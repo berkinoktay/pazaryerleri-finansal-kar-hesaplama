@@ -240,17 +240,24 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     }
   }
 
+  // A null VAT rate comes from a fee definition missing on the order date (the loader
+  // recorded a blocking REFERENCE_DATA_MISSING): the line's VAT cannot be split, so the
+  // actual line is not written, exactly like its estimate.
   function addRecordLine(params: {
     readonly type: ProfitLineType;
     readonly orderItemId: string;
     readonly gross: Decimal;
-    readonly vatRatePct: Decimal;
+    readonly vatRatePct: Decimal | null;
     readonly reference: RecordReference;
     readonly extraInputs?: ProfitLineInputs; // inputs beyond recordIds (only the SALE line today)
   }): void {
+    const vatRatePct = params.vatRatePct;
+    if (vatRatePct === null) {
+      return;
+    }
     const amount: LineMoney = {
       gross: params.gross,
-      vat: vatFromGross(params.gross, params.vatRatePct),
+      vat: vatFromGross(params.gross, vatRatePct),
     };
     if (isZeroAmount(amount)) {
       return;
@@ -263,7 +270,7 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
         certainty: ProfitLineCertainty.ACTUAL,
         source: ProfitLineSource.MARKETPLACE_RECORD,
         amount,
-        vatRatePct: params.vatRatePct,
+        vatRatePct,
         inputs: { recordIds: params.reference.recordIds, ...params.extraInputs },
         externalRecord: params.reference.externalRecord,
       }),
@@ -430,12 +437,14 @@ export function mapTrendyolRecords(input: TrendyolMappingInput): MappingResult {
     }
   }
 
+  // A null VAT rate is a SHIPPING definition missing on the order date (the loader
+  // recorded a blocking REFERENCE_DATA_MISSING): no cargo line is written, like the estimate.
   function buildCargoLine(
     type: ProfitLineType,
     cargoGroup: readonly TrendyolCargoInvoiceItem[],
-    vatRatePct: Decimal,
+    vatRatePct: Decimal | null,
   ): ProfitLine | null {
-    if (cargoGroup.length === 0) {
+    if (cargoGroup.length === 0 || vatRatePct === null) {
       return null;
     }
     const gross = sumDecimals(cargoGroup.map((cargoItem) => cargoItem.amountGross));

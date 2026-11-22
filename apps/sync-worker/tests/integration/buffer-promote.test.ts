@@ -910,17 +910,19 @@ describe('processBufferPromote', () => {
     // Path A -- direct: the variant already has a cost, so the order is written at once.
     const barcodeA = 'EAN13-PARITY-A';
     await seedCategoryVariant(org.id, store.id, barcodeA, true);
-    await upsertOrderWithSnapshot(
-      store.id,
-      org.id,
-      buildMappedForIntake({
+    // Both orders name the seeded SENDEOMP carrier: an order never uses the store default,
+    // and an unrecognized carrier blocks the profit (engine v12).
+    const cargoProviderName = 'Kolay Gelsin Marketplace';
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...buildMappedForIntake({
         platformOrderId: 'parity-direct',
         barcode: barcodeA,
         quantity: 1,
         orderDate,
         commissionKnown: false,
       }),
-    );
+      cargoProviderName,
+    });
 
     // Path B -- buffer: the variant is cost-missing today, so intake buffers it; the cost
     // then arrives and the entry is flipped PROMOTING (cost-attach simulation) -> promote.
@@ -929,13 +931,16 @@ describe('processBufferPromote', () => {
     const outcome = await intakeOrder({
       storeId: store.id,
       organizationId: org.id,
-      mapped: buildMappedForIntake({
-        platformOrderId: 'parity-buffer',
-        barcode: barcodeB,
-        quantity: 1,
-        orderDate,
-        commissionKnown: false,
-      }),
+      mapped: {
+        ...buildMappedForIntake({
+          platformOrderId: 'parity-buffer',
+          barcode: barcodeB,
+          quantity: 1,
+          orderDate,
+          commissionKnown: false,
+        }),
+        cargoProviderName,
+      },
     });
     expect(outcome).toEqual({ kind: 'buffered' });
     await attachVersionedCost(org.id, store.id, variantB);

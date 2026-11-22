@@ -353,6 +353,7 @@ enum ProfitIssueCode {
   AMBIGUOUS_RECORD_MATCH
   CARRIER_NOT_RECOGNIZED
   SELLER_CARGO_AGREEMENT_ESTIMATE
+  REFERENCE_DATA_MISSING
 }
 
 // How a profit statement is computed: ESTIMATE from estimate-only lines, BEST_KNOWN from the best available.

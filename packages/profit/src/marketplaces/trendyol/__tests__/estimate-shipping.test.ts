@@ -154,6 +154,66 @@ describe('estimateShippingLine', () => {
     ]);
   });
 
+  it('reports NO_TARIFF_VERSION, not DESI_OVERFLOW, when the carrier has no version in force', () => {
+    // The carrier is recognized but no tariff version covers the order date (a carrier
+    // whose tariff was never entered, or a date before its first version): the loader
+    // leaves its tariffs empty and flags the missing version.
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: true }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: {
+            code: 'TEXMP',
+            supportsBarem: false,
+            maxBaremDesi: new Decimal('0'),
+            baremAppliesToReturns: false,
+          },
+          desiTariffNet: new Map(),
+          baremBands: [],
+          tariffVersionMissing: true,
+        },
+      }),
+    });
+
+    expect(line).toBeNull();
+    expect(issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'NO_TARIFF_VERSION',
+      },
+    ]);
+  });
+
+  it('still prices an own-contract store from its own tariff when the carrier version is missing', () => {
+    const snapshot = makeParcel({
+      items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
+    });
+
+    const { line, issues } = estimateShippingLine({
+      snapshot,
+      attributes: makeTrendyolAttributes({ fastDelivery: false }),
+      reference: trendyolReference({
+        shipping: {
+          source: ShippingTariffSource.OWN_CONTRACT,
+          desiTariffNet: new Map(),
+          baremBands: [],
+          tariffVersionMissing: true,
+          ownTariffNet: new Map([['3', new Decimal('50.00')]]),
+        },
+      }),
+    });
+
+    expect(issues).toEqual([]);
+    expect(line?.amount.gross.toFixed(2)).toBe('60.00');
+    expect(line?.inputs.tariffKind).toBe('OWN');
+  });
+
   it('reports UNKNOWN_DESI when a product desi is missing', () => {
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: null })],
@@ -239,16 +299,16 @@ describe('estimateShippingLine', () => {
     ]);
   });
 
-  it('writes a zero estimate for a not-recognized order carrier', () => {
-    // An order whose Trendyol-contract carrier is not recognized gets a zero SHIPPING line
-    // recording the reason + provider name, plus a non-blocking CARRIER_NOT_RECOGNIZED
-    // issue -- NOT the NO_CARRIER unavailable issue a carrier-less scenario (outcome null)
+  it('blocks a not-recognized order carrier with no shipping line', () => {
+    // An order whose Trendyol-contract carrier is not recognized cannot be priced: it gets
+    // no SHIPPING line and a blocking CARRIER_NOT_RECOGNIZED issue carrying the provider
+    // name -- NOT the NO_CARRIER unavailable issue a carrier-less scenario (outcome null)
     // produces.
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
 
-    const { line, issues } = estimateShippingLine({
+    const { line, issues, outboundBaremTier } = estimateShippingLine({
       snapshot,
       attributes: makeTrendyolAttributes({ fastDelivery: false }),
       reference: trendyolReference({
@@ -259,6 +319,8 @@ describe('estimateShippingLine', () => {
       }),
     });
 
+    expect(line).toBeNull();
+    expect(outboundBaremTier).toBeNull();
     expect(issues).toEqual([
       {
         code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
@@ -266,20 +328,11 @@ describe('estimateShippingLine', () => {
         detail: 'Alternative Delivery',
       },
     ]);
-    expect(line?.type).toBe(ProfitLineType.SHIPPING);
-    expect(line?.level).toBe(ProfitLineLevel.PARCEL);
-    expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
-    expect(line?.amount.gross.toFixed(2)).toBe('0.00');
-    expect(line?.amount.vat.toFixed(2)).toBe('0.00');
-    expect(line?.inputs).toEqual({
-      reason: CARRIER_NOT_RECOGNIZED_REASON,
-      providerName: 'Alternative Delivery',
-    });
   });
 
   it('records a null detail for a not-recognized carrier without a provider name', () => {
-    // Trendyol named no provider at all: the zero line is still written and the issue
-    // carries a null detail rather than an empty or made-up name.
+    // Trendyol named no provider at all: still no line, and the issue carries a null
+    // detail rather than an empty or made-up name.
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
@@ -295,12 +348,10 @@ describe('estimateShippingLine', () => {
       }),
     });
 
+    expect(line).toBeNull();
     expect(issues).toEqual([
       { code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED, orderItemId: null, detail: null },
     ]);
-    expect(line?.type).toBe(ProfitLineType.SHIPPING);
-    expect(line?.amount.gross.toFixed(2)).toBe('0.00');
-    expect(line?.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
   });
 
   it('flags a seller-cargo-agreement order on a Trendyol-contract store', () => {
@@ -356,9 +407,10 @@ describe('estimateShippingLine', () => {
     expect(line?.inputs.tariffKind).toBe('OWN');
   });
 
-  it('returns both issues with a zero line for a not-recognized carrier on a seller-cargo order', () => {
-    // A seller-cargo-agreement order whose carrier is not recognized keeps the zero line and
-    // carries both non-blocking issues: the carrier one and the seller-cargo one.
+  it('keeps the zero line and only the seller-cargo issue for a not-recognized carrier on a seller-cargo order', () => {
+    // Design 6.13: the not-recognized carrier rule does not apply to a seller-cargo-agreement
+    // order (its carrier is not consulted). It keeps today's zero line and the non-blocking
+    // seller-cargo warning; CARRIER_NOT_RECOGNIZED is never recorded for it.
     const snapshot = makeParcel({
       items: [makeItem({ orderItemId: 'a', listGross: '100.00', unitDesi: '3' })],
     });
@@ -376,18 +428,20 @@ describe('estimateShippingLine', () => {
 
     expect(issues).toEqual([
       {
-        code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
-        orderItemId: null,
-        detail: 'Alternative Delivery',
-      },
-      {
         code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
         orderItemId: null,
         detail: null,
       },
     ]);
+    expect(line?.type).toBe(ProfitLineType.SHIPPING);
+    expect(line?.level).toBe(ProfitLineLevel.PARCEL);
+    expect(line?.certainty).toBe(ProfitLineCertainty.ESTIMATE);
     expect(line?.amount.gross.toFixed(2)).toBe('0.00');
-    expect(line?.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
+    expect(line?.amount.vat.toFixed(2)).toBe('0.00');
+    expect(line?.inputs).toEqual({
+      reason: CARRIER_NOT_RECOGNIZED_REASON,
+      providerName: 'Alternative Delivery',
+    });
   });
 
   it('adds no seller-cargo issue to an all-digital parcel on a Trendyol-contract store', () => {

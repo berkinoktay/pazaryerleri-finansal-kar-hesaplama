@@ -24,6 +24,7 @@ function makeStatement(overrides: Partial<StatementListRow> = {}): StatementList
     saleMarginPct: new Decimal('25.00'),
     costMarkupPct: new Decimal('38.40'),
     reconciliationStatus: ReconciliationStatus.NOT_SETTLED,
+    issues: [],
     ...overrides,
   };
 }

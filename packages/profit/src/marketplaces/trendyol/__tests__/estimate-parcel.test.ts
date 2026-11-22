@@ -1,5 +1,11 @@
 import { Decimal } from 'decimal.js';
-import { BaremTier, CostProfileType, ProfitIssueCode, ProfitLineType } from '@pazarsync/db/enums';
+import {
+  BaremTier,
+  CostProfileType,
+  ProfitIssueCode,
+  ProfitLineType,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import { describe, expect, it } from 'vitest';
 
 import { makeItem, makeParcel } from '../../../__tests__/fixtures/parcel-builders';
@@ -296,9 +302,101 @@ describe('estimateTrendyolParcel', () => {
     expect(statement.netProfit).not.toBeNull();
   });
 
-  it('records CARRIER_NOT_RECOGNIZED once per parcel even with an accepted return', () => {
-    // The outbound and the return leg both write a zero line for a not-recognized carrier,
-    // but only the outbound leg records the issue: the parcel carries it exactly once.
+  it('leaves out only the service fee when the platform service definition is missing', () => {
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: trendyolReference({
+        fees: { psfStandardNet: null, psfSameDayNet: null, psfVatRatePct: null },
+      }),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [],
+    });
+
+    const types = result.lines.map((line) => line.type);
+    expect(types).not.toContain(ProfitLineType.SERVICE_FEE);
+    expect(types).toContain(ProfitLineType.SALE);
+    expect(types).toContain(ProfitLineType.COMMISSION);
+    expect(types).toContain(ProfitLineType.STOPPAGE);
+    expect(types).toContain(ProfitLineType.SHIPPING);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('writes no line that needs a missing fee definition and does not throw', () => {
+    // An order dated before every fee definition: platform service, stoppage, commission
+    // VAT and shipping VAT are all unknown (the loader recorded REFERENCE_DATA_MISSING for
+    // each). The sale, the seller cost and their return legs are still written.
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: trendyolReference({
+        fees: {
+          psfStandardNet: null,
+          psfSameDayNet: null,
+          psfVatRatePct: null,
+          stoppageRatePct: null,
+          commissionVatRatePct: null,
+          shippingVatRatePct: null,
+          returnShippingVatRatePct: null,
+        },
+      }),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [{ orderItemId: 'a', acceptedQuantity: 1 }],
+    });
+
+    const types = result.lines.map((line) => line.type);
+    for (const missing of [
+      ProfitLineType.SERVICE_FEE,
+      ProfitLineType.STOPPAGE,
+      ProfitLineType.STOPPAGE_REFUND,
+      ProfitLineType.COMMISSION,
+      ProfitLineType.COMMISSION_REFUND,
+      ProfitLineType.SHIPPING,
+      ProfitLineType.RETURN_SHIPPING,
+    ]) {
+      expect(types).not.toContain(missing);
+    }
+    expect(types).toContain(ProfitLineType.SALE);
+    expect(types).toContain(ProfitLineType.SALE_RETURN);
+    expect(result.issues).toEqual([]);
+    // No shipping VAT, so no standalone shipping weight either.
+    expect(result.allocation.activeItems[0]?.standaloneAmount).toBeNull();
+    expect(result.allocation.returnedItems[0]?.standaloneAmount).toBeNull();
+  });
+
+  it('writes no international service fee when its definition is missing on an export parcel', () => {
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        isExportSale: true,
+        items: [makeItem({ orderItemId: 'a', listGross: '1000.00', unitDesi: '1' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: trendyolReference({
+        fees: { internationalServiceRatePct: null, internationalServiceVatRatePct: null },
+      }),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [],
+    });
+
+    expect(result.lines.map((line) => line.type)).not.toContain(
+      ProfitLineType.INTERNATIONAL_SERVICE_FEE,
+    );
+  });
+
+  it('makes a not-recognized carrier not computable on both shipping legs with an accepted return', () => {
+    // The outbound leg writes no line and the blocking CARRIER_NOT_RECOGNIZED issue; the
+    // return leg writes no line either and records its own cause under the return prefix,
+    // so each leg's cargo invoice can lift its own cause in the best-known view.
     const result = estimateTrendyolParcel({
       snapshot: makeParcel({
         items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
@@ -322,16 +420,74 @@ describe('estimateTrendyolParcel', () => {
         orderItemId: null,
         detail: 'Alternative Delivery',
       },
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'RETURN_CARRIER_NOT_RECOGNIZED',
+      },
     ]);
     const shippingLegs = result.lines.filter(
       (line) =>
         line.type === ProfitLineType.SHIPPING || line.type === ProfitLineType.RETURN_SHIPPING,
     );
-    expect(shippingLegs.map((line) => line.type)).toEqual([
-      ProfitLineType.SHIPPING,
-      ProfitLineType.RETURN_SHIPPING,
+    expect(shippingLegs).toEqual([]);
+
+    const statement = computeProfitStatement({
+      lines: result.lines,
+      view: 'BEST_KNOWN',
+      settings: { includeStopaj: true, includeNegativeNetVat: true },
+      isExportSale: false,
+      isCancelled: false,
+      isExcluded: false,
+      issues: result.issues,
+    });
+    expect(statement.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(statement.netProfit).toBeNull();
+  });
+
+  it('keeps a seller-cargo order with a not-recognized carrier computable at a zero shipping line', () => {
+    // Design 6.13 (until PR-6): a seller-cargo-agreement order is exempt from the
+    // not-recognized carrier rule, so its result is unchanged -- a zero SHIPPING line, the
+    // non-blocking seller-cargo warning, and an estimated (computable) profit.
+    const result = estimateTrendyolParcel({
+      snapshot: makeParcel({
+        items: [makeItem({ orderItemId: 'a', listGross: '200.00', unitDesi: '1' })],
+      }),
+      attributes: makeTrendyolAttributes({
+        usesSellerCargoAgreement: true,
+        items: [makeTrendyolItemAttributes({ orderItemId: 'a' })],
+      }),
+      reference: trendyolReference({
+        shipping: {
+          carrier: null,
+          orderCarrierOutcome: { kind: 'not-recognized', providerName: 'Alternative Delivery' },
+        },
+      }),
+      costs: [tryCogs('a', '40.00')],
+      acceptedReturns: [],
+    });
+
+    expect(result.issues).toEqual([
+      {
+        code: ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+        orderItemId: null,
+        detail: null,
+      },
     ]);
-    expect(shippingLegs.map((line) => line.amount.gross.toFixed(2))).toEqual(['0.00', '0.00']);
+    const shipping = result.lines.find((line) => line.type === ProfitLineType.SHIPPING);
+    expect(shipping?.amount.gross.toFixed(2)).toBe('0.00');
+
+    const statement = computeProfitStatement({
+      lines: result.lines,
+      view: 'BEST_KNOWN',
+      settings: { includeStopaj: true, includeNegativeNetVat: true },
+      isExportSale: false,
+      isCancelled: false,
+      isExcluded: false,
+      issues: result.issues,
+    });
+    expect(statement.status).toBe(ProfitStatus.ESTIMATED);
+    expect(statement.netProfit).not.toBeNull();
   });
 
   it('gives an export parcel no service fee and no stoppage but the international service fee', () => {

@@ -9,8 +9,12 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export type ProfitIssueWire = components['schemas']['ProfitIssue'];
 
-/** The non-blocking profit issue codes the order detail surfaces as notices. */
-const NOTICE_CODES = ['CARRIER_NOT_RECOGNIZED', 'SELLER_CARGO_AGREEMENT_ESTIMATE'] as const;
+/**
+ * The non-blocking profit issue codes the order detail surfaces as notices. An
+ * unrecognized carrier blocks the profit, so it is named by the blocker alert
+ * (`ProfitBlockersAlert`), not here.
+ */
+const NOTICE_CODES = ['SELLER_CARGO_AGREEMENT_ESTIMATE'] as const;
 
 type NoticeCode = (typeof NOTICE_CODES)[number];
 
@@ -27,8 +31,7 @@ export interface ProfitIssueNoticesProps {
 /**
  * Warning notices for the best-known profit statement's visible issues. Only the
  * codes in NOTICE_CODES render (one alert per issue, stacked); every other code is
- * filtered out, and nothing renders when none remain. The provider name comes from
- * the issue detail, falling back to a generic carrier label.
+ * filtered out, and nothing renders when none remain.
  */
 export function ProfitIssueNotices({ issues }: ProfitIssueNoticesProps): React.ReactElement | null {
   const t = useTranslations('orderDetail');
@@ -40,17 +43,12 @@ export function ProfitIssueNotices({ issues }: ProfitIssueNoticesProps): React.R
 
   return (
     <div className="gap-lg flex flex-col">
-      {notices.map((issue, index) => {
-        const providerName = issue.detail ?? t('profitIssues.unknownCarrier');
-        return (
-          <Alert key={`${issue.code}-${index}`} tone="warning" size="md">
-            <AlertTitle>{t(`profitIssues.${issue.code}.title`)}</AlertTitle>
-            <AlertDescription>
-              {t(`profitIssues.${issue.code}.description`, { providerName })}
-            </AlertDescription>
-          </Alert>
-        );
-      })}
+      {notices.map((issue, index) => (
+        <Alert key={`${issue.code}-${index}`} tone="warning" size="md">
+          <AlertTitle>{t(`profitIssues.${issue.code}.title`)}</AlertTitle>
+          <AlertDescription>{t(`profitIssues.${issue.code}.description`)}</AlertDescription>
+        </Alert>
+      ))}
     </div>
   );
 }

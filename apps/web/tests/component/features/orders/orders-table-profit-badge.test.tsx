@@ -1,3 +1,4 @@
+import { createTranslator } from 'next-intl';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { OrderListItem } from '@/features/orders/api/list-orders.api';
@@ -9,6 +10,15 @@ import trMessages from '../../../../messages/tr.json';
 vi.mock('next/navigation', () => ({ useRouter: vi.fn(() => ({ push: vi.fn() })) }));
 
 const OPEN_LABEL = trMessages.profitBadge.open;
+const BADGE_LABEL = trMessages.profitBlockers.badge;
+// The not-computable chip announces its status before the open hint.
+const BLOCKED_NAME = `${BADGE_LABEL}, ${OPEN_LABEL}`;
+// Reason sentences rendered from the catalog (no Turkish literals in source).
+const tBlockers = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'profitBlockers',
+});
 
 function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
   return {
@@ -32,6 +42,7 @@ function makeRow(overrides: Partial<OrderListItem> = {}): OrderListItem {
     itemCount: 2,
     profitExcludedAt: null,
     profitExclusionReason: null,
+    profitBlockers: [],
     ...overrides,
   };
 }
@@ -79,6 +90,53 @@ describe('OrdersTable — Tahmini kâr profit badge', () => {
     // Click a plain, non-interactive cell — the order number text.
     await user.click(screen.getByText('ON-1'));
     expect(onRowOpen).not.toHaveBeenCalled();
+  });
+
+  describe('not-computable profit (API blockers)', () => {
+    const BLOCKED_ROW = makeRow({
+      estimatedNetProfit: null,
+      saleMarginPct: null,
+      costMarkupPct: null,
+      profitBlockers: [
+        { code: 'MISSING_COST', detail: null },
+        { code: 'CARRIER_NOT_RECOGNIZED', detail: 'Alternative Delivery' },
+      ],
+    });
+
+    it('shows the warning badge instead of the em-dash and names every reason on hover', async () => {
+      renderTable({ rows: [BLOCKED_ROW] });
+      const badge = screen.getByRole('button', { name: BLOCKED_NAME });
+      expect(badge).toHaveTextContent(BADGE_LABEL);
+      expect(badge).not.toHaveTextContent('—');
+
+      badge.focus();
+      const tip = await screen.findByRole('tooltip');
+      expect(tip).toHaveTextContent(tBlockers('reasons.MISSING_COST'));
+      expect(tip).toHaveTextContent(
+        tBlockers('reasons.CARRIER_NOT_RECOGNIZED', { providerName: 'Alternative Delivery' }),
+      );
+    });
+
+    it('still opens the profit detail when the badge is clicked (the touch path)', async () => {
+      const { onRowOpen, user } = renderTable({ rows: [BLOCKED_ROW] });
+      await user.click(screen.getByRole('button', { name: BLOCKED_NAME }));
+      expect(onRowOpen).toHaveBeenCalledWith('o1');
+    });
+
+    it('lets a screen reader hear the not-computable status, not only the open hint', () => {
+      renderTable({ rows: [BLOCKED_ROW] });
+      const badge = screen.getByRole('button', { name: new RegExp(BADGE_LABEL) });
+      expect(badge).toHaveAccessibleName(BLOCKED_NAME);
+    });
+
+    it('keeps the neutral em-dash badge for a null profit without blockers', () => {
+      renderTable({
+        rows: [makeRow({ estimatedNetProfit: null, saleMarginPct: null, profitBlockers: [] })],
+      });
+      const badge = screen.getByRole('button', { name: OPEN_LABEL });
+      expect(badge).toHaveTextContent('—');
+      expect(badge).not.toHaveTextContent(BADGE_LABEL);
+    });
   });
 
   it('opens nothing in the profit-excluded tab — no badge, row not clickable', async () => {

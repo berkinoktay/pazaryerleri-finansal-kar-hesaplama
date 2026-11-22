@@ -16,7 +16,7 @@ import {
   type ParcelItemSnapshot,
   type ParcelSnapshot,
 } from '../../core/parcel-snapshot';
-import { type ProfitIssue } from '../../core/profit-issue';
+import { type ProfitIssue, RETURN_SHIPPING_ISSUE_DETAIL_PREFIX } from '../../core/profit-issue';
 import { createProfitLine, type LineMoney, type ProfitLine } from '../../core/profit-line';
 import { buildCostReturnLines } from '../../core/seller-costs/build-cost-return-lines';
 import { roundMoney } from '../../money';
@@ -35,6 +35,12 @@ import { type OverseasReturnTier, type TrendyolReferenceData } from './trendyol-
 const ZERO = new Decimal(0);
 /** Percent rates are expressed per hundred; the divisor that turns a rate into a factor. */
 const PERCENT = new Decimal(100);
+
+/**
+ * The `detail` of the REFERENCE_DATA_MISSING issue an export return records when no
+ * micro-export return tier in force covers the item's unit sale.
+ */
+export const MISSING_EXPORT_RETURN_TIER_DETAIL = 'EXPORT_RETURN_TIER';
 
 /** The shape every return estimator returns: lines, issues and the returned-item set. */
 interface ReturnEstimate {
@@ -58,7 +64,9 @@ interface AcceptedEntry {
  * return legs. All amounts are in Turkish lira; the module never writes a
  * zero-amount line. `outboundBaremTier` is the Barem table the forward leg was priced
  * at (`estimateShippingLine`); it decides whether the domestic return shipping may be
- * priced at Barem table 1.
+ * priced at Barem table 1. `usesSellerCargoAgreement` is the order's own flag
+ * (`TrendyolParcelAttributes`): such an order is exempt from the not-recognized carrier
+ * rule on the return leg too.
  */
 export function estimateReturnLines(params: {
   readonly snapshot: ParcelSnapshot;
@@ -67,12 +75,21 @@ export function estimateReturnLines(params: {
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
   readonly outboundBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): {
   readonly lines: ProfitLine[];
   readonly issues: ProfitIssue[];
   readonly returnedItems: AllocationItem[];
 } {
-  const { snapshot, accepted, commissionLines, costLines, reference, outboundBaremTier } = params;
+  const {
+    snapshot,
+    accepted,
+    commissionLines,
+    costLines,
+    reference,
+    outboundBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
   assertAcceptedReturns(snapshot, accepted);
 
   if (accepted.length === 0) {
@@ -113,6 +130,7 @@ export function estimateReturnLines(params: {
       appliesToReturns: carrier !== null && carrier.baremAppliesToReturns,
       outboundBaremTier,
     }),
+    usesSellerCargoAgreement,
   });
 }
 
@@ -120,7 +138,8 @@ export function estimateReturnLines(params: {
  * The standalone (as-if-returned-alone) return shipping gross for one returned item,
  * used as an allocation weight. The desi is `unitDesi x acceptedQuantity`, the basket
  * is the item's own returned sale, and the Barem table is the parcel return's.
- * Returns `null` when the desi is unknown or the tariff cannot be resolved.
+ * Returns `null` when the desi is unknown, the tariff cannot be resolved or the return
+ * shipping VAT rate is unknown (a missing SHIPPING definition).
  */
 function standaloneReturnShippingGross(params: {
   readonly item: ParcelItemSnapshot;
@@ -130,7 +149,8 @@ function standaloneReturnShippingGross(params: {
   readonly returnBaremTier: TrendyolBaremTier | null;
 }): Decimal | null {
   const { item, acceptedQuantity, saleReturnGross, reference, returnBaremTier } = params;
-  if (item.unitDesi === null) {
+  const vatRatePct = reference.fees.returnShippingVatRatePct;
+  if (item.unitDesi === null || vatRatePct === null) {
     return null;
   }
 
@@ -139,7 +159,7 @@ function standaloneReturnShippingGross(params: {
     basketGross: saleReturnGross,
     baremTier: returnBaremTier,
     tariff: reference.shipping,
-    vatRatePct: reference.fees.returnShippingVatRatePct,
+    vatRatePct,
   });
   if (!resolved.ok) {
     return null;
@@ -160,8 +180,16 @@ function estimateDomesticReturns(params: {
   readonly costLines: readonly ProfitLine[];
   readonly reference: TrendyolReferenceData;
   readonly returnBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): ReturnEstimate {
-  const { acceptedEntries, commissionByItem, costLines, reference, returnBaremTier } = params;
+  const {
+    acceptedEntries,
+    commissionByItem,
+    costLines,
+    reference,
+    returnBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
 
   const saleReturnLines: ProfitLine[] = [];
   const commissionRefundLines: ProfitLine[] = [];
@@ -202,13 +230,16 @@ function estimateDomesticReturns(params: {
     }
     returnBasketGross = returnBasketGross.add(saleReturnGross);
 
+    // A missing COMMISSION_INVOICE definition leaves no commission line to refund (and no
+    // VAT rate for one), so the refund is skipped too.
     const commissionLine = commissionByItem.get(item.orderItemId);
-    if (commissionLine !== undefined) {
+    const commissionVatRatePct = reference.fees.commissionVatRatePct;
+    if (commissionLine !== undefined && commissionVatRatePct !== null) {
       const gross = roundMoney(commissionLine.amount.gross.mul(ratio));
       if (!gross.equals(ZERO)) {
         const amount: LineMoney = {
           gross,
-          vat: vatFromGross(gross, reference.fees.commissionVatRatePct),
+          vat: vatFromGross(gross, commissionVatRatePct),
         };
         commissionRefundLines.push(
           createProfitLine({
@@ -218,7 +249,7 @@ function estimateDomesticReturns(params: {
             certainty: ProfitLineCertainty.ESTIMATE,
             source: ProfitLineSource.RULE,
             amount,
-            vatRatePct: reference.fees.commissionVatRatePct,
+            vatRatePct: commissionVatRatePct,
             inputs: { ratio: ratio.toString() },
             externalRecord: null,
           }),
@@ -252,11 +283,16 @@ function estimateDomesticReturns(params: {
   }
 
   const costReturnLines = buildCostReturnLines({ costLines, ratioByItem });
-  const stoppageRefundLines = buildStoppageRefundLines({
-    saleReturnLines,
-    ratePct: reference.fees.stoppageRatePct,
-    isExportSale: false,
-  });
+  // A missing STOPPAGE definition wrote no stoppage, so there is none to refund.
+  const stoppageRatePct = reference.fees.stoppageRatePct;
+  const stoppageRefundLines =
+    stoppageRatePct === null
+      ? []
+      : buildStoppageRefundLines({
+          saleReturnLines,
+          ratePct: stoppageRatePct,
+          isExportSale: false,
+        });
 
   const lines: ProfitLine[] = [
     ...saleReturnLines,
@@ -276,6 +312,7 @@ function estimateDomesticReturns(params: {
       basketGross: returnBasketGross,
       reference,
       returnBaremTier,
+      usesSellerCargoAgreement,
     });
     if (returnShipping.line !== null) {
       lines.push(returnShipping.line);
@@ -289,9 +326,14 @@ function estimateDomesticReturns(params: {
 }
 
 /**
- * The single parcel-level RETURN_SHIPPING line. An unknown desi on any accepted item
- * or an unresolvable tariff yields a blocking SHIPPING_ESTIMATE_UNAVAILABLE issue
- * (reason in `detail`, prefixed `RETURN_`) and no line; a zero gross yields neither.
+ * The single parcel-level RETURN_SHIPPING line. A not-recognized carrier on a
+ * Trendyol-contract order yields no line and a blocking SHIPPING_ESTIMATE_UNAVAILABLE
+ * issue whose detail is `RETURN_CARRIER_NOT_RECOGNIZED`, unless the order uses a seller
+ * cargo agreement: that order is exempt (design 6.13) and keeps a zero line recording why,
+ * with no issue. An unknown desi on any accepted item or an unresolvable tariff yields a
+ * blocking SHIPPING_ESTIMATE_UNAVAILABLE issue (reason in `detail`, prefixed `RETURN_`)
+ * and no line; a zero gross yields neither, and neither does an unknown return shipping
+ * VAT rate (a missing SHIPPING definition, already recorded by the loader).
  * Barem is looked up only in `returnBaremTier` (null = the desi tariff), and only
  * when the return desi is within the carrier's Barem limit and the returned sale falls
  * in a band of that table.
@@ -302,19 +344,47 @@ function buildReturnShippingLine(params: {
   readonly basketGross: Decimal;
   readonly reference: TrendyolReferenceData;
   readonly returnBaremTier: TrendyolBaremTier | null;
+  readonly usesSellerCargoAgreement: boolean;
 }): { readonly line: ProfitLine | null; readonly issue: ProfitIssue | null } {
-  const { anyDesiUnknown, desi, basketGross, reference, returnBaremTier } = params;
+  const {
+    anyDesiUnknown,
+    desi,
+    basketGross,
+    reference,
+    returnBaremTier,
+    usesSellerCargoAgreement,
+  } = params;
+  const vatRatePct = reference.fees.returnShippingVatRatePct;
 
-  // A not-recognized carrier on a Trendyol-contract order cannot be priced, so the
-  // return-shipping estimate is a zero line recording why -- consistent with the forward
-  // leg, and never an unavailable issue (a cargo invoice later replaces it). An
-  // own-contract store is unaffected and falls through to its own tariff below.
+  // A not-recognized carrier on a Trendyol-contract order cannot be priced from any tariff.
+  // This mirrors the forward leg; an own-contract store is unaffected and falls through to
+  // its own tariff below.
   const carrierOutcome = reference.shipping.orderCarrierOutcome;
   if (
     reference.shipping.source === ShippingTariffSource.TRENDYOL_CONTRACT &&
     carrierOutcome !== null &&
     carrierOutcome.kind === 'not-recognized'
   ) {
+    // An order shipped under Trendyol's agreement gets no return line and a blocking
+    // return-leg issue: a zero line would read as a known cost once the forward cargo
+    // invoice lifts the forward cause in the best-known view. A return cargo invoice lifts
+    // this one in turn (`issuesForView`).
+    if (!usesSellerCargoAgreement) {
+      return {
+        line: null,
+        issue: {
+          code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+          orderItemId: null,
+          detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}${CARRIER_NOT_RECOGNIZED_REASON}`,
+        },
+      };
+    }
+    // A seller-cargo-agreement order is exempt (design 6.13): until the seller's own tariff
+    // prices it (PR-6) it keeps a zero line recording why, and no issue. With the return
+    // shipping VAT unknown (see below) even the zero line is left out.
+    if (vatRatePct === null) {
+      return { line: null, issue: null };
+    }
     const line = createProfitLine({
       type: ProfitLineType.RETURN_SHIPPING,
       level: ProfitLineLevel.PARCEL,
@@ -322,7 +392,7 @@ function buildReturnShippingLine(params: {
       certainty: ProfitLineCertainty.ESTIMATE,
       source: ProfitLineSource.RULE,
       amount: { gross: ZERO, vat: ZERO },
-      vatRatePct: reference.fees.returnShippingVatRatePct,
+      vatRatePct,
       inputs: {
         reason: CARRIER_NOT_RECOGNIZED_REASON,
         providerName: carrierOutcome.providerName,
@@ -332,13 +402,19 @@ function buildReturnShippingLine(params: {
     return { line, issue: null };
   }
 
+  // A missing SHIPPING definition leaves the return shipping VAT unknown (the loader
+  // recorded a blocking REFERENCE_DATA_MISSING): no line, and no issue of its own.
+  if (vatRatePct === null) {
+    return { line: null, issue: null };
+  }
+
   if (anyDesiUnknown) {
     return {
       line: null,
       issue: {
         code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
         orderItemId: null,
-        detail: 'RETURN_UNKNOWN_DESI',
+        detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}UNKNOWN_DESI`,
       },
     };
   }
@@ -348,7 +424,7 @@ function buildReturnShippingLine(params: {
     basketGross,
     baremTier: returnBaremTier,
     tariff: reference.shipping,
-    vatRatePct: reference.fees.returnShippingVatRatePct,
+    vatRatePct,
   });
   if (!resolved.ok) {
     return {
@@ -356,7 +432,7 @@ function buildReturnShippingLine(params: {
       issue: {
         code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
         orderItemId: null,
-        detail: `RETURN_${resolved.reason}`,
+        detail: `${RETURN_SHIPPING_ISSUE_DETAIL_PREFIX}${resolved.reason}`,
       },
     };
   }
@@ -368,7 +444,7 @@ function buildReturnShippingLine(params: {
 
   const amount: LineMoney = {
     gross,
-    vat: vatFromGross(gross, reference.fees.returnShippingVatRatePct),
+    vat: vatFromGross(gross, vatRatePct),
   };
   const line = createProfitLine({
     type: ProfitLineType.RETURN_SHIPPING,
@@ -377,7 +453,7 @@ function buildReturnShippingLine(params: {
     certainty: ProfitLineCertainty.ESTIMATE,
     source: ProfitLineSource.RULE,
     amount,
-    vatRatePct: reference.fees.returnShippingVatRatePct,
+    vatRatePct,
     inputs: {
       desi: desi.toString(),
       tariffKind: resolved.kind,
@@ -390,20 +466,20 @@ function buildReturnShippingLine(params: {
   return { line, issue: null };
 }
 
-/** The overseas (micro-export) return tier whose inclusive band contains the unit sale. */
+/**
+ * The overseas (micro-export) return tier whose inclusive band contains the unit sale,
+ * or null when no tier in force on the order date covers it.
+ */
 function findOverseasReturnTier(
   tiers: readonly OverseasReturnTier[],
   unitSaleGross: Decimal,
-): OverseasReturnTier {
+): OverseasReturnTier | null {
   const tier = tiers.find(
     (candidate) =>
       candidate.minUnitSaleGross.lte(unitSaleGross) &&
       unitSaleGross.lte(candidate.maxUnitSaleGross),
   );
-  if (tier === undefined) {
-    throw new RangeError(`no overseas return tier matches unit sale ${unitSaleGross.toString()}`);
-  }
-  return tier;
+  return tier ?? null;
 }
 
 /**
@@ -411,7 +487,12 @@ function findOverseasReturnTier(
  * the seller and the commission is not refunded. Each accepted item is charged one
  * INTERNATIONAL_OPERATION_FEE: `max(0, accepted sale - accepted effective commission)`
  * times the tier rate for its rounded unit sale, rounded per item. VAT is assumed
- * zero. A fee that rounds to zero writes no line.
+ * zero. A fee that rounds to zero writes no line. An item whose unit sale no tier in
+ * force covers (no tier version yet, or a gap) writes no line and records a blocking
+ * REFERENCE_DATA_MISSING issue for that item instead of failing the parcel; it still
+ * joins the returned-item set. While the commission VAT is unknown (a missing
+ * COMMISSION_INVOICE definition, already recorded by the loader) no item gets a line
+ * either, and no issue of its own.
  */
 function estimateExportReturns(params: {
   readonly acceptedEntries: readonly AcceptedEntry[];
@@ -421,13 +502,34 @@ function estimateExportReturns(params: {
   const { acceptedEntries, commissionByItem, reference } = params;
 
   const lines: ProfitLine[] = [];
+  const issues: ProfitIssue[] = [];
   const returnedItems: AllocationItem[] = [];
 
   for (const { item, acceptedQuantity } of acceptedEntries) {
     const ratio = new Decimal(acceptedQuantity).div(item.quantity);
+    returnedItems.push({
+      orderItemId: item.orderItemId,
+      saleGross: roundMoney(item.saleGross.mul(ratio)),
+      standaloneAmount: null,
+    });
+
     const unitSaleGross = roundMoney(item.saleGross.div(item.quantity));
     const tier = findOverseasReturnTier(reference.fees.overseasReturnTiers, unitSaleGross);
+    if (tier === null) {
+      issues.push({
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: item.orderItemId,
+        detail: MISSING_EXPORT_RETURN_TIER_DETAIL,
+      });
+      continue;
+    }
 
+    // A missing COMMISSION_INVOICE definition (the loader recorded REFERENCE_DATA_MISSING)
+    // left the item without a commission line, so the fee base is unknown: no line, rather
+    // than one that reads the absent commission as zero.
+    if (reference.fees.commissionVatRatePct === null) {
+      continue;
+    }
     const commissionLine = commissionByItem.get(item.orderItemId);
     const commissionGross = commissionLine === undefined ? ZERO : commissionLine.amount.gross;
     const acceptedSale = item.saleGross.mul(ratio);
@@ -452,13 +554,7 @@ function estimateExportReturns(params: {
         }),
       );
     }
-
-    returnedItems.push({
-      orderItemId: item.orderItemId,
-      saleGross: roundMoney(item.saleGross.mul(ratio)),
-      standaloneAmount: null,
-    });
   }
 
-  return { lines, issues: [], returnedItems };
+  return { lines, issues, returnedItems };
 }

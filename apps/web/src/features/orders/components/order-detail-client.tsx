@@ -21,6 +21,7 @@ import { OrderItemsList } from './order-items-list';
 import { OrderProfitHero } from './order-profit-hero';
 import { OrderProfitSummary } from './order-profit-summary';
 import { OrderStatusBadge } from './order-status-badge';
+import { ProfitBlockersAlert } from './profit-blockers-alert';
 import { ProfitIssueNotices } from './profit-issue-notices';
 import { ReconciliationStatusBadge } from './reconciliation-status-badge';
 
@@ -105,6 +106,7 @@ export function OrderDetailClient({
   }
 
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
+  const notComputable = order.profitBreakdown === null && order.profitBlockers.length > 0;
 
   // The exclusion banner text is reason-specific and plain (the same `exclusionReasons`
   // source as the excluded-list cell, one sentence, no jargon). Every reason is handled
@@ -196,26 +198,40 @@ export function OrderDetailClient({
         </Alert>
       ) : null}
 
-      {/* Non-blocking profit warnings (carrier not recognized, seller cargo
-          agreement) sit right above the profit result they qualify. */}
+      {/* Why the profit could not be calculated (the API's blockers), above the
+          profit section. */}
+      <ProfitBlockersAlert blockers={order.profitBlockers} />
+
+      {/* Non-blocking profit warnings (seller cargo agreement) sit right above the
+          profit result they qualify. */}
       <ProfitIssueNotices issues={order.profitIssues} />
 
       {/* Profit-led + odaklı: sonuç (hero) → siparişteki ürünler (resimlerle) →
           kâr dökümü (gelir + gruplu tahsis + öneri). Ücret zaman çizgisi, iade
           talepleri ve teslimat bilinçli olarak kaldırıldı — sheet yalnız kâr
           hikâyesine odaklanır. */}
-      <OrderProfitHero
-        breakdown={order.profitBreakdown}
-        reconciliationStatus={order.reconciliationStatus}
-      />
+      {/* A not-computable profit has no breakdown; the blocker alert already explains
+          it, so the hero placeholder and the summary's generic "not calculated" text
+          are left out. For a micro-export order the summary header still renders on
+          its own: it carries the micro-export badge, and a missing export return tier
+          blocks exactly those orders. A breakdown is never hidden. */}
+      {notComputable ? null : (
+        <OrderProfitHero
+          breakdown={order.profitBreakdown}
+          reconciliationStatus={order.reconciliationStatus}
+        />
+      )}
 
       <OrderItemsList items={order.items} profitExcluded={order.profitExcludedAt !== null} />
 
-      <OrderProfitSummary
-        breakdown={order.profitBreakdown}
-        promotionDisplays={order.promotionDisplays}
-        isExportSale={order.isExportSale}
-      />
+      {notComputable && !order.isExportSale ? null : (
+        <OrderProfitSummary
+          breakdown={order.profitBreakdown}
+          promotionDisplays={order.promotionDisplays}
+          isExportSale={order.isExportSale}
+          hideUnavailableText={notComputable}
+        />
+      )}
     </div>
   );
 }

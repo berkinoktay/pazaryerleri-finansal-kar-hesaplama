@@ -256,6 +256,8 @@ describe('dated shipping tariff and micro-export tier reads', () => {
     });
     expect(inV2.desiTariffNet.get('1')?.toString()).toBe('120');
     expect(inV2.carrier?.supportsBarem).toBe(false);
+    expect(inV1.tariffVersionMissing).toBe(false);
+    expect(inV2.tariffVersionMissing).toBe(false);
   });
 
   it('loadShippingTariff reads the Barem table of every band and the returns flag', async () => {
@@ -299,9 +301,23 @@ describe('dated shipping tariff and micro-export tier reads', () => {
 
     expect(tariff.desiTariffNet.size).toBe(0);
     expect(tariff.baremBands).toHaveLength(0);
-    // The carrier is still named, but without a version it offers no Barem.
+    // The carrier is still named, but without a version it offers no Barem, and the
+    // missing version is flagged so the estimate reports NO_TARIFF_VERSION.
     expect(tariff.carrier?.code).toBe(CARRIER_CODE);
     expect(tariff.carrier?.supportsBarem).toBe(false);
+    expect(tariff.tariffVersionMissing).toBe(true);
+  });
+
+  it('loadShippingTariff without a carrier does not flag a missing version', async () => {
+    const tariff = await loadShippingTariff(prisma, {
+      storeId: randomUUID(),
+      source: 'TRENDYOL_CONTRACT',
+      carrier: null,
+      at: new Date('1999-06-01T00:00:00Z'),
+    });
+
+    expect(tariff.carrier).toBeNull();
+    expect(tariff.tariffVersionMissing).toBe(false);
   });
 
   it('a retired micro-export band is not applied after the new version', async () => {

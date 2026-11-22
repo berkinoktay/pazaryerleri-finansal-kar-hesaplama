@@ -9,6 +9,7 @@ import { type ResolvedProfitSettings } from '@pazarsync/utils';
 
 import { getLineSpec, type ProfitLineGroup } from './catalog/profit-line-catalog';
 import { PROFIT_ENGINE_VERSION } from './engine-version';
+import { issuesForView } from './issues-for-view';
 import { type ProfitIssue } from './profit-issue';
 import { type ProfitLine } from './profit-line';
 import { deriveProfitStatus, deriveReconciliationStatus } from './profit-status';
@@ -25,7 +26,7 @@ export interface ProfitStatementInput {
   readonly isExportSale: boolean;
   readonly isCancelled: boolean;
   readonly isExcluded: boolean;
-  readonly issues: readonly ProfitIssue[];
+  readonly issues: readonly ProfitIssue[]; // every issue the engine recorded, for both views
 }
 
 export interface ProfitStatementRow {
@@ -52,7 +53,7 @@ export interface ProfitStatement {
   readonly netProfit: Decimal | null; // null when NOT_COMPUTABLE or EXCLUDED
   readonly saleMarginPct: Decimal | null;
   readonly costMarkupPct: Decimal | null;
-  readonly issues: readonly ProfitIssue[];
+  readonly issues: readonly ProfitIssue[]; // this view's issues (see `issuesForView`)
 }
 
 const ZERO = new Decimal(0);
@@ -123,9 +124,11 @@ function ratioPct(numerator: Decimal | null, base: Decimal): Decimal | null {
 
 /**
  * The profit statement: the single marketplace-agnostic profit computation. It picks
- * the lines for the requested view, aggregates them into per-type rows, derives the
- * net VAT and the status, and turns those into a net profit and its margins. Nothing
- * is re-rounded here; rows sum already-rounded line amounts and ratios stay unrounded.
+ * the lines for the requested view, keeps the issues that view stands on (see
+ * `issuesForView`: in the best-known view a cargo invoice lifts its leg's shipping
+ * causes), aggregates the lines into per-type rows, derives the net VAT and the status,
+ * and turns those into a net profit and its margins. Nothing is re-rounded here; rows sum
+ * already-rounded line amounts and ratios stay unrounded.
  *
  * Two statuses leave the net profit and both margins empty: NOT_COMPUTABLE, which has
  * no trustworthy total to report, and EXCLUDED, whose order is permanently kept out of
@@ -134,6 +137,9 @@ function ratioPct(numerator: Decimal | null, base: Decimal): Decimal | null {
  */
 export function computeProfitStatement(input: ProfitStatementInput): ProfitStatement {
   const selectedLines = selectLines(input.lines, input.view);
+  // The view's own issues: the status, the reconciliation and the stored list all read
+  // this one list, so a cause a cargo invoice lifted cannot linger in any of them.
+  const issues = issuesForView(input.view, input.issues, selectedLines);
   const rows = buildRows(selectedLines, input.settings);
 
   const vatTotals = computeVatTotals(selectedLines);
@@ -152,7 +158,7 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
 
   const status = deriveProfitStatus({
     selectedLines,
-    issues: input.issues,
+    issues,
     isCancelled: input.isCancelled,
     isExcluded: input.isExcluded,
   });
@@ -172,7 +178,7 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
   return {
     view: input.view,
     status,
-    reconciliationStatus: deriveReconciliationStatus(selectedLines, input.issues),
+    reconciliationStatus: deriveReconciliationStatus(selectedLines, issues),
     engineVersion: PROFIT_ENGINE_VERSION,
     selectedLines,
     rows,
@@ -184,6 +190,6 @@ export function computeProfitStatement(input: ProfitStatementInput): ProfitState
     netProfit,
     saleMarginPct: ratioPct(netProfit, saleGross),
     costMarkupPct: ratioPct(netProfit, costGross),
-    issues: input.issues,
+    issues,
   };
 }

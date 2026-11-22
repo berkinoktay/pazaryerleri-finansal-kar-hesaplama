@@ -34,7 +34,6 @@ import {
   type TrendyolShippingTariff,
 } from '../../marketplaces/trendyol/trendyol-inputs';
 import { type ProfitLine } from '../../core/profit-line';
-import { FeeDefinitionNotFoundError } from '../../resolve-fee-definition';
 import { computeParcelProfit } from '../compute-parcel-profit';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
@@ -42,6 +41,7 @@ import {
   createAdditionalStore,
   ensureDbReachable,
   MELONTIK,
+  melontikCargoInvoiceInput,
   type MelontikParcel,
   melontikSaleCycleRecordInputs,
   seedMelontikParcel,
@@ -895,8 +895,9 @@ describe('loadTrendyolParcel', () => {
     const fees = loaded.estimateInput.reference.fees;
     expect(loaded.estimateInput.snapshot.isExportSale).toBe(true);
     // rateOfSale 0.0600 -> 6%.
-    expect(fees.internationalServiceRatePct.toFixed(2)).toBe('6.00');
-    expect(fees.internationalServiceVatRatePct.toFixed(2)).toBe('20.00');
+    expect(fees.internationalServiceRatePct?.toFixed(2)).toBe('6.00');
+    expect(fees.internationalServiceVatRatePct?.toFixed(2)).toBe('20.00');
+    expect(loaded.loadIssues).toEqual([]);
 
     // Seeded tiers: rate 0.3500 -> 35, 0.3000 -> 30 (rate x 100).
     const tierByMin = new Map(
@@ -1386,12 +1387,15 @@ describe('loadTrendyolParcel', () => {
     });
 
     const fees = loaded.estimateInput.reference.fees;
-    // Non-same-day: the same-day net falls back to the standard net (10.99), no throw.
-    expect(fees.psfSameDayNet.toFixed(2)).toBe('10.99');
-    expect(fees.psfSameDayNet.toFixed(2)).toBe(fees.psfStandardNet.toFixed(2));
+    // Non-same-day: the same-day net falls back to the standard net (10.99), no issue.
+    expect(fees.psfSameDayNet?.toFixed(2)).toBe('10.99');
+    expect(fees.psfSameDayNet?.toFixed(2)).toBe(fees.psfStandardNet?.toFixed(2));
+    expect(loaded.loadIssues).toEqual([]);
   });
 
-  it('throws when a same-day parcel has no fast fee definition', async () => {
+  it('records missing reference data when a same-day parcel has no fast fee definition', async () => {
+    // Formerly a FeeDefinitionNotFoundError that left the order without any statement; now
+    // the loader records the missing definition and leaves the same-day net empty.
     const parcel = await seedMelontikParcel({
       fastDelivery: true,
       fastDeliveryType: TRENDYOL_SAME_DAY_SHIPPING_TYPE,
@@ -1400,12 +1404,163 @@ describe('loadTrendyolParcel', () => {
       where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE_FAST' },
     });
 
-    await expect(
-      loadTrendyolParcel(prisma, {
-        organizationId: parcel.organizationId,
-        orderId: parcel.orderId,
-      }),
-    ).rejects.toBeInstanceOf(FeeDefinitionNotFoundError);
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: null,
+        detail: 'FEE:PLATFORM_SERVICE_FAST',
+      },
+    ]);
+    const fees = loaded.estimateInput.reference.fees;
+    expect(fees.psfSameDayNet).toBeNull();
+    expect(fees.psfStandardNet?.toFixed(2)).toBe('10.99');
+  });
+
+  it('leaves out the platform service fee whose definition is missing and blocks the profit', async () => {
+    const parcel = await seedMelontikParcel();
+    await prisma.feeDefinition.deleteMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    expect(loaded.loadIssues).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: null,
+        detail: 'FEE:PLATFORM_SERVICE',
+      },
+    ]);
+    expect(loaded.estimateInput.reference.fees.psfStandardNet).toBeNull();
+    expect(loaded.estimateInput.reference.fees.psfVatRatePct).toBeNull();
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    const types = computed.lines.map((line) => line.type);
+    expect(types).not.toContain(ProfitLineType.SERVICE_FEE);
+    expect(types).toContain(ProfitLineType.COMMISSION);
+    expect(types).toContain(ProfitLineType.SHIPPING);
+    for (const statement of [computed.estimate, computed.bestKnown]) {
+      expect(statement.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+      expect(statement.netProfit).toBeNull();
+      expect(statement.issues).toContainEqual({
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: null,
+        detail: 'FEE:PLATFORM_SERVICE',
+      });
+    }
+  });
+
+  it('records an incomplete fee definition the same way, keeping its VAT rate', async () => {
+    // A PLATFORM_SERVICE definition without its fixed amount (formerly an
+    // IncompleteFeeDefinitionError): one REFERENCE_DATA_MISSING, the net empty.
+    const parcel = await seedMelontikParcel();
+    await prisma.feeDefinition.updateMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
+      data: { fixedAmountNet: null },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.loadIssues).toEqual([
+      {
+        code: ProfitIssueCode.REFERENCE_DATA_MISSING,
+        orderItemId: null,
+        detail: 'FEE:PLATFORM_SERVICE',
+      },
+    ]);
+    expect(loaded.estimateInput.reference.fees.psfStandardNet).toBeNull();
+    expect(loaded.estimateInput.reference.fees.psfVatRatePct?.toFixed(2)).toBe('20.00');
+  });
+
+  it('computes an order dated before every fee definition without throwing', async () => {
+    // A store whose history predates the first fee definitions: platform service,
+    // stoppage, commission VAT and shipping VAT are all missing. Each is recorded once; no
+    // line needs a missing value, estimate or actual -- the settled commission and the cargo
+    // invoice included -- and both views come out not computable.
+    const tracking = BigInt('7335552222');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    await prisma.feeDefinition.deleteMany({});
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+    await insertFinanceRecord(melontikCargoInvoiceInput(parcel, tracking.toString()));
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const types = computed.lines.map((line) => line.type);
+    for (const missing of [
+      ProfitLineType.SERVICE_FEE,
+      ProfitLineType.STOPPAGE,
+      ProfitLineType.COMMISSION,
+      ProfitLineType.SHIPPING,
+    ]) {
+      expect(types).not.toContain(missing);
+    }
+    // The sale is still written, estimated and settled.
+    expect(
+      computed.lines
+        .filter((line) => line.type === ProfitLineType.SALE)
+        .map((line) => line.certainty)
+        .sort(),
+    ).toEqual([
+      ProfitLineCertainty.ACTUAL,
+      ProfitLineCertainty.ACTUAL,
+      ProfitLineCertainty.ESTIMATE,
+      ProfitLineCertainty.ESTIMATE,
+    ]);
+    for (const statement of [computed.estimate, computed.bestKnown]) {
+      expect(statement.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+      expect(statement.netProfit).toBeNull();
+      expect(
+        statement.issues
+          .filter((issue) => issue.code === ProfitIssueCode.REFERENCE_DATA_MISSING)
+          .map((issue) => issue.detail),
+      ).toEqual(['FEE:PLATFORM_SERVICE', 'FEE:STOPPAGE', 'FEE:COMMISSION_INVOICE', 'FEE:SHIPPING']);
+    }
+  });
+
+  it('does not read fully settled when missing fee definitions leave required slots empty', async () => {
+    // Every fee VAT is missing, so the commission, shipping and service fee slots carry no
+    // line at all, estimate or actual. The sale records land and no cargo invoice does:
+    // without a settlement gap nothing would be pending and reconciliation would read
+    // FULLY_SETTLED although the commission and cargo were never reconciled.
+    const parcel = await seedMelontikParcel();
+    await prisma.feeDefinition.deleteMany({});
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const types = computed.bestKnown.selectedLines.map((line) => line.type);
+    for (const empty of [
+      ProfitLineType.COMMISSION,
+      ProfitLineType.SHIPPING,
+      ProfitLineType.SERVICE_FEE,
+    ]) {
+      expect(types).not.toContain(empty);
+    }
+    expect(computed.bestKnown.reconciliationStatus).toBe(ReconciliationStatus.PARTIALLY_SETTLED);
+    expect(computed.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
   });
 
   it('picks the version in effect by effective_from, not by changed_at', async () => {
@@ -1553,8 +1708,10 @@ describe('loadTrendyolParcel', () => {
     expect(shipping.inputs.carrierCode).toBe('TEST_ORDER_NOBAREM');
   });
 
-  /** The single parcel SHIPPING line for `cargoProviderName`, estimated read-only. */
-  async function shippingLineFor(cargoProviderName: string | null): Promise<ProfitLine> {
+  /** The parcel's estimate for `cargoProviderName`, computed read-only. */
+  async function estimateFor(
+    cargoProviderName: string | null,
+  ): Promise<ReturnType<typeof estimateTrendyolParcel>> {
     const parcel = await seedMelontikParcel();
     await prisma.order.update({
       where: { id: parcel.orderId },
@@ -1564,23 +1721,27 @@ describe('loadTrendyolParcel', () => {
       organizationId: parcel.organizationId,
       orderId: parcel.orderId,
     });
-    const result = estimateTrendyolParcel(loaded.estimateInput);
-    return requireLine(result.lines, ProfitLineType.SHIPPING, null);
+    return estimateTrendyolParcel(loaded.estimateInput);
   }
 
-  /** Asserts a parcel SHIPPING line is a zero estimate recording the not-recognized reason. */
-  function expectZeroShipping(line: ProfitLine, providerName: string | null): void {
-    expect(line.amount.gross.toFixed(2)).toBe('0.00');
-    expect(line.amount.vat.toFixed(2)).toBe('0.00');
-    expect(line.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
-    expect(line.inputs.providerName).toBe(providerName);
+  /** Asserts the order got no SHIPPING line and one blocking carrier issue with `detail`. */
+  function expectBlockedCarrier(
+    result: ReturnType<typeof estimateTrendyolParcel>,
+    providerName: string | null,
+  ): void {
+    expect(result.lines.filter((line) => line.type === ProfitLineType.SHIPPING)).toEqual([]);
+    expect(
+      result.issues.filter((issue) => issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED),
+    ).toEqual([
+      { code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED, orderItemId: null, detail: providerName },
+    ]);
   }
 
-  it('estimates zero shipping for an unknown carrier name', async () => {
-    // Trendyol named a carrier that matches no active carrier (e.g. alternative delivery):
-    // the estimate is a zero SHIPPING line recording the provider name, never the store
-    // default (which is no longer consulted on an order) nor an unavailable issue. The
-    // statement records a non-blocking CARRIER_NOT_RECOGNIZED issue and stays ESTIMATED.
+  it('blocks an order with an unknown carrier name', async () => {
+    // Trendyol named a carrier that matches no active carrier (e.g. alternative delivery)
+    // on an order shipped under Trendyol's agreement: no SHIPPING line (never the store
+    // default, which an order no longer consults, nor a zero line) and a blocking
+    // CARRIER_NOT_RECOGNIZED issue, so the order is not computable.
     const parcel = await seedMelontikParcel();
     await prisma.order.update({
       where: { id: parcel.orderId },
@@ -1592,10 +1753,7 @@ describe('loadTrendyolParcel', () => {
       orderId: parcel.orderId,
     });
 
-    expectZeroShipping(
-      requireLine(computed.lines, ProfitLineType.SHIPPING, null),
-      'Alternative Delivery',
-    );
+    expect(computed.lines.filter((line) => line.type === ProfitLineType.SHIPPING)).toEqual([]);
     for (const statement of [computed.estimate, computed.bestKnown]) {
       // Exactly one per parcel: the return leg never adds a second one.
       expect(
@@ -1607,15 +1765,43 @@ describe('loadTrendyolParcel', () => {
           detail: 'Alternative Delivery',
         },
       ]);
-      expect(statement.status).toBe(ProfitStatus.ESTIMATED);
+      expect(statement.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+      expect(statement.netProfit).toBeNull();
     }
   });
 
-  it('estimates zero shipping for an empty carrier name', async () => {
-    // Trendyol sent no usable name: the line records null, never '' (the frontend falls
+  it('keeps a seller-cargo order with an unknown carrier at a zero shipping line', async () => {
+    // Design 6.13: a seller-cargo-agreement order is exempt from the not-recognized carrier
+    // rule until PR-6, so its result is unchanged -- a zero SHIPPING estimate, only the
+    // seller-cargo warning, and a computable (estimated) profit.
+    const parcel = await seedMelontikParcel();
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Alternative Delivery', usesSellerCargoAgreement: true },
+    });
+
+    const computed = await computeParcelProfit(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const shipping = requireLine(computed.lines, ProfitLineType.SHIPPING, null);
+    expect(shipping.amount.gross.toFixed(2)).toBe('0.00');
+    expect(shipping.inputs.reason).toBe(CARRIER_NOT_RECOGNIZED_REASON);
+    expect(shipping.inputs.providerName).toBe('Alternative Delivery');
+    for (const statement of [computed.estimate, computed.bestKnown]) {
+      expect(statement.issues.map((issue) => issue.code)).toEqual([
+        ProfitIssueCode.SELLER_CARGO_AGREEMENT_ESTIMATE,
+      ]);
+      expect(statement.status).toBe(ProfitStatus.ESTIMATED);
+      expect(statement.netProfit).not.toBeNull();
+    }
+  });
+
+  it('blocks an order with an empty carrier name', async () => {
+    // Trendyol sent no usable name: the issue records null, never '' (the frontend falls
     // back to its "unknown carrier" label on null only).
-    const shipping = await shippingLineFor('');
-    expectZeroShipping(shipping, null);
+    expectBlockedCarrier(await estimateFor(''), null);
   });
 
   it('reports a null provider name for a whitespace-only carrier name', async () => {
@@ -1630,7 +1816,7 @@ describe('loadTrendyolParcel', () => {
       orderId: parcel.orderId,
     });
 
-    expectZeroShipping(requireLine(computed.lines, ProfitLineType.SHIPPING, null), null);
+    expect(computed.lines.filter((line) => line.type === ProfitLineType.SHIPPING)).toEqual([]);
     expect(
       computed.bestKnown.issues.filter(
         (issue) => issue.code === ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
@@ -1638,9 +1824,9 @@ describe('loadTrendyolParcel', () => {
     ).toEqual([{ code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED, orderItemId: null, detail: null }]);
   });
 
-  it('estimates zero shipping for an ambiguous carrier name', async () => {
+  it('blocks an order with an ambiguous carrier name', async () => {
     // Two distinct active carriers both claim the order's cargo name: the match is
-    // ambiguous, so the carrier is not recognized and the estimate is a zero line.
+    // ambiguous, so the carrier is not recognized and the order gets no shipping line.
     const parcel = await seedMelontikParcel();
     for (const code of ['TEST_AMBIG_A', 'TEST_AMBIG_B']) {
       await upsertCarrierWithTariffs({
@@ -1663,18 +1849,16 @@ describe('loadTrendyolParcel', () => {
       organizationId: parcel.organizationId,
       orderId: parcel.orderId,
     });
-    const shipping = requireLine(
-      estimateTrendyolParcel(loaded.estimateInput).lines,
-      ProfitLineType.SHIPPING,
-      null,
+    expectBlockedCarrier(
+      estimateTrendyolParcel(loaded.estimateInput),
+      'Shared Ambiguous Kargo Marketplace',
     );
-    expectZeroShipping(shipping, 'Shared Ambiguous Kargo Marketplace');
   });
 
-  it('estimates zero shipping for an inactive carrier with the same name', async () => {
+  it('blocks an order whose carrier name only an inactive carrier claims', async () => {
     // An INACTIVE carrier whose orderCargoNames contains the order's cargo name is dropped
-    // by the active-only query, so the order's carrier is not recognized -- a zero estimate,
-    // not the inactive namesake's cheap 50.00 -> 60.00 tariff.
+    // by the active-only query, so the order's carrier is not recognized -- no shipping
+    // line, never the inactive namesake's cheap 50.00 -> 60.00 tariff.
     const parcel = await seedMelontikParcel();
     await upsertCarrierWithTariffs({
       code: 'TEST_INACTIVE_NAMESAKE',
@@ -1703,12 +1887,10 @@ describe('loadTrendyolParcel', () => {
       organizationId: parcel.organizationId,
       orderId: parcel.orderId,
     });
-    const shipping = requireLine(
-      estimateTrendyolParcel(loaded.estimateInput).lines,
-      ProfitLineType.SHIPPING,
-      null,
+    expectBlockedCarrier(
+      estimateTrendyolParcel(loaded.estimateInput),
+      'Test Inactive Kargo Marketplace',
     );
-    expectZeroShipping(shipping, 'Test Inactive Kargo Marketplace');
   });
 
   it('prices an own-contract store normally when the carrier is not recognized', async () => {

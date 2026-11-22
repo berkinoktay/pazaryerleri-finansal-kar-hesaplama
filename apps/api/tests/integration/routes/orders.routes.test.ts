@@ -988,6 +988,246 @@ describe('Order routes', () => {
       );
       expect(res.status).toBe(422);
     });
+
+    it('returns the blocking causes of a not-computable best-known statement as profitBlockers', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const carrierIssue = {
+        code: 'CARRIER_NOT_RECOGNIZED',
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      };
+
+      // The list row reads its best-known view, the same view as the detail.
+      // Blocked: a Trendyol-contract order with a cost whose carrier name is not
+      // recognized, so the carrier is the only blocking cause. A warning stored beside it
+      // does not block and stays out of profitBlockers.
+      const blocked = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: blocked.id },
+        data: { cargoProviderName: 'Alternative Delivery' },
+      });
+      await createProfitStatement(blocked.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [carrierIssue],
+      });
+      await createProfitStatement(blocked.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [
+          carrierIssue,
+          { code: 'AMBIGUOUS_RECORD_MATCH', orderItemId: null, detail: 'rec-1' },
+        ],
+      });
+      // Computed with a warning only: a seller-cargo-agreement estimate does not block.
+      const computed = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(computed.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+        issues: [{ code: 'SELLER_CARGO_AGREEMENT_ESTIMATE', orderItemId: null, detail: null }],
+      });
+      // The status is the gate, not the code: an estimated statement that still carries a
+      // blocking code (an engine before version 12 wrote such rows) has no blockers.
+      const staleWarned = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(staleWarned.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+        issues: [carrierIssue],
+      });
+      // Excluded from profit: its EXCLUDED statement has no blockers.
+      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: excluded.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+      await createProfitStatement(excluded.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'EXCLUDED',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [{ code: 'MISSING_COST', orderItemId: null, detail: null }],
+      });
+      // Cancelled (even one still missing reference data), and an order with no statement
+      // yet: no blockers either.
+      const cancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      await createProfitStatement(cancelled.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'CANCELLED',
+        saleGross: '0',
+        netProfit: '0',
+        issues: [{ code: 'REFERENCE_DATA_MISSING', orderItemId: null, detail: 'FEE:SHIPPING' }],
+      });
+      const fresh = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+
+      const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: { data: { id: string; profitBlockers: unknown }[] } = await res.json();
+      const blockersOf = (orderId: string): unknown =>
+        body.data.find((row) => row.id === orderId)?.profitBlockers;
+
+      expect(blockersOf(blocked.id)).toEqual([
+        { code: 'CARRIER_NOT_RECOGNIZED', detail: 'Alternative Delivery' },
+      ]);
+      expect(blockersOf(computed.id)).toEqual([]);
+      expect(blockersOf(staleWarned.id)).toEqual([]);
+      expect(blockersOf(excluded.id)).toEqual([]);
+      expect(blockersOf(cancelled.id)).toEqual([]);
+      expect(blockersOf(fresh.id)).toEqual([]);
+    });
+
+    it('reads the list row and the detail blockers from the best-known view: an invoiced order whose estimate stays blocked has none', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const carrierIssue = {
+        code: 'CARRIER_NOT_RECOGNIZED',
+        orderItemId: null,
+        detail: 'Yeni Kargo Marketplace',
+      };
+
+      // A Trendyol-agreement order whose carrier name is not recognized, after its cargo
+      // invoice landed: the estimate view (the order-time estimate) is still blocked on the
+      // carrier, while the best-known view is computed from the invoice. The order's profit
+      // is computable, so neither surface lists a blocker: the list row's estimate cell is
+      // a plain empty value and its settled profit and margin are filled.
+      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { cargoProviderName: 'Yeni Kargo Marketplace' },
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: null,
+        type: 'SHIPPING',
+        level: 'PARCEL',
+        certainty: 'ACTUAL',
+        source: 'CARGO_INVOICE',
+        amountGross: '98.34',
+        amountVat: '16.39',
+        vatRatePct: '20',
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'ESTIMATE',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [carrierIssue],
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'PARTIALLY_SETTLED',
+        reconciliationStatus: 'PARTIALLY_SETTLED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+        saleMarginPct: '25.00',
+      });
+
+      const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+        headers: { Authorization: bearer(user.accessToken) },
+      });
+      expect(listRes.status).toBe(200);
+      const list: {
+        data: {
+          id: string;
+          estimatedNetProfit: string | null;
+          settledNetProfit: string | null;
+          saleMarginPct: string | null;
+          profitBlockers: unknown;
+        }[];
+      } = await listRes.json();
+      const row = list.data.find((item) => item.id === order.id);
+      expect(row?.estimatedNetProfit).toBeNull();
+      expect(row?.settledNetProfit).toBe('60');
+      expect(row?.saleMarginPct).toBe('25');
+      expect(row?.profitBlockers).toEqual([]);
+
+      const detailRes = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(detailRes.status).toBe(200);
+      const detail: { profitBlockers: unknown; profitBreakdown: unknown } = await detailRes.json();
+      expect(detail.profitBlockers).toEqual([]);
+      expect(detail.profitBreakdown).not.toBeNull();
+    });
+
+    it('keeps the list up when stored issues are corrupt: those rows read no blockers', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Two not-computable best-known statements (the view the list row reads) whose stored
+      // issues the reader rejects (an unknown code, and a value that is not an array),
+      // beside a healthy blocked order.
+      const unknownCode = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(unknownCode.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [{ code: 'NOT_A_REAL_CODE', orderItemId: null, detail: null }],
+      });
+      const notArray = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(notArray.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: { broken: true },
+      });
+      const healthy = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(healthy.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [{ code: 'MISSING_COST', orderItemId: null, detail: null }],
+      });
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
+          headers: { Authorization: bearer(user.accessToken) },
+        });
+        expect(res.status).toBe(200);
+        const body: { data: { id: string; profitBlockers: unknown }[] } = await res.json();
+        const blockersOf = (orderId: string): unknown =>
+          body.data.find((row) => row.id === orderId)?.profitBlockers;
+
+        expect(body.data).toHaveLength(3);
+        expect(blockersOf(unknownCode.id)).toEqual([]);
+        expect(blockersOf(notArray.id)).toEqual([]);
+        expect(blockersOf(healthy.id)).toEqual([{ code: 'MISSING_COST', detail: null }]);
+
+        // One [profit-read] line for the request, counting both failed rows (owner
+        // decision 2026-11-04: the page opens, the error is logged).
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[profit-read] in-request profit computation failed',
+          expect.objectContaining({
+            surface: 'order-list',
+            organizationId: org.id,
+            failedCount: 2,
+          }),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
   });
 
   // ─── GET /v1/organizations/:orgId/stores/:storeId/orders/:orderId ─────────
@@ -1518,9 +1758,11 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      // A bare Trendyol order with no stored statement and no fee reference data (every
-      // test truncates it): the in-request computation throws when it resolves the
-      // platform fees, so the detail must still open with an empty profit section.
+      // A bare Trendyol order with no stored statement whose seller discount exceeds its
+      // list price: the computed sale goes negative, so the snapshot check rejects the
+      // parcel and the in-request computation throws. (A missing fee definition no longer
+      // throws -- it is a REFERENCE_DATA_MISSING issue -- so it cannot drive this path.)
+      // The detail must still open with an empty profit section.
       const order = await createOrder(org.id, store.id, {
         status: 'DELIVERED',
         saleGross: '240.00',
@@ -1533,6 +1775,8 @@ describe('Order routes', () => {
           barcode: 'BC-NOFEES-1',
           platformLineId: 7301n,
           quantity: 1,
+          lineListGross: '100.00',
+          lineSellerDiscountGross: '600.00',
         },
       });
 
@@ -1658,8 +1902,11 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       // Cancelled, no statement: the sale is 0 even though the order column holds 240
-      // (rule B5). No fee reference data, so the in-request computation fails and logs;
-      // the page still opens. Silence the expected log so it does not look like a break.
+      // (rule B5). There is no fee reference data, but the in-request computation no
+      // longer fails on that: each missing definition is a REFERENCE_DATA_MISSING issue and
+      // the cancelled order still computes, so nothing is logged. (The failure path, where
+      // the page opens with an empty profit section, is pinned above by "opens the detail
+      // without profit when the in-request computation fails": an invalid seller discount.)
       const cancelled = await createOrder(org.id, store.id, {
         status: 'CANCELLED',
         saleGross: '240.00',
@@ -1673,6 +1920,7 @@ describe('Order routes', () => {
         expect(res.status).toBe(200);
         const body = (await res.json()) as { saleGross: string | null };
         expect(body.saleGross).toBe('0');
+        expect(errorSpy).not.toHaveBeenCalled();
       } finally {
         errorSpy.mockRestore();
       }
@@ -1978,6 +2226,7 @@ describe('Order routes', () => {
       const readDetail = async (): Promise<{
         items: ItemWire[];
         profitIssues: { code: string; orderItemId: string | null }[];
+        profitBlockers: { code: string; detail: string | null }[];
       }> => {
         const res = await app.request(
           `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
@@ -2001,6 +2250,10 @@ describe('Order routes', () => {
         const item = body.items[0];
         expect(body.profitIssues).toContainEqual(
           expect.objectContaining({ code: 'MISSING_COMMISSION_RATE', orderItemId: item?.id }),
+        );
+        // Both paths (in-request computed and stored) report the blocking cause.
+        expect(body.profitBlockers).toContainEqual(
+          expect.objectContaining({ code: 'MISSING_COMMISSION_RATE' }),
         );
         expect(item?.commissionGross).toBeNull();
         expect(item?.commissionRate).toBeNull();
@@ -2068,6 +2321,126 @@ describe('Order routes', () => {
       expect(await issuesOf(warned.id)).toEqual([carrierIssue]);
       expect(await issuesOf(plain.id)).toEqual([]);
       expect(await issuesOf(invoiced.id)).toEqual([]);
+    });
+
+    it('returns the blocking causes of a not-computable best-known statement as profitBlockers', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const carrierIssue = {
+        code: 'CARRIER_NOT_RECOGNIZED',
+        orderItemId: null,
+        detail: 'Alternative Delivery',
+      };
+      const ambiguousIssue = {
+        code: 'AMBIGUOUS_RECORD_MATCH',
+        orderItemId: null,
+        detail: 'rec-1',
+      };
+
+      // Blocked: an order with a cost whose carrier name is not recognized; a warning
+      // stored beside the carrier does not block.
+      const blocked = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await prisma.order.update({
+        where: { id: blocked.id },
+        data: { cargoProviderName: 'Alternative Delivery' },
+      });
+      await createProfitStatement(blocked.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [carrierIssue, ambiguousIssue],
+      });
+      // Computed: an estimated statement has no blockers.
+      const computed = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      await createProfitStatement(computed.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'ESTIMATED',
+        saleGross: '240.00',
+        netProfit: '60.00',
+      });
+
+      const detailOf = async (
+        orderId: string,
+      ): Promise<{ profitBlockers: unknown; profitIssues: unknown }> => {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${orderId}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        return res.json();
+      };
+
+      const blockedBody = await detailOf(blocked.id);
+      expect(blockedBody.profitBlockers).toEqual([
+        { code: 'CARRIER_NOT_RECOGNIZED', detail: 'Alternative Delivery' },
+      ]);
+      // profitIssues is unchanged: every stored issue that still applies, warnings included.
+      expect(blockedBody.profitIssues).toEqual([carrierIssue, ambiguousIssue]);
+
+      expect((await detailOf(computed.id)).profitBlockers).toEqual([]);
+    });
+
+    it('returns no profitBlockers when the stored profit cannot be read', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // A not-computable best-known statement whose profit line the reader rejects: the
+      // detail opens with an empty profit section, and no blocker is shown either.
+      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const item = await prisma.orderItem.create({
+        data: {
+          orderId: order.id,
+          organizationId: org.id,
+          productVariantId: null,
+          barcode: 'BC-CORRUPT-2',
+          platformLineId: 7502n,
+          quantity: 1,
+        },
+      });
+      await createProfitStatement(order.id, org.id, store.id, {
+        view: 'BEST_KNOWN',
+        status: 'NOT_COMPUTABLE',
+        saleGross: '240.00',
+        netProfit: null,
+        issues: [
+          { code: 'SHIPPING_ESTIMATE_UNAVAILABLE', orderItemId: null, detail: 'UNKNOWN_DESI' },
+        ],
+      });
+      await createProfitLine(order.id, org.id, store.id, {
+        orderItemId: item.id,
+        type: 'COST_COGS',
+        certainty: 'ESTIMATE',
+        source: 'SELLER_INPUT',
+        amountGross: '30.00',
+        amountVat: '5.00',
+        vatRatePct: '20',
+        // A nested object is not a flat string/boolean/null input -- the reader throws.
+        inputs: { nested: { reason: 'corrupt' } },
+      });
+
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const res = await app.request(
+          `/v1/organizations/${org.id}/stores/${store.id}/orders/${order.id}`,
+          { headers: { Authorization: bearer(user.accessToken) } },
+        );
+        expect(res.status).toBe(200);
+        const body: { profitBlockers: unknown; profitBreakdown: unknown } = await res.json();
+        expect(body.profitBreakdown).toBeNull();
+        expect(body.profitBlockers).toEqual([]);
+        expect(errorSpy).toHaveBeenCalledTimes(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[profit-read] in-request profit computation failed',
+          expect.objectContaining({ surface: 'order-detail', orderId: order.id }),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
   });
 

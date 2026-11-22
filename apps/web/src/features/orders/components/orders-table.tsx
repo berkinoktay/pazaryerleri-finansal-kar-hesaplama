@@ -7,7 +7,6 @@ import * as React from 'react';
 
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
-import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { DataTablePagination } from '@/components/patterns/data-table-pagination';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
@@ -33,6 +32,7 @@ import {
 
 import { ExcludedReasonCell } from './excluded-reason-cell';
 import { FastDeliverySlaBadge } from './fast-delivery-sla-badge';
+import { OrderProfitCell } from './order-profit-cell';
 import { OrderStatusBadge } from './order-status-badge';
 import { OrdersCostStatusTabs } from './orders-cost-status-tabs';
 import { OrdersToolbar, type OrdersToolbarChange } from './orders-toolbar';
@@ -241,12 +241,13 @@ export function OrdersTable({
         // satır-tıklaması yerine kâr detay modalını açar → satırdaki diğer
         // etkileşimler serbest kalır. value null → nötr ama yine tıklanabilir "—"
         // rozet (hiçbir satır detaysız/sahipsiz kalmaz).
+        // A profit the API reports as not computable (profitBlockers) shows a warning
+        // chip with its reasons instead of the dash (OrderProfitCell).
         id: 'estimatedNetProfit',
         header: t('columns.estimatedNetProfit'),
         cell: ({ row }) => (
-          <ProfitBadge
-            value={row.original.estimatedNetProfit}
-            marginPct={row.original.saleMarginPct}
+          <OrderProfitCell
+            order={row.original}
             scale={scale}
             onOpen={() => onRowOpen?.(row.original.id)}
           />

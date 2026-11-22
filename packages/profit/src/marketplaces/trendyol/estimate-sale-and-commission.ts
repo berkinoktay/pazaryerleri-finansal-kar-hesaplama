@@ -68,7 +68,9 @@ export function estimateSaleLines(snapshot: ParcelSnapshot): ProfitLine[] {
  * settlement (plan decision 12): the list and the seller-discount commissions are
  * each rounded to kurus and then subtracted. An item with no attributes or no
  * resolvable rate produces a blocking MISSING_COMMISSION_RATE issue and no line; a
- * commission that nets to zero produces neither a line nor an issue.
+ * commission that nets to zero produces neither a line nor an issue, and neither does
+ * one whose VAT rate is unknown (a missing COMMISSION_INVOICE definition, recorded by
+ * the loader).
  *
  * `commissionByItem` records the rate resolved for each item that had attributes
  * (null when nothing applied), so a caller can report the rate even when it nets to
@@ -127,10 +129,16 @@ export function estimateCommissionLines(params: {
     if (gross.equals(ZERO)) {
       continue;
     }
+    // A missing COMMISSION_INVOICE definition leaves the commission VAT unknown (the
+    // loader recorded REFERENCE_DATA_MISSING): no line is written for it.
+    const commissionVatRatePct = reference.fees.commissionVatRatePct;
+    if (commissionVatRatePct === null) {
+      continue;
+    }
 
     const amount: LineMoney = {
       gross,
-      vat: vatFromGross(gross, reference.fees.commissionVatRatePct),
+      vat: vatFromGross(gross, commissionVatRatePct),
     };
     lines.push(
       createProfitLine({
@@ -140,7 +148,7 @@ export function estimateCommissionLines(params: {
         certainty: ProfitLineCertainty.ESTIMATE,
         source: ProfitLineSource.RULE,
         amount,
-        vatRatePct: reference.fees.commissionVatRatePct,
+        vatRatePct: commissionVatRatePct,
         inputs: {
           ratePct: resolved.ratePct.toString(),
           rateSource: resolved.source,

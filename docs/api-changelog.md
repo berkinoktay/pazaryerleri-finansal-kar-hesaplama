@@ -26,6 +26,20 @@ section "Versioning" for details.
 
 ### Changed
 
+- **New profit issue code and a blocking not-recognized carrier**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`, `profitIssues[].code`). The
+  `ProfitIssue.code` enum gains `REFERENCE_DATA_MISSING` (blocking): a fee definition (`detail`
+  `FEE:<fee type>`) or a micro-export return tier (`detail` `EXPORT_RETURN_TIER`) was missing on the
+  order date, so that fee is left out and the profit is not computable. `CARRIER_NOT_RECOGNIZED` is
+  now blocking: an order shipped under Trendyol's agreement whose carrier is not recognized gets no
+  shipping estimate instead of a zero one; a seller-cargo-agreement order no longer records it. Its
+  return leg likewise gets no return shipping line instead of a zero one, and a blocking
+  `SHIPPING_ESTIMATE_UNAVAILABLE` with the new `detail` `RETURN_CARRIER_NOT_RECOGNIZED`, which a
+  return cargo invoice lifts in the best-known view; a seller-cargo-agreement order keeps its zero
+  return line and no issue. `SHIPPING_ESTIMATE_UNAVAILABLE` has a new `detail`, `NO_TARIFF_VERSION` (`RETURN_NO_TARIFF_VERSION`
+  on the return leg), for a carrier with no tariff version in force on the order date; it was
+  reported as `DESI_OVERFLOW` before. The product pricing routes still report that case as
+  `DESI_OVERFLOW`. Clients must accept the new enum value.
 - **Entering a desi moves today's waiting orders into profit**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
   `PATCH .../products/variants/dimensional-weight`). Setting a desi (any value, 0 included) now
@@ -1234,6 +1248,22 @@ section "Versioning" for details.
 
 ### Added
 
+- **Why an order's profit is not computable** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET .../orders/{orderId}`). Each orders list row and the order detail gain `profitBlockers`, an
+  array of the new `ProfitBlocker` component schema (`code`, a `ProfitIssueCode`; `detail`, the
+  same optional English context as `ProfitIssue.detail`, e.g. the carrier name for
+  `CARRIER_NOT_RECOGNIZED`). Both the list row and the detail read the best-known profit
+  statement, so a list row carries a blocker only while the order's profit is really not
+  computable: after a cargo invoice makes the best-known view computable, the row's
+  `profitBlockers` is empty even while its `estimatedNetProfit` (the order-time estimate) stays
+  null. It is filled only while the best-known statement's status is `NOT_COMPUTABLE`: its
+  blocking issues, one entry per distinct code + detail, ordered by the code in the
+  `ProfitIssueCode` enum order (not alphabetical), then by detail (null first). It is empty for a
+  computed, excluded, cancelled or statement-less order; the detail computes the statement in the
+  request when none is stored, as for its other profit fields. Which codes block is decided here,
+  not by the client. A stored issues value the reader rejects leaves that list row's
+  `profitBlockers` empty and is logged (`[profit-read]`, surface `order-list`) instead of failing
+  the page. `profitIssues` on the detail is unchanged. Additive.
 - **Desi on live performance rows, and each waiting line's cost gap**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`,
   `GET .../live-performance/buffer/{bufferId}`). Each today products row and each buffer detail

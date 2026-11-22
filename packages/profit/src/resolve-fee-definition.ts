@@ -10,7 +10,7 @@
  * sürümü seçer.
  */
 
-import type { OrderFeeType, Platform, Prisma } from '@pazarsync/db';
+import type { FeeDefinition, OrderFeeType, Platform, Prisma } from '@pazarsync/db';
 
 export class FeeDefinitionNotFoundError extends Error {
   constructor(
@@ -47,7 +47,15 @@ interface ResolveArgs {
   at: Date;
 }
 
-export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: ResolveArgs) {
+/**
+ * The fee definition in force at `args.at`, or null when none covers the date. The
+ * non-throwing lookup behind `resolveFeeDefinition`; the order loader uses it directly
+ * so a missing definition becomes a recorded issue instead of an error.
+ */
+export async function findFeeDefinition(
+  tx: Prisma.TransactionClient,
+  args: ResolveArgs,
+): Promise<FeeDefinition | null> {
   // Kapsam: spesifik pazaryeri (args.platform) VEYA pazaryeri-bağımsız 'ALL'
   // (denetim A — stopaj + komisyon KDV gibi tüm pazaryerlerinde sabit ücretler
   // FeeScope.ALL satırında yaşar). Bir feeType ya spesifik ya ALL'dır (ikisi
@@ -59,7 +67,7 @@ export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: R
   // spesifik pazaryeri (enum tanım sırasında ALL'dan önce) ALL'ı geçer — ileride
   // bir feeType hem spesifik hem ALL satır taşırsa spesifik tercih edilsin diye
   // defansif tiebreak.
-  const def = await tx.feeDefinition.findFirst({
+  return tx.feeDefinition.findFirst({
     where: {
       platform: { in: [args.platform, 'ALL'] },
       feeType: args.feeType,
@@ -68,7 +76,14 @@ export async function resolveFeeDefinition(tx: Prisma.TransactionClient, args: R
     },
     orderBy: [{ effectiveFrom: 'desc' }, { platform: 'asc' }],
   });
+}
 
+/** The fee definition in force at `args.at`; throws `FeeDefinitionNotFoundError` when none. */
+export async function resolveFeeDefinition(
+  tx: Prisma.TransactionClient,
+  args: ResolveArgs,
+): Promise<FeeDefinition> {
+  const def = await findFeeDefinition(tx, args);
   if (def === null) {
     throw new FeeDefinitionNotFoundError(args.platform, args.feeType);
   }

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ProfitIssueCode" ADD VALUE 'REFERENCE_DATA_MISSING';

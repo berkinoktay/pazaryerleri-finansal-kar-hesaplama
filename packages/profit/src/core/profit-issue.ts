@@ -12,22 +12,42 @@ export interface ProfitIssue {
 }
 
 /**
+ * The `detail` prefix of a SHIPPING_ESTIMATE_UNAVAILABLE issue raised by the return
+ * shipping leg (`RETURN_UNKNOWN_DESI`, `RETURN_DESI_OVERFLOW`, ...). A detail without it
+ * belongs to the outbound leg.
+ */
+export const RETURN_SHIPPING_ISSUE_DETAIL_PREFIX = 'RETURN_';
+
+/**
  * Per-code flags for each profit issue.
  *
  * `blocking` makes the order NOT_COMPUTABLE (see `deriveProfitStatus`); a non-blocking
  * one stays a visible warning. An unmapped marketplace record is deliberately
  * non-blocking so a new record type does not turn every order "not computable" at once.
  * An ambiguous record match is a warning for the same reason: like an unmapped record,
- * it leaves the order's own estimate intact. A not-recognized carrier and a
- * seller-cargo-agreement estimate are warnings too: the order still carries a shipping
- * line (a zero or a tariff-based estimate), so the profit stays computable.
+ * it leaves the order's own estimate intact. A seller-cargo-agreement estimate is a
+ * warning too: the order still carries a tariff-based (or zero) shipping line, so the
+ * profit stays computable.
  *
- * `settlementGap` marks a settlement-required slot the engine left without any line,
- * because it could neither estimate it nor read an actual for it (it could not estimate
- * shipping or resolve a commission rate). With no line in that slot nothing is "pending",
- * so without this flag reconciliation would read FULLY_SETTLED even though the real
- * record never arrived; it instead holds reconciliation at PARTIALLY_SETTLED (see
- * `deriveReconciliationStatus`). Every settlement-gap code is also blocking.
+ * A not-recognized carrier on a Trendyol-contract order is blocking: the order gets no
+ * shipping line at all (the engine cannot price a carrier it does not know). A
+ * seller-cargo-agreement order never records it (design 6.13). Missing reference data (a
+ * fee definition or a micro-export return tier absent on the order date) is blocking as
+ * well: the fee it would have priced is left out, so the total is not trustworthy.
+ *
+ * `settlementGap` marks a settlement-required slot the engine may have left without any
+ * line, because it could neither estimate it nor read an actual for it (it could not
+ * estimate shipping, recognize the order's carrier, resolve a commission rate, or read the
+ * fee definition that gives the commission or shipping its VAT rate). With no line in
+ * that slot nothing is "pending", so without this flag reconciliation would read
+ * FULLY_SETTLED even though the real record never arrived; it instead holds
+ * reconciliation at PARTIALLY_SETTLED (see `deriveReconciliationStatus`). Every
+ * settlement-gap code is also blocking. Missing reference data is a gap whichever fee it
+ * names: no marketplace record fills it, only the reference data itself, so it holds
+ * reconciliation until the data is added.
+ *
+ * Which issues a statement view keeps is decided per view (see `issuesForView`): in the
+ * best-known view a cargo invoice lifts the shipping causes of its own leg.
  */
 export const PROFIT_ISSUE_CATALOG = {
   MISSING_COST: { blocking: true, settlementGap: false },
@@ -35,8 +55,9 @@ export const PROFIT_ISSUE_CATALOG = {
   UNMAPPED_MARKETPLACE_RECORD: { blocking: false, settlementGap: false },
   MISSING_COMMISSION_RATE: { blocking: true, settlementGap: true },
   AMBIGUOUS_RECORD_MATCH: { blocking: false, settlementGap: false },
-  CARRIER_NOT_RECOGNIZED: { blocking: false, settlementGap: false },
+  CARRIER_NOT_RECOGNIZED: { blocking: true, settlementGap: true },
   SELLER_CARGO_AGREEMENT_ESTIMATE: { blocking: false, settlementGap: false },
+  REFERENCE_DATA_MISSING: { blocking: true, settlementGap: true },
 } as const satisfies Record<
   ProfitIssueCode,
   { readonly blocking: boolean; readonly settlementGap: boolean }

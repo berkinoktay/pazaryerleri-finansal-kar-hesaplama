@@ -73,6 +73,7 @@ function reference(): TrendyolReferenceData {
       ownTariffNet: new Map(),
       // A scenario base is a non-order context: the carrier field alone decides.
       orderCarrierOutcome: null,
+      tariffVersionMissing: false,
     },
     commission: { categoryRatePct: new Map(), categoryBrandRatePct: new Map() },
   };

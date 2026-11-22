@@ -24,7 +24,8 @@ const PERCENT = new Decimal(100);
  * sum of the active items' sale amounts (list minus seller discount; a
  * marketplace-funded discount is not deducted). Item shares are allocated later by
  * the catalog's SALE_SHARE rule, not here. The line is ESTIMATE / RULE at PARCEL
- * level in Turkish lira.
+ * level in Turkish lira. A missing INTERNATIONAL_SERVICE definition (a null rate or VAT
+ * rate; the loader recorded REFERENCE_DATA_MISSING) writes no line.
  */
 export function estimateInternationalServiceLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -33,6 +34,11 @@ export function estimateInternationalServiceLine(params: {
   const { snapshot, fees } = params;
 
   if (!snapshot.isExportSale) {
+    return null;
+  }
+  const ratePct = fees.internationalServiceRatePct;
+  const vatRatePct = fees.internationalServiceVatRatePct;
+  if (ratePct === null || vatRatePct === null) {
     return null;
   }
 
@@ -46,14 +52,14 @@ export function estimateInternationalServiceLine(params: {
     base = base.add(item.saleGross);
   }
 
-  const gross = roundMoney(base.mul(fees.internationalServiceRatePct).div(PERCENT));
+  const gross = roundMoney(base.mul(ratePct).div(PERCENT));
   if (gross.equals(ZERO)) {
     return null;
   }
 
   const amount: LineMoney = {
     gross,
-    vat: vatFromGross(gross, fees.internationalServiceVatRatePct),
+    vat: vatFromGross(gross, vatRatePct),
   };
 
   return createProfitLine({
@@ -63,10 +69,10 @@ export function estimateInternationalServiceLine(params: {
     certainty: ProfitLineCertainty.ESTIMATE,
     source: ProfitLineSource.RULE,
     amount,
-    vatRatePct: fees.internationalServiceVatRatePct,
+    vatRatePct,
     inputs: {
       base: base.toFixed(2),
-      ratePct: fees.internationalServiceRatePct.toString(),
+      ratePct: ratePct.toString(),
     },
     externalRecord: null,
   });

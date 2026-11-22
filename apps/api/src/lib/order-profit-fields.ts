@@ -9,7 +9,10 @@ import {
 /**
  * The statement columns the orders list and summary read. Kept narrow so the
  * list query stays cheap: the engine's rolled-up sale / output VAT / net profit /
- * margins plus the reconciliation status, per statement view.
+ * margins plus the reconciliation status, per statement view. `issues` feeds the
+ * row's profit blockers (`storedProfitBlockers`), read from the best-known view: a
+ * relation select cannot narrow a column per view, so the estimate row carries it too,
+ * but only a NOT_COMPUTABLE best-known row's value is ever parsed.
  */
 export const STATEMENT_LIST_SELECT = {
   view: true,
@@ -20,6 +23,7 @@ export const STATEMENT_LIST_SELECT = {
   saleMarginPct: true,
   costMarkupPct: true,
   reconciliationStatus: true,
+  issues: true,
 } as const satisfies Prisma.OrderProfitStatementSelect;
 
 export type StatementListRow = Prisma.OrderProfitStatementGetPayload<{

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeLine } from '../../__tests__/helpers/make-profit-line';
 import { PROFIT_ENGINE_VERSION } from '../engine-version';
+import { type ProfitIssue } from '../profit-issue';
 import { type ProfitLine } from '../profit-line';
 import {
   computeProfitStatement,
@@ -140,5 +141,96 @@ describe('computeProfitStatement', () => {
           .equals(s.netProfit ?? new Decimal(NaN)),
       ).toBe(true);
     }
+  });
+});
+
+describe('computeProfitStatement per-view issues', () => {
+  /** basic() without its shipping estimate: the leg the engine could not price. */
+  const withoutShippingEstimate = (): ProfitLine[] =>
+    basic().filter((line) => line.type !== ProfitLineType.SHIPPING);
+  const outboundInvoice = (): ProfitLine =>
+    makeLine({
+      type: ProfitLineType.SHIPPING,
+      gross: '9',
+      vat: '1.50',
+      certainty: ProfitLineCertainty.ACTUAL,
+      source: ProfitLineSource.CARGO_INVOICE,
+    });
+  const returnInvoice = (): ProfitLine =>
+    makeLine({
+      type: ProfitLineType.RETURN_SHIPPING,
+      gross: '4',
+      vat: '0.50',
+      certainty: ProfitLineCertainty.ACTUAL,
+      source: ProfitLineSource.CARGO_INVOICE,
+    });
+  const carrierNotRecognized: ProfitIssue = {
+    code: ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+    orderItemId: null,
+    detail: 'Yeni Kargo Marketplace',
+  };
+
+  it('lets an outbound cargo invoice lift a not-recognized carrier in the best-known view', () => {
+    const lines = [...withoutShippingEstimate(), outboundInvoice()];
+    const issues = [carrierNotRecognized];
+
+    const bestKnown = statementOf(lines, { issues });
+    // The sale and commission are still estimates, so the invoice alone settles partially.
+    expect(bestKnown.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+    expect(bestKnown.netProfit?.toFixed(2)).toBe('31.50');
+    expect(bestKnown.issues).toEqual([]);
+
+    // The estimate view is the order-time estimate: it still cannot price the shipping.
+    const estimate = statementOf(lines, { issues, view: 'ESTIMATE' });
+    expect(estimate.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(estimate.netProfit).toBeNull();
+    expect(estimate.issues).toEqual(issues);
+  });
+
+  it('lets an outbound cargo invoice lift an outbound shipping estimate cause', () => {
+    const lines = [...withoutShippingEstimate(), outboundInvoice()];
+    const issues: ProfitIssue[] = [
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'DESI_OVERFLOW',
+      },
+    ];
+
+    expect(statementOf(lines, { issues }).status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(statementOf(lines, { issues, view: 'ESTIMATE' }).status).toBe(
+      ProfitStatus.NOT_COMPUTABLE,
+    );
+  });
+
+  it('lets a return cargo invoice lift only the return shipping cause', () => {
+    const returnCause: ProfitIssue = {
+      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+      orderItemId: null,
+      detail: 'RETURN_UNKNOWN_DESI',
+    };
+
+    const lifted = statementOf([...basic(), returnInvoice()], { issues: [returnCause] });
+    expect(lifted.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(lifted.issues).toEqual([]);
+
+    // An outbound invoice is not the return leg's invoice.
+    const crossLeg = statementOf([...withoutShippingEstimate(), outboundInvoice()], {
+      issues: [returnCause],
+    });
+    expect(crossLeg.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(crossLeg.issues).toEqual([returnCause]);
+  });
+
+  it('keeps a cause that is not about the cargo even with both invoices', () => {
+    const lines = [...withoutShippingEstimate(), outboundInvoice(), returnInvoice()];
+    const issues: ProfitIssue[] = [
+      carrierNotRecognized,
+      { code: ProfitIssueCode.REFERENCE_DATA_MISSING, orderItemId: null, detail: 'FEE:STOPPAGE' },
+    ];
+
+    const bestKnown = statementOf(lines, { issues });
+    expect(bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(bestKnown.issues).toEqual([issues[1]]);
   });
 });

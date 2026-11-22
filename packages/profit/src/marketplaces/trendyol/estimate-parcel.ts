@@ -89,13 +89,18 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
   const sellerCost = buildSellerCostLines({ snapshot, costs });
   lines.push(...sellerCost.lines);
 
-  // 4. Stoppage lines (from the sale lines).
-  const stoppageLines = buildStoppageLines({
-    saleLines,
-    ratePct: reference.fees.stoppageRatePct,
-    isExportSale: snapshot.isExportSale,
-  });
-  lines.push(...stoppageLines);
+  // 4. Stoppage lines (from the sale lines). A missing STOPPAGE definition (a null rate;
+  // the loader recorded REFERENCE_DATA_MISSING) writes none.
+  const stoppageRatePct = reference.fees.stoppageRatePct;
+  if (stoppageRatePct !== null) {
+    lines.push(
+      ...buildStoppageLines({
+        saleLines,
+        ratePct: stoppageRatePct,
+        isExportSale: snapshot.isExportSale,
+      }),
+    );
+  }
 
   // 5. Platform service fee.
   const serviceFeeLine = estimateServiceFeeLine({ snapshot, attributes, fees: reference.fees });
@@ -130,6 +135,7 @@ export function estimateTrendyolParcel(input: TrendyolEstimateInput): EstimateRe
       reference,
       // The forward leg's Barem table decides whether the return may be priced at table 1.
       outboundBaremTier: shipping.outboundBaremTier,
+      usesSellerCargoAgreement: attributes.usesSellerCargoAgreement,
     });
     lines.push(...returns.lines);
     returnIssues = returns.issues;

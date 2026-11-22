@@ -37,7 +37,8 @@ type ServiceFeeTier = (typeof SERVICE_FEE_TIER)[keyof typeof SERVICE_FEE_TIER];
  * day: `fastDeliveryType === TRENDYOL_SAME_DAY_SHIPPING_TYPE` and
  * `inferShippedSameDay(...) !== false` (an unknown ship date stays optimistic).
  * Otherwise the standard tier (`psfStandardNet`) applies. A zero gross writes no
- * line. Lines are ESTIMATE / RULE in Turkish lira.
+ * line, and neither does a missing definition (a null net or VAT rate; the loader
+ * recorded REFERENCE_DATA_MISSING). Lines are ESTIMATE / RULE in Turkish lira.
  */
 export function estimateServiceFeeLine(params: {
   readonly snapshot: ParcelSnapshot;
@@ -67,15 +68,19 @@ export function estimateServiceFeeLine(params: {
 
   const tier: ServiceFeeTier = isSameDay ? SERVICE_FEE_TIER.SAME_DAY : SERVICE_FEE_TIER.STANDARD;
   const net = isSameDay ? fees.psfSameDayNet : fees.psfStandardNet;
+  const vatRatePct = fees.psfVatRatePct;
+  if (net === null || vatRatePct === null) {
+    return null;
+  }
 
-  const gross = grossFromNet(net, fees.psfVatRatePct);
+  const gross = grossFromNet(net, vatRatePct);
   if (gross.equals(ZERO)) {
     return null;
   }
 
   const amount: LineMoney = {
     gross,
-    vat: vatFromGross(gross, fees.psfVatRatePct),
+    vat: vatFromGross(gross, vatRatePct),
   };
 
   return createProfitLine({
@@ -85,7 +90,7 @@ export function estimateServiceFeeLine(params: {
     certainty: ProfitLineCertainty.ESTIMATE,
     source: ProfitLineSource.RULE,
     amount,
-    vatRatePct: fees.psfVatRatePct,
+    vatRatePct,
     inputs: {
       tier,
       net: net.toFixed(2),

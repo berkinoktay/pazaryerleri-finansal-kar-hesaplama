@@ -3782,11 +3782,6 @@
       "description": "{count, plural, other {# iade talebi}} işlendi; kâr dökümündeki tutarlar iade sonrası net gösterilir."
     },
     "profitIssues": {
-      "unknownCarrier": "bilinmeyen taşıyıcı",
-      "CARRIER_NOT_RECOGNIZED": {
-        "title": "Kargo tahmini 0 TL",
-        "description": "Trendyol'un bildirdiği taşıyıcı ({providerName}) tanınmadığı için kargo tahmini yapılamadı. Kargo faturası gelince gerçek tutar bu siparişe yansır."
-      },
       "SELLER_CARGO_AGREEMENT_ESTIMATE": {
         "title": "Kargo tutarı tahmin olarak kalacak",
         "description": "Bu sipariş kendi kargo anlaşmanla gönderildi; Trendyol bunun için kargo faturası kesmez. Gerçek tutarı görmek için kargo ayarlarından kendi tarifeni gir."
@@ -3816,7 +3811,7 @@
       "margin": "Kâr Marjı",
       "profitCostRatio": "Kâr/Maliyet Oranı",
       "estimateHint": "Tahmini değer — kesin tutar mutabakat (settlement) sonrasında netleşir.",
-      "pendingHint": "{count} sipariş maliyet ya da desi bekliyor — kâra henüz dahil değil"
+      "pendingHint": "{count} sipariş bekliyor — kâra henüz dahil değil"
     },
     "chart": {
       "title": "Saatlik Kümülatif",
@@ -3898,7 +3893,32 @@
       "detail": "Detayı gör",
       "burstTitle": "{count} yeni sipariş geldi",
       "catchupTitle": "Siz yokken {count} yeni sipariş geldi",
-      "tabBadge": "🛍️ {count, plural, one {Yeni sipariş geldi!} other {# yeni sipariş geldi!}}"
+      "tabBadge": "🛍️ {count, plural, one {Yeni sipariş geldi!} other {# yeni sipariş geldi!}}",
+      "notComputableLine": "Kâr henüz hesaplanamadı; sebebi sipariş detayında"
+    }
+  },
+  "profitBlockers": {
+    "badge": "Hesaplanamadı",
+    "title": "Kâr hesaplanamadı",
+    "unknownCarrier": "bilinmeyen kargo firması",
+    "reasons": {
+      "CARRIER_NOT_RECOGNIZED": "Kargo firması tanınmadı ({providerName}). Kargo faturası gelince ya da firma tanımlanınca kâr hesaplanır.",
+      "SHIPPING_ESTIMATE_UNAVAILABLE": {
+        "NO_TARIFF_VERSION": "Kargo firmasının sipariş tarihinde geçerli tarifesi yok. Kargo faturası gelince kâr hesaplanır.",
+        "DESI_OVERFLOW": "Ürünün desisi kargo tarifesinin üst sınırını aşıyor. Kargo faturası gelince kâr hesaplanır.",
+        "UNKNOWN_DESI": "Siparişteki ürünün desisi bilinmiyor.",
+        "NO_CARRIER": "Siparişin kargo firması belirlenemedi. Kargo faturası gelince kâr hesaplanır.",
+        "OWN_CONTRACT_EMPTY": "Kendi kargo tarifende bu desinin fiyatı yok.",
+        "RETURN_CARRIER_NOT_RECOGNIZED": "İade kargosu tahmin edilemedi: kargo firması tanınmadı. İade kargo faturası gelince ya da firma tanımlanınca kâr hesaplanır.",
+        "RETURN": "İade kargosunun tutarı tahmin edilemedi. İade kargo faturası gelince kâr hesaplanır.",
+        "other": "Kargo gideri tahmin edilemedi. Kargo faturası gelince kâr hesaplanır."
+      },
+      "REFERENCE_DATA_MISSING": {
+        "EXPORT_RETURN_TIER": "Mikro ihracat iade ücreti için geçerli kademe bulunamadı. Bilgi eklenince kâr hesaplanır.",
+        "other": "Sipariş tarihinde geçerli pazaryeri ücret bilgisi bulunamadı. Bilgi eklenince kâr hesaplanır."
+      },
+      "MISSING_COMMISSION_RATE": "Siparişin komisyon oranı bulunamadı.",
+      "MISSING_COST": "Siparişteki bir ürünün maliyeti bulunamadı."
     }
   }
 }

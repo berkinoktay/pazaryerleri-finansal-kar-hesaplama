@@ -208,8 +208,10 @@ function estimateResult(
 
 /** The first profit badge whose amount contains `amountText` (netProfit distinguishes the pair). */
 function findProfitBadge(amountText: string): HTMLElement {
+  // A null amount's badge leads its accessible name with the reason label, so match the
+  // open hint as the name's ending rather than the whole name.
   const badge = screen
-    .getAllByRole('button', { name: PROFIT_BADGE_LABEL })
+    .getAllByRole('button', { name: (name) => name.endsWith(PROFIT_BADGE_LABEL) })
     .find((button) => button.textContent?.includes(amountText));
   if (badge === undefined) throw new Error(`profit badge with amount "${amountText}" not found`);
   return badge;

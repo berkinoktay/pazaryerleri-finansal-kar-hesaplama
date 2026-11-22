@@ -1488,15 +1488,16 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       },
     });
 
-    await upsertOrderWithSnapshot(
-      store.id,
-      org.id,
-      buildDirectMapped({
+    await upsertOrderWithSnapshot(store.id, org.id, {
+      ...buildDirectMapped({
         platformOrderId: 'est-1',
         barcode: 'EAN13-EST',
         lastModifiedDate: new Date('2026-05-19T11:00:00Z'),
       }),
-    );
+      // The order names the seeded SENDEOMP carrier: an order never uses the store
+      // default, and an unrecognized carrier blocks the profit (engine v12).
+      cargoProviderName: 'Kolay Gelsin Marketplace',
+    });
     const order = await prisma.order.findFirstOrThrow({
       where: { storeId: store.id, platformOrderId: 'est-1' },
     });

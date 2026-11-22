@@ -31,6 +31,12 @@ export interface OrderProfitSummaryProps {
   breakdown: ProfitBreakdownData | null;
   promotionDisplays?: PromotionDisplay[] | null;
   isExportSale?: boolean;
+  /**
+   * Leave out the generic "not calculated" text when there is no breakdown, keeping
+   * only the card header (title + micro-export badge). For a not-computable profit
+   * whose blocker alert already explains why. No effect when a breakdown exists.
+   */
+  hideUnavailableText?: boolean;
 }
 
 /**
@@ -46,6 +52,7 @@ export function OrderProfitSummary({
   breakdown,
   promotionDisplays,
   isExportSale = false,
+  hideUnavailableText = false,
 }: OrderProfitSummaryProps): React.ReactElement {
   const t = useTranslations('profitBreakdown');
   const formatter = useFormatter();
@@ -60,18 +67,27 @@ export function OrderProfitSummary({
   const allocation = breakdown === null ? null : buildProfitAllocation(breakdown);
   const hasReturn = breakdown !== null && breakdown.returnShippingGross !== '0.00';
 
+  const header = (
+    <CardHeader>
+      <div className="gap-xs flex flex-wrap items-center">
+        <CardTitle>{t('title')}</CardTitle>
+        {isExportSale ? (
+          <Badge tone="neutral" size="sm">
+            {t('microExport')}
+          </Badge>
+        ) : null}
+      </div>
+    </CardHeader>
+  );
+
+  // Header only (no empty padded body) when the caller explains the missing breakdown.
+  if (breakdown === null && hideUnavailableText) {
+    return <Card>{header}</Card>;
+  }
+
   return (
     <Card>
-      <CardHeader>
-        <div className="gap-xs flex flex-wrap items-center">
-          <CardTitle>{t('title')}</CardTitle>
-          {isExportSale ? (
-            <Badge tone="neutral" size="sm">
-              {t('microExport')}
-            </Badge>
-          ) : null}
-        </div>
-      </CardHeader>
+      {header}
       <CardContent className="gap-lg flex flex-col">
         {breakdown === null || allocation === null ? (
           <p className="text-muted-foreground text-sm">{t('unavailable')}</p>

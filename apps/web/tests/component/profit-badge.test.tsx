@@ -68,9 +68,38 @@ describe('ProfitBadge', () => {
         emptyLabel="Maliyet girin"
       />,
     );
-    const button = screen.getByRole('button', { name: OPEN_LABEL });
+    const button = screen.getByRole('button');
     expect(button).toHaveTextContent('Maliyet girin');
     expect(button).not.toHaveTextContent('—');
+  });
+
+  it('announces the emptyLabel cause before the open hint in the accessible name', () => {
+    // The aria-label overrides the visible text, so the cause must be part of it or a
+    // screen reader never hears why the amount is missing.
+    render(
+      <ProfitBadge
+        value={null}
+        marginPct={null}
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="cause"
+      />,
+    );
+    expect(screen.getByRole('button')).toHaveAccessibleName(`cause, ${OPEN_LABEL}`);
+  });
+
+  it('keeps the plain open hint as the accessible name when an amount hides the emptyLabel', () => {
+    // Campaign cells pass emptyLabel on every row; a row with an amount never shows it.
+    render(
+      <ProfitBadge
+        value="212.87"
+        marginPct="19.35"
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="cause"
+      />,
+    );
+    expect(screen.getByRole('button')).toHaveAccessibleName(OPEN_LABEL);
   });
 
   it('paints the emptyLabel empty state as a warning-soft chip (bg-warning-surface text-warning)', () => {
@@ -84,9 +113,27 @@ describe('ProfitBadge', () => {
         emptyLabel="Maliyet girin"
       />,
     );
-    const chip = screen.getByRole('button', { name: OPEN_LABEL }).firstElementChild as HTMLElement;
-    expect(chip.className).toContain('bg-warning-surface');
-    expect(chip.className).toContain('text-warning');
+    const button = screen.getByRole('button');
+    expect(button.firstElementChild).toHaveClass('bg-warning-surface', 'text-warning');
+  });
+
+  it('shows a custom tooltip instead of the default click hint when one is given', async () => {
+    // A surface with a specific cause (the not-computable reasons) explains it on hover;
+    // without the prop every other surface keeps the default click hint.
+    render(
+      <ProfitBadge
+        value={null}
+        marginPct={null}
+        scale={null}
+        onOpen={vi.fn()}
+        emptyLabel="cause"
+        tooltip="cause-detail"
+      />,
+    );
+    screen.getByRole('button', { name: `cause, ${OPEN_LABEL}` }).focus();
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent('cause-detail');
+    expect(tip).not.toHaveTextContent(trMessages.profitBadge.tooltip);
   });
 
   it('keeps the default em-dash empty state a mute neutral chip (no warning tone)', () => {

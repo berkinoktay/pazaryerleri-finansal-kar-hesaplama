@@ -24,6 +24,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
+import { TRENDYOL_CARGO_RETURN_ITEM_TYPE } from '../../marketplaces/trendyol/settlement-records';
 import { ParcelNotFoundError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
@@ -501,10 +502,10 @@ describe('recomputeParcelProfit', () => {
     );
   });
 
-  it('replaces the zero estimate of an unrecognized carrier with a later cargo invoice', async () => {
-    // Trendyol named a carrier we cannot recognize, so the forward estimate is a zero
-    // SHIPPING line. When the cargo invoice arrives it writes an ACTUAL SHIPPING line and
-    // the statement selects it, so the real cost (98.34) replaces the zero estimate.
+  it('writes the cargo invoice of an unrecognized carrier as the only shipping line', async () => {
+    // Trendyol named a carrier we cannot recognize, so there is no forward estimate (the
+    // order is blocked by CARRIER_NOT_RECOGNIZED). When the cargo invoice arrives it writes
+    // an ACTUAL SHIPPING line with the real cost (98.34), the only SHIPPING line.
     const tracking = BigInt('7335551111');
     const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
     await prisma.order.update({
@@ -519,13 +520,207 @@ describe('recomputeParcelProfit', () => {
     const shippingLines = await prisma.profitLine.findMany({
       where: { orderId: parcel.orderId, type: ProfitLineType.SHIPPING },
     });
-    const estimate = shippingLines.find((line) => line.certainty === ProfitLineCertainty.ESTIMATE);
-    const actual = shippingLines.find((line) => line.certainty === ProfitLineCertainty.ACTUAL);
-    // The zero estimate stays recorded (with its reason) while the ACTUAL cargo invoice
-    // supplies the real amount that the statement selects.
-    expect(estimate?.amountGross.toFixed(2)).toBe('0.00');
-    expect(estimate?.inputs).toMatchObject({ reason: 'CARRIER_NOT_RECOGNIZED' });
-    expect(actual?.amountGross.toFixed(2)).toBe('98.34');
+    expect(shippingLines.map((line) => line.certainty)).toEqual([ProfitLineCertainty.ACTUAL]);
+    expect(shippingLines[0]?.amountGross.toFixed(2)).toBe('98.34');
+
+    // The invoice fills the shipping slot, so the best-known view drops the carrier cause
+    // and computes; with the sale still an estimate it settles only partially. The
+    // estimate view keeps the cause and stays not computable.
+    expect(result.bestKnown.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+    expect(result.bestKnown.netProfit).not.toBeNull();
+    const statements = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    const bestKnownRow = statements.find((row) => row.view === ProfitStatementView.BEST_KNOWN);
+    const estimateRow = statements.find((row) => row.view === ProfitStatementView.ESTIMATE);
+    expect(bestKnownRow?.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+    expect(issueCodesOf(bestKnownRow?.issues ?? null)).not.toContain(
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+    );
+    expect(estimateRow?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(issueCodesOf(estimateRow?.issues ?? null)).toContain(
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+    );
+  });
+
+  it('computes the best-known view of an unrecognized carrier once the sale and cargo invoice land', async () => {
+    // A Trendyol-agreement order whose carrier name we do not recognize, with its cost,
+    // its sale-cycle records and its 98.34 cargo invoice. The invoice is the real cost of
+    // the shipping leg the engine could not estimate, so the best-known view no longer
+    // carries the carrier cause: it settles at the golden 191.79 (the invoice equals the
+    // golden shipping estimate). The estimate view is the order-time estimate and keeps it.
+    const tracking = BigInt('7335553333');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Yeni Kargo Marketplace' },
+    });
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+    await insertFinanceRecord(melontikCargoInvoiceInput(parcel, tracking.toString()));
+
+    const result = await recompute(parcel.organizationId, parcel.orderId);
+    expect(result.changed).toBe(true);
+    expect(result.bestKnown.status).toBe(ProfitStatus.SETTLED);
+    expect(result.bestKnown.netProfit?.toFixed(2)).toBe('191.79');
+    // The invoice is the only shipping line, so it is the one the best-known view selects.
+    const shippingLines = await prisma.profitLine.findMany({
+      where: { orderId: parcel.orderId, type: ProfitLineType.SHIPPING },
+    });
+    expect(shippingLines.map((line) => line.source)).toEqual([ProfitLineSource.CARGO_INVOICE]);
+
+    // Each stored statement keeps its own issue list.
+    const statements = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    const bestKnownRow = statements.find((row) => row.view === ProfitStatementView.BEST_KNOWN);
+    const estimateRow = statements.find((row) => row.view === ProfitStatementView.ESTIMATE);
+    expect(bestKnownRow?.status).toBe(ProfitStatus.SETTLED);
+    expect(bestKnownRow?.reconciliationStatus).toBe(ReconciliationStatus.FULLY_SETTLED);
+    expect(bestKnownRow?.netProfit?.toFixed(2)).toBe('191.79');
+    expect(issueCodesOf(bestKnownRow?.issues ?? null)).toEqual([]);
+    expect(estimateRow?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(estimateRow?.netProfit).toBeNull();
+    expect(issueCodesOf(estimateRow?.issues ?? null)).toEqual([
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+    ]);
+  });
+
+  it('keeps the best-known view of an unrecognized carrier not computable until its return cargo invoice lands too', async () => {
+    // A Trendyol-agreement order whose carrier name we do not recognize, with an accepted
+    // return of item A and its outbound cargo invoice. The invoice lifts the forward cause
+    // in the best-known view, but the return leg has no line and keeps its own cause: the
+    // return shipping must not read as a known zero. Once the return cargo invoice lands,
+    // the best-known view computes; the estimate view keeps both causes.
+    const tracking = BigInt('7335556666');
+    const returnTracking = BigInt('7335557777');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    await prisma.order.update({
+      where: { id: parcel.orderId },
+      data: { cargoProviderName: 'Yeni Kargo Marketplace' },
+    });
+    const claim = await prisma.orderClaim.create({
+      data: {
+        organizationId: parcel.organizationId,
+        storeId: parcel.storeId,
+        orderId: parcel.orderId,
+        marketplaceClaimId: 'claim-return-a',
+        claimDate: new Date(),
+        cargoTrackingNumber: returnTracking,
+        resolved: false,
+      },
+    });
+    await prisma.orderClaimItem.create({
+      data: {
+        claimId: claim.id,
+        orderItemId: parcel.itemA,
+        marketplaceClaimItemId: 'claim-item-a',
+        reasonCode: 'DAMAGEDITEM',
+        reasonName: 'reason',
+        status: 'Accepted',
+        acceptedBySeller: true,
+        resolved: true,
+      },
+    });
+    await insertFinanceRecord(melontikCargoInvoiceInput(parcel, tracking.toString()));
+
+    const returnCause = {
+      code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+      orderItemId: null,
+      detail: 'RETURN_CARRIER_NOT_RECOGNIZED',
+    };
+    const returnShippingSources = async (): Promise<ProfitLineSource[]> => {
+      const rows = await prisma.profitLine.findMany({
+        where: { orderId: parcel.orderId, type: ProfitLineType.RETURN_SHIPPING },
+        select: { source: true },
+      });
+      return rows.map((row) => row.source);
+    };
+
+    const outboundOnly = await recompute(parcel.organizationId, parcel.orderId);
+    expect(outboundOnly.changed).toBe(true);
+    expect(outboundOnly.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(outboundOnly.bestKnown.netProfit).toBeNull();
+    expect(await returnShippingSources()).toEqual([]);
+    const blocked = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    expect(blocked.find((row) => row.view === ProfitStatementView.BEST_KNOWN)?.issues).toEqual([
+      returnCause,
+    ]);
+    expect(
+      issueCodesOf(
+        blocked.find((row) => row.view === ProfitStatementView.ESTIMATE)?.issues ?? null,
+      ),
+    ).toEqual([
+      ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+      ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+    ]);
+
+    // The return cargo invoice is matched through the claim's cargo tracking number.
+    await insertFinanceRecord({
+      storeId: parcel.storeId,
+      organizationId: parcel.organizationId,
+      family: 'CARGO_INVOICE_ITEM',
+      transactionType: TRENDYOL_CARGO_RETURN_ITEM_TYPE,
+      recordId: 'cargo-return-1',
+      parcelUniqueId: returnTracking.toString(),
+      invoiceSerial: 'INV2',
+      amountGross: '93.05',
+      desi: '1',
+    });
+
+    const bothInvoiced = await recompute(parcel.organizationId, parcel.orderId);
+    expect(bothInvoiced.changed).toBe(true);
+    expect(bothInvoiced.bestKnown.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(bothInvoiced.bestKnown.netProfit).not.toBeNull();
+    expect(await returnShippingSources()).toEqual([ProfitLineSource.CARGO_INVOICE]);
+    const computed = await prisma.orderProfitStatement.findMany({
+      where: { orderId: parcel.orderId },
+    });
+    expect(computed.find((row) => row.view === ProfitStatementView.BEST_KNOWN)?.issues).toEqual([]);
+    const estimateRow = computed.find((row) => row.view === ProfitStatementView.ESTIMATE);
+    expect(estimateRow?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(estimateRow?.issues).toContainEqual(returnCause);
+  });
+
+  it('computes the best-known view of a shipping leg past the tariff once its cargo invoice lands', async () => {
+    // Both items weigh 5 desi, so the 10-desi parcel is past the carrier's last desi row
+    // (2) and the shipping estimate is unavailable. The desi is set before the first
+    // recompute because the order snapshot is taken then. The cargo invoice lifts the
+    // outbound cause in the best-known view only.
+    const tracking = BigInt('7335554444');
+    const parcel = await seedMelontikParcel({ cargoTrackingNumber: tracking });
+    await prisma.productVariant.updateMany({
+      where: { id: { in: [parcel.variantA, parcel.variantB] } },
+      data: { syncedDimensionalWeight: '5' },
+    });
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+    await insertFinanceRecord(melontikCargoInvoiceInput(parcel, tracking.toString()));
+
+    const result = await recompute(parcel.organizationId, parcel.orderId);
+    expect(result.changed).toBe(true);
+    expect(result.bestKnown.status).toBe(ProfitStatus.SETTLED);
+    expect(result.bestKnown.netProfit?.toFixed(2)).toBe('191.79');
+
+    const bestKnown = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.BEST_KNOWN },
+    });
+    expect(bestKnown?.issues).toEqual([]);
+    const estimate = await prisma.orderProfitStatement.findFirst({
+      where: { orderId: parcel.orderId, view: ProfitStatementView.ESTIMATE },
+    });
+    expect(estimate?.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(estimate?.issues).toEqual([
+      {
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        orderItemId: null,
+        detail: 'DESI_OVERFLOW',
+      },
+    ]);
   });
 
   it('writes a cancelled parcel without any records as CANCELLED with no lines', async () => {

@@ -31,12 +31,13 @@ import {
   type TrendyolParcelAttributes,
 } from '../marketplaces/trendyol/trendyol-inputs';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
+import { normalizeCargoProviderName } from './normalize-cargo-provider-name';
 import {
   dec,
   decOrNull,
   loadCommissionRulesForCategories,
   loadCostProfilesByVariant,
-  loadFeeParams,
+  loadOrderFeeParams,
   loadPinnedCostProfilesByVersionId,
   loadShippingTariff,
 } from './trendyol-reference-loaders';
@@ -46,8 +47,10 @@ const ZERO = new Decimal(0);
 /**
  * Everything a parcel needs to be driven through the Phase 2A Trendyol module and
  * then written: the pure estimate input, the raw settlement + cargo records for the
- * mapper, the resolved profit settings, the exclusion flag, and the raw rows the
- * loader could not hand to the mapper (non-blocking issues the writer merges in).
+ * mapper, the resolved profit settings, the exclusion flag, and the issues the loader
+ * raised itself (the writer merges them in): a blocking REFERENCE_DATA_MISSING per fee
+ * definition missing on the order date, and a non-blocking one per raw row it could not
+ * hand to the mapper.
  */
 export interface LoadedTrendyolParcel {
   readonly organizationId: string;
@@ -104,20 +107,21 @@ export function reportedProviderName(cargoProviderName: string | null): string |
  * getProviders "Name" ("PTT Kargo Marketplace", ...), which seeds the carrier's
  * `orderCargoNames` -- NOT its short `display_name` ("PTT Kargo"). So a carrier is
  * matched when the order's name equals either its display name OR one of its
- * `orderCargoNames`. Both sides are compared after `trim()` + `toLowerCase()` (a
- * deterministic, non-locale compare).
+ * `orderCargoNames`. Both sides are compared by `normalizeCargoProviderName` (NFC,
+ * Turkish I folding, lowercase, spacing and punctuation collapsed -- a deterministic,
+ * non-locale compare).
  *
  * When exactly one carrier matches it wins. Otherwise the carrier is NOT recognized and
- * the result is null (the store default is never used on an order): a null or blank name,
- * an "Alternative Delivery" / "***" or any other unknown name, AND the ambiguous case
- * where two or more distinct carriers claim the same name (never a silent pick among
- * equals). Inactive carriers are never passed in (the query filters `active = true`), so
- * an inactive namesake is not recognized either.
+ * the result is null (the store default is never used on an order): a null name or one
+ * that normalises to nothing (blank, "***"), an "Alternative Delivery" or any other
+ * unknown name, AND the ambiguous case where two or more distinct carriers claim the same
+ * normalised name (never a silent pick among equals). Inactive carriers are never passed
+ * in (the query filters `active = true`), so an inactive namesake is not recognized either.
  *
- * For an own-contract store the matched carrier still drives Barem eligibility, while
- * the own desi tariff stays store-level -- intended (plan decision 3): the carrier
- * identity decides whether Barem applies, the store's own prices decide the amount. A
- * not-recognized carrier there only means no Barem, never a zero estimate.
+ * An own-contract order does not consult the carrier at all: its outbound and return legs
+ * are priced from the store's own desi tariff, never from the carrier's desi rows or Barem
+ * (`resolveTrendyolShippingNet`), so a not-recognized carrier there raises no carrier
+ * issue and changes no amount. Only a Trendyol-contract order is priced from the carrier.
  */
 export function resolveOrderCarrier(
   cargoProviderName: string | null,
@@ -126,14 +130,14 @@ export function resolveOrderCarrier(
   if (cargoProviderName === null) {
     return null;
   }
-  const normalized = cargoProviderName.trim().toLowerCase();
+  const normalized = normalizeCargoProviderName(cargoProviderName);
   if (normalized === '') {
     return null;
   }
   const matches = carriers.filter(
     (carrier) =>
-      carrier.displayName.trim().toLowerCase() === normalized ||
-      carrier.orderCargoNames.some((name) => name.trim().toLowerCase() === normalized),
+      normalizeCargoProviderName(carrier.displayName) === normalized ||
+      carrier.orderCargoNames.some((name) => normalizeCargoProviderName(name) === normalized),
   );
   // Collapse to distinct carriers: one carrier matching on both its display name and an
   // orderCargoNames entry is still a single match. Zero or 2+ distinct -> not recognized.
@@ -269,11 +273,18 @@ export async function loadTrendyolParcel(
     items: itemAttributes,
   };
 
+  // Issues the loader raises itself: missing reference data (below) and the raw finance
+  // rows it cannot hand to the mapper (further down).
+  const loadIssues: ProfitIssue[] = [];
+
   // --- Reference: fees, shipping, commission rules ---
-  const fees = await loadFeeParams(tx, {
+  // A fee definition missing on the order date never throws here: it becomes a blocking
+  // REFERENCE_DATA_MISSING issue and the fee is left out, so the statement is still written.
+  const fees = await loadOrderFeeParams(tx, {
     orderDate,
     isExport: order.isExportSale,
     fastDeliveryType: order.fastDeliveryType,
+    issues: loadIssues,
   });
   // The order's own carrier (the one Trendyol assigned, named by cargoProviderName)
   // drives the shipping estimate; the store default is never used on an order. When the
@@ -314,7 +325,6 @@ export async function loadTrendyolParcel(
         .filter((barcode): barcode is string => barcode !== null),
     ),
   ];
-  const loadIssues: ProfitIssue[] = [];
   const { records, cargoItems } = await loadFinanceRecords(tx, {
     storeId,
     orderId: order.id,

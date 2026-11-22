@@ -51,19 +51,42 @@ export interface OverseasReturnTier {
   readonly ratePct: Decimal;
 }
 
-/** Fee parameters effective on the order date. Every rate is a percentage. */
-export interface TrendyolFeeParams {
-  readonly psfStandardNet: Decimal;
-  readonly psfSameDayNet: Decimal;
-  readonly psfVatRatePct: Decimal;
-  readonly stoppageRatePct: Decimal;
-  readonly commissionVatRatePct: Decimal;
-  readonly shippingVatRatePct: Decimal;
-  readonly returnShippingVatRatePct: Decimal;
-  readonly internationalServiceRatePct: Decimal; // applied to the VAT-inclusive sale; result is gross
-  readonly internationalServiceVatRatePct: Decimal;
+/**
+ * Fee parameters effective on the order date, with `TMissing` standing for a value whose
+ * fee definition was missing on that date (or lacked the amount it needs): `null` where
+ * the loader carries on without it, `never` where it throws instead. Every rate is a
+ * percentage.
+ */
+export interface TrendyolFeeParamsOf<TMissing extends null> {
+  readonly psfStandardNet: Decimal | TMissing;
+  readonly psfSameDayNet: Decimal | TMissing;
+  readonly psfVatRatePct: Decimal | TMissing;
+  readonly stoppageRatePct: Decimal | TMissing;
+  readonly commissionVatRatePct: Decimal | TMissing;
+  readonly shippingVatRatePct: Decimal | TMissing;
+  readonly returnShippingVatRatePct: Decimal | TMissing;
+  readonly internationalServiceRatePct: Decimal | TMissing; // applied to the VAT-inclusive sale; result is gross
+  readonly internationalServiceVatRatePct: Decimal | TMissing;
   readonly overseasReturnTiers: readonly OverseasReturnTier[];
 }
+
+/**
+ * Fee parameters effective on the order date, as the engine reads them.
+ *
+ * A null value means the fee definition behind it was missing on the order date (or
+ * lacked the amount it needs). Only the order loader produces a null, after recording a
+ * blocking REFERENCE_DATA_MISSING issue for that fee; the scenario loader throws instead
+ * (see `CompleteTrendyolFeeParams`). The engine writes no line that needs a null value
+ * (estimate or actual) and never throws on one.
+ */
+export type TrendyolFeeParams = TrendyolFeeParamsOf<null>;
+
+/**
+ * Fee parameters with every value set: what the scenario loader returns, because it
+ * throws on a missing definition instead of leaving a null. Assignable to
+ * `TrendyolFeeParams`.
+ */
+export type CompleteTrendyolFeeParams = TrendyolFeeParamsOf<never>;
 
 /** A cargo carrier and its barem eligibility. */
 export interface TrendyolShippingCarrier {
@@ -107,6 +130,11 @@ export interface TrendyolShippingTariff {
   readonly ownTariffNet: ReadonlyMap<string, Decimal>;
   // How the order's carrier resolved (null = non-order context: scenario / store default).
   readonly orderCarrierOutcome: TrendyolOrderCarrierOutcome | null;
+  // True when a carrier is set but none of its tariff versions is in force at the instant
+  // (no tariff entered yet, or a date before its first version): its desi and Barem
+  // tariffs are empty and a Trendyol-contract estimate reports NO_TARIFF_VERSION. False
+  // when there is no carrier or a version was found.
+  readonly tariffVersionMissing: boolean;
 }
 
 /** Category and category+brand commission rules. */
