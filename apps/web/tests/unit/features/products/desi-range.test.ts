@@ -55,7 +55,7 @@ describe('desiRange', () => {
     });
   });
 
-  it('counts a Trendyol desi of 0 as a real desi', () => {
+  it('counts a stored desi of 0 as a real desi', () => {
     expect(desiRange([missing('a'), withDesi('b', '0'), withDesi('c', '2')])).toEqual({
       min: '0',
       max: '2',

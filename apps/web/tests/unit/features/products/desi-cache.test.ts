@@ -46,7 +46,7 @@ describe('previewVariantDesi', () => {
     });
   });
 
-  it('clearing the override over a Trendyol desi of 0 falls back to 0, a real desi', () => {
+  it('clearing the override over a stored synced desi of 0 falls back to 0, a real desi', () => {
     const preview = previewVariantDesi(
       makeVariantSummary({
         dimensionalWeight: '2.00',

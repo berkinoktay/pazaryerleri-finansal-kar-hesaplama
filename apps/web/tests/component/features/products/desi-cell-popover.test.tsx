@@ -117,7 +117,7 @@ describe('DesiCellPopover', () => {
     expect(screen.getByText(popover.syncedMissing)).toBeInTheDocument();
   });
 
-  it('treats a Trendyol desi of 0 as a real value: pre-filled "0", hint instead of the note', async () => {
+  it('treats a stored synced desi of 0 as a real value: pre-filled "0", hint instead of the note', async () => {
     const { user } = renderPopover(
       makeVariantSummary({
         id: VARIANT_ID,

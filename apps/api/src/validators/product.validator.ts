@@ -492,8 +492,8 @@ const VariantSummarySchema = z
         description:
           "The marketplace's latest dimensional weight for this variant. Refreshed every sync. " +
           'Independent of any user override. Used by the UI to show the seller what the ' +
-          'marketplace currently reports. Null when the marketplace sent no desi; "0" is a ' +
-          'real desi the marketplace sent.',
+          'marketplace currently reports. Null when the marketplace sent no desi; a Trendyol ' +
+          'desi of 0 (its value for a desi that was never entered) is stored as null too.',
         example: '1.20',
       }),
     isDimensionalWeightOverridden: z.boolean().openapi({

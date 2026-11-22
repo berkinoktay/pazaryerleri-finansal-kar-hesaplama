@@ -33,7 +33,7 @@ function wrap(client: QueryClient) {
 }
 
 // V1 carries an override over no Trendyol desi (clearing it makes it missing
-// again); V2 carries one over a Trendyol desi of 0, a real desi (clearing it
+// again); V2 carries one over a stored synced desi of 0, a real desi (clearing it
 // falls back to 0 and is never missing).
 function seedListCache(client: QueryClient) {
   const key = productKeys.list(ORG_ID, STORE_ID, {

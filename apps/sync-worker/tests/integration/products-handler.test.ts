@@ -829,7 +829,7 @@ describe('processProductsChunk', () => {
     expect(variant.dimensionalWeightOverride?.toString()).toBe('5');
   });
 
-  it('stores an omitted or null dimensionalWeight from Trendyol as null and a 0 as a real 0', async () => {
+  it('stores an omitted, null or 0 dimensionalWeight from Trendyol as null', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);

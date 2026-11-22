@@ -283,7 +283,7 @@ describe('loadTrendyolScenarioBases', () => {
     });
   });
 
-  it('loads a Trendyol desi of 0 as a real unit desi of 0', async () => {
+  it('loads a stored synced desi of 0 as a real unit desi of 0', async () => {
     const parcel = await seedMelontikParcel();
     await prisma.productVariant.update({
       where: { id: parcel.variantA },

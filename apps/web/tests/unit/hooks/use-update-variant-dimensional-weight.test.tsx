@@ -234,7 +234,7 @@ describe('useUpdateVariantDimensionalWeight', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
-  it('optimistically keeps the variant not missing when the override is cleared over a Trendyol desi of 0', async () => {
+  it('optimistically keeps the variant not missing when the override is cleared over a stored synced desi of 0', async () => {
     const client = makeClient();
     const key = seedListCache(client, {
       dimensionalWeight: '2.00',

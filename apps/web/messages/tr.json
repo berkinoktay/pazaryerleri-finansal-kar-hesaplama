@@ -3873,7 +3873,7 @@
       "sheetTitle": "Sipariş ayrıntısı",
       "close": "Kapat",
       "buffer": {
-        "pendingNotice": "Maliyet ve desi bugün 00:00'a kadar girilmeli; biri eksik kalırsa bu sipariş kâr hesabına alınmaz.",
+        "pendingNotice": "Maliyet ve desi gün bitmeden girilmeli; biri eksik kalırsa bu sipariş kâr hesabına alınmaz.",
         "columns": {
           "product": "Ürün",
           "quantity": "Adet",

@@ -1,6 +1,11 @@
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
+import {
+  ProfitExclusionReason,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
@@ -48,6 +53,8 @@ function buildMapped(over: {
   lines?: Array<{ barcode: string; platformLineId: string }>;
   /** Trendyol's cargo-measured desi of the package. Defaults null. */
   cargoDeci?: MappedOrder['cargoDeci'];
+  /** The package ships under the seller's own cargo agreement. Defaults false. */
+  usesSellerCargoAgreement?: boolean;
 }): MappedOrder {
   // GROSS konvansiyon (2026-06-16): MappedOrderLine gross alanlar.
   // lineSaleGross 100 = net 84.75 + KDV 15.25 (%18). Raw commission rate 15%.
@@ -85,7 +92,7 @@ function buildMapped(over: {
     cargoProviderName: null,
     cargoTrackingNumber: null,
     cargoDeci: over.cargoDeci ?? null,
-    usesSellerCargoAgreement: false,
+    usesSellerCargoAgreement: over.usesSellerCargoAgreement ?? false,
     platformCreatedBy: null,
     originShipmentDate: null,
     lines:
@@ -202,6 +209,15 @@ async function clearDesi(storeId: string, barcode: string): Promise<void> {
   await prisma.productVariant.updateMany({
     where: { storeId, barcode },
     data: { syncedDimensionalWeight: null, dimensionalWeightOverride: null },
+  });
+}
+
+// Mark the variant behind `barcode` as digital: it ships no cargo, so it never needs
+// a desi (it still needs a cost).
+async function markDigital(storeId: string, barcode: string): Promise<void> {
+  await prisma.productVariant.updateMany({
+    where: { storeId, barcode },
+    data: { isDigital: true },
   });
 }
 
@@ -620,6 +636,150 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+  });
+
+  // The seller's own cargo agreement does not waive the product desi: the gate reads
+  // the variant's desi whatever carrier contract the package ships under.
+
+  it('buffers a costed but desiless order of today shipped under the seller cargo agreement', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'own-cargo-desiless-today',
+        orderDate: new Date(),
+        usesSellerCargoAgreement: true,
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('excludes a past-day order shipped under the seller cargo agreement with a timely cost but no desi as LATE_DESILESS_ARRIVAL', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = new Date(Date.now() - PAST_DAY_MS);
+    await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'own-cargo-late-desiless',
+        orderDate,
+        usesSellerCargoAgreement: true,
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_desiless_arrival' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe(ProfitExclusionReason.LATE_DESILESS_ARRIVAL);
+  });
+
+  // A digital item ships no cargo, so it never needs a desi (it still needs a cost);
+  // a non-digital item next to it still does.
+
+  it('persists a costed order of today whose only item is a desiless digital variant', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+    await markDigital(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'digital-today', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).toBeNull();
+  });
+
+  it('does not exclude a past-day order whose only item is a desiless digital variant with a timely cost', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = new Date(Date.now() - PAST_DAY_MS);
+    await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
+    await clearDesi(store.id, BARCODE);
+    await markDigital(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'digital-past-day', orderDate }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+  });
+
+  it('buffers an order of today whose digital item needs no desi but whose second, non-digital item has none', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const digitalBarcode = 'EAN13-INTAKE-DIGITAL';
+    const physicalBarcode = 'EAN13-INTAKE-PHYSICAL';
+    await seedVariant(org.id, store.id, digitalBarcode, true);
+    await clearDesi(store.id, digitalBarcode);
+    await markDigital(store.id, digitalBarcode);
+    await seedVariant(org.id, store.id, physicalBarcode, true);
+    await clearDesi(store.id, physicalBarcode);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'digital-plus-desiless',
+        orderDate: new Date(),
+        lines: [
+          { barcode: digitalBarcode, platformLineId: '9001' },
+          { barcode: physicalBarcode, platformLineId: '9002' },
+        ],
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('desi-missing + today but already in orders: persists (idempotent), never buffers', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+    const mapped = buildMapped({ platformOrderId: 'exists-desiless', orderDate: new Date() });
+    // Pre-existing orders row (e.g. written while the variant still had a desi).
+    await prisma.order.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformOrderId: 'exists-desiless',
+        platformOrderNumber: 'ord-exists-desiless',
+        orderDate: new Date(),
+        status: 'PROCESSING',
+      },
+    });
+
+    const outcome = await intakeOrder({ storeId: store.id, organizationId: org.id, mapped });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'already_in_orders' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 
   it('cost-missing + today but already in orders → persists (idempotent), never buffers', async () => {

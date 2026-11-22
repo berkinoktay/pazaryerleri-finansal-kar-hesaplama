@@ -804,9 +804,11 @@ describe('captureOrderProfitSnapshot', () => {
     }
   });
 
-  it('keeps a Trendyol desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {
+  it('keeps a stored synced desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {
     const parcel = await seedSnapshotParcel();
-    // Trendyol sent a real desi of 0 for both variants; the seller corrected neither.
+    // Both variants carry a stored synced desi of 0, a real desi (the mapper stores
+    // a Trendyol 0 as null, but a stored 0 is a real desi); the seller corrected
+    // neither.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: null, syncedDimensionalWeight: '0' },

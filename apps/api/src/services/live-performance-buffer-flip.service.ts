@@ -1,5 +1,9 @@
 import type { Prisma } from '@pazarsync/db';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import {
+  buildCalcCheckLines,
+  resolveOrderCalculability,
+  type OrderLineForCalcCheck,
+} from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 const MALFORMED_ENTRY_LOG =
@@ -27,6 +31,43 @@ function readLineBarcodes(mappedOrder: unknown): string[] | null {
     barcodes.push(barcode);
   }
   return barcodes;
+}
+
+/**
+ * Resolve every distinct barcode once with buildCalcCheckLines (one variant query,
+ * scoped to the organization and store) and key the result by barcode. Its output
+ * is one line per input line, in input order, so each distinct barcode maps to the
+ * line it resolved to, an unresolved barcode included (variantId null).
+ */
+async function resolveCalcLinesByBarcode(
+  tx: Prisma.TransactionClient,
+  args: { organizationId: string; storeId: string; barcodes: readonly string[] },
+): Promise<Map<string, OrderLineForCalcCheck>> {
+  const distinct = [...new Set(args.barcodes)];
+  const lines = await buildCalcCheckLines(tx, {
+    organizationId: args.organizationId,
+    storeId: args.storeId,
+    lines: distinct.map((barcode) => ({ barcode })),
+  });
+  return new Map(lines.map((line) => [line.barcode, line]));
+}
+
+/**
+ * One order's calc-check lines, in its own line order, from the shared lookup; null
+ * when a barcode is missing from it (never the case, since the lookup was built
+ * from every candidate's barcodes), so such an order is simply not flipped.
+ */
+function linesForOrder(
+  lineBarcodes: readonly string[],
+  lineByBarcode: ReadonlyMap<string, OrderLineForCalcCheck>,
+): OrderLineForCalcCheck[] | null {
+  const lines: OrderLineForCalcCheck[] = [];
+  for (const barcode of lineBarcodes) {
+    const line = lineByBarcode.get(barcode);
+    if (line === undefined) return null;
+    lines.push(line);
+  }
+  return lines;
 }
 
 /**
@@ -99,20 +140,31 @@ export async function flipBufferForVariants(
       )
   `;
 
-  const promotableIds: string[] = [];
+  const readable: Array<{ id: string; lineBarcodes: string[] }> = [];
   for (const row of candidates) {
     const lineBarcodes = readLineBarcodes(row.mapped_order);
     if (lineBarcodes === null) {
       console.warn(MALFORMED_ENTRY_LOG, { organizationId, storeId, entryId: row.id });
       continue;
     }
-    const calcLines = await buildCalcCheckLines(tx, {
-      organizationId,
-      storeId,
-      lines: lineBarcodes.map((barcode) => ({ barcode })),
-    });
-    if (resolveOrderCalculability(calcLines).kind === 'calculable') {
-      promotableIds.push(row.id);
+    readable.push({ id: row.id, lineBarcodes });
+  }
+  if (readable.length === 0) return 0;
+
+  // ONE variant query for every candidate's lines: each distinct barcode is
+  // resolved once (same org + store scope), then every order's lines are rebuilt
+  // in its own line order, repeated barcodes included.
+  const lineByBarcode = await resolveCalcLinesByBarcode(tx, {
+    organizationId,
+    storeId,
+    barcodes: readable.flatMap((entry) => entry.lineBarcodes),
+  });
+
+  const promotableIds: string[] = [];
+  for (const entry of readable) {
+    const calcLines = linesForOrder(entry.lineBarcodes, lineByBarcode);
+    if (calcLines !== null && resolveOrderCalculability(calcLines).kind === 'calculable') {
+      promotableIds.push(entry.id);
     }
   }
   if (promotableIds.length === 0) return 0;

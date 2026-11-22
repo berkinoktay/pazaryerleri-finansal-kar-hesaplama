@@ -48,11 +48,15 @@ function nullableDecimalString(value: number | null | undefined): string | null 
 // product whose desi was never entered (seen on the live store: a 50-pack of flags
 // at desi 0), so a wire 0 means "no desi" (Berkin 2026-11-22). A product that
 // really is desi 0 gets it from the seller's override, where 0 is a real value.
-// Desi is a measure, not money; toFixed(2) matches the Decimal(6,2) column like
-// priceToDecimalString.
+// A positive desi that rounds to 0 at 2 decimals (below 0.005) is a 0 too, so a
+// Trendyol 0 is never written. Desi is a measure, not money; toFixed(2) matches
+// the Decimal(6,2) column like priceToDecimalString.
+const ZERO_DESI = '0.00';
+
 function desiDecimalString(value: number | null | undefined): string | null {
   if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) return null;
-  return value.toFixed(2);
+  const rounded = value.toFixed(2);
+  return rounded === ZERO_DESI ? null : rounded;
 }
 
 // One status per variant. Trendyol's four wire flags are independent booleans,

@@ -50,7 +50,7 @@ function syncedDesi(variant: VariantSummary): Decimal | null {
  *
  * Open: the input is pre-filled (see initialInputValue). Below it, a note
  *   says Trendyol has no desi for the product when the synced value is
- *   empty; otherwise the synced value (0 included) is shown for reference
+ *   empty; otherwise the synced value is shown for reference
  *   while the input differs from it.
  * Save: the input is parsed the Turkish way ("1,5" and "1.5" both mean 1.5)
  *   and validated inline; only a valid value is sent, as the dot string

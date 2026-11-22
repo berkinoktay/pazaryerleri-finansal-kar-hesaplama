@@ -69,7 +69,7 @@ describe('DesiCell', () => {
     expect(screen.queryByRole('button', { name: desiCell.addDesi })).toBeNull();
   });
 
-  it('renders a Trendyol desi of 0 as a real value, not as missing desi', () => {
+  it('renders a stored synced desi of 0 as a real value, not as missing desi', () => {
     render(
       <DesiCell
         variant={makeVariant({

@@ -228,7 +228,7 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
   });
 
   it('OK / NORMAL desi-0 — no override, a synced desi of 0', async () => {
-    // Desi 0 is a real desi and a valid tariff tier (Trendyol sent 0). Both
+    // A stored desi of 0 is a real desi and a valid tariff tier. Both
     // paths resolve the desi-0 row (SENDEOMP desi-0 = 91.99), not NO_DESI.
     const carrier = await getSendeomp();
     const fixture = await createVariantFixture({

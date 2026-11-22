@@ -103,7 +103,7 @@ describe('resolveOrderCalculability', () => {
     expect(result).toEqual({ kind: 'skip', reason: 'cost_missing', barcode: 'A', variantId: 'v1' });
   });
 
-  it('a desi of 0 (a real desi Trendyol sent) does not block the order', () => {
+  it('a stored desi of 0 (a real desi) does not block the order', () => {
     const result = resolveOrderCalculability([
       line({ barcode: 'A', variantId: 'v1', unitDesi: '0' }),
     ]);

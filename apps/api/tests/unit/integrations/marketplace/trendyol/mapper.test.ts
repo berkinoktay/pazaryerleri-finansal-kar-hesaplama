@@ -351,7 +351,7 @@ describe('mapTrendyolContent', () => {
     expect(padded.variants[0]?.syncedCommissionRate).toBe('7.80');
   });
 
-  it('maps no desi from Trendyol (absent, null, not a number, negative) to null', () => {
+  it('maps no desi from Trendyol (absent, null, 0, rounds to 0, not a number, negative) to null', () => {
     const variant = STAGING_SAMPLE_DFSF.variants?.[0];
     if (variant === undefined) throw new Error('fixture variant missing');
     const { dimensionalWeight: _droppedDesi, ...variantWithoutDesi } = {
@@ -360,7 +360,9 @@ describe('mapTrendyolContent', () => {
     };
     void _droppedDesi;
     // 0 is in the list: Trendyol sends 0 for a product whose desi was never entered.
-    const wireValues = [null, 0, Number.NaN, Number.POSITIVE_INFINITY, -1];
+    // So is a positive desi that rounds to 0 at 2 decimals (0.004 -> 0.00): a
+    // Trendyol 0 is never written, whichever way it arrives.
+    const wireValues = [null, 0, 0.004, Number.NaN, Number.POSITIVE_INFINITY, -1];
     const outs = [
       mapTrendyolContent({ ...STAGING_SAMPLE_DFSF, variants: [variantWithoutDesi] }),
       ...wireValues.map((dimensionalWeight) =>
@@ -386,8 +388,14 @@ describe('mapTrendyolContent', () => {
       ...STAGING_SAMPLE_DFSF,
       variants: [{ ...variant, dimensionalWeight: 1.5 }],
     });
+    // The smallest desi that does not round to 0 keeps its rounded value.
+    const roundsUp = mapTrendyolContent({
+      ...STAGING_SAMPLE_DFSF,
+      variants: [{ ...variant, dimensionalWeight: 0.005 }],
+    });
     expect(small.variants[0]?.syncedDimensionalWeight).toBe('0.50');
     expect(decimal.variants[0]?.syncedDimensionalWeight).toBe('1.50');
+    expect(roundsUp.variants[0]?.syncedDimensionalWeight).toBe('0.01');
   });
 
   it('collapses absent and zero commission to null', () => {

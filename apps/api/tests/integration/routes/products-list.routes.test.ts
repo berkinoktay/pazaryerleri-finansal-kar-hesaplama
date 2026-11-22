@@ -1125,7 +1125,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
-    // A Trendyol desi of 0 is a real desi, not a missing one.
+    // A stored synced desi of 0 is a real desi, not a missing one.
     expect(byBarcode.get('F-SYNCED-ZERO')).toMatchObject({
       dimensionalWeight: '0',
       syncedDimensionalWeight: '0',

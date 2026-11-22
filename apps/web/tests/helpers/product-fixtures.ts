@@ -11,12 +11,12 @@ import type {
 // in one hand-written copy per test file.
 //
 // Defaults describe one plain variant: on sale, in stock, no cost profile and
-// no shipping estimate. Desi mirrors the wire shape: the default is a desi of 0
-// Trendyol sent, a real desi, so it is NOT flagged missing. A variant without
-// any desi arrives with null desi fields and the backend's missing flag; spread
-// MISSING_DESI_FIELDS to model that "Desi gir" variant (the backend owns the
-// rule). Ids are deterministic; pass explicit ids whenever a test renders
-// several rows that must stay distinct.
+// no shipping estimate. Desi mirrors the wire shape: the default is a stored desi
+// of 0 (the column default; a Trendyol 0 is stored as null), a real desi, so it is
+// NOT flagged missing. A variant without any desi arrives with null desi fields
+// and the backend's missing flag; spread MISSING_DESI_FIELDS to model that
+// "Desi gir" variant (the backend owns the rule). Ids are deterministic; pass
+// explicit ids whenever a test renders several rows that must stay distinct.
 
 const DEFAULT_VARIANT_ID = 'v-1';
 const DEFAULT_PRODUCT_ID = 'p-1';
