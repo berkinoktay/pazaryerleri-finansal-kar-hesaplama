@@ -107,21 +107,34 @@ export function OrderDetailClient({
   const headerTitle = order.platformOrderNumber ?? order.platformOrderId;
 
   // Kâr-dışı banner açıklaması sebebe özel + sade (kâr-dışı liste hücresiyle aynı
-  // `exclusionReasons` kaynağı, tek cümle, jargonsuz). reason null (CHECK gereği
-  // olmamalı) → generic metne düşer. profitExcludedAt null ise banner çizilmez.
+  // `exclusionReasons` kaynağı, tek cümle, jargonsuz). Her sebep açıkça karşılanır;
+  // yeni bir sebep `never` koruması yüzünden derlemeyi kırar; çalışma anında bilinmeyen
+  // bir sebep (API web'den önce yayına çıkarsa) ve reason null (CHECK gereği olmamalı)
+  // generic metne düşer, sayfa hata ekranına düşmez. profitExcludedAt null ise banner
+  // çizilmez.
   const exclusionDescription =
     order.profitExcludedAt === null
       ? null
       : ((): string => {
-          switch (order.profitExclusionReason) {
+          const reason = order.profitExclusionReason;
+          switch (reason) {
+            case null:
+              return t('exclusion.description');
             case 'COST_DEADLINE_MISSED':
               return tReason('COST_DEADLINE_MISSED.detail');
             case 'LATE_UNCOSTED_ARRIVAL':
               return tReason('LATE_UNCOSTED_ARRIVAL.detail');
             case 'LEGACY_BACKFILL':
               return tReason('LEGACY_BACKFILL.detail');
-            default:
+            case 'DESI_DEADLINE_MISSED':
+              return tReason('DESI_DEADLINE_MISSED.detail');
+            case 'LATE_DESILESS_ARRIVAL':
+              return tReason('LATE_DESILESS_ARRIVAL.detail');
+            default: {
+              const _exhaustive: never = reason;
+              void _exhaustive;
               return t('exclusion.description');
+            }
           }
         })();
 

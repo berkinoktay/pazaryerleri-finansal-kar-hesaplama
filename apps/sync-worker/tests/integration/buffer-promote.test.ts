@@ -272,6 +272,46 @@ async function seedLateCostedVariant(
   });
 }
 
+// Leave the variant behind `barcode` with no desi at all (no Trendyol desi, no seller
+// desi). The column default is 0, a REAL desi (plan PR-2c decision 1), so a desiless
+// fixture writes null explicitly.
+async function clearVariantDesi(storeId: string, barcode: string): Promise<void> {
+  await prisma.productVariant.updateMany({
+    where: { storeId, barcode },
+    data: { syncedDimensionalWeight: null, dimensionalWeightOverride: null },
+  });
+}
+
+// Seed a resolvable variant with NO cost and NO desi (both gates open).
+async function seedUncostedDesilessVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+): Promise<void> {
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Test Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+      syncedDimensionalWeight: null,
+    },
+  });
+}
+
 // The commission category of the path-parity test and its Trendyol category rule.
 const PARITY_CATEGORY_ID = 626n;
 const PARITY_CATEGORY_RATE = '19';
@@ -626,6 +666,54 @@ describe('processBufferPromote', () => {
     const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
     expect(after.status).toBe('PENDING');
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('desi removed from a costed today PROMOTING entry → demoted back to PENDING (window still open)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // The cost is in place, but the product's desi was emptied after the flip: the
+    // desi gate re-checks under the lock, so the same-day entry returns to PENDING.
+    await seedCalculableVariant(org.id, store.id, 'EAN13-PROMOTE-NODESI');
+    await clearVariantDesi(store.id, 'EAN13-PROMOTE-NODESI');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-demote-desi',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-demote-desi',
+        barcode: 'EAN13-PROMOTE-NODESI',
+      }),
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('PENDING');
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('graduates a past-day PROMOTING entry with a timely cost but no desi as DESI_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-PROMOTE-PAST-NODESI', orderDate);
+    await clearVariantDesi(store.id, 'EAN13-PROMOTE-PAST-NODESI');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-past-desiless',
+      orderDate,
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-past-desiless',
+        barcode: 'EAN13-PROMOTE-PAST-NODESI',
+      }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
   });
 
   it('promote applies the out-of-order guard: stale buffer snapshot deletes the row but never regresses a newer order', async () => {
@@ -998,6 +1086,55 @@ describe('processPastDayBufferFlush', () => {
       where: { orderId: order.id },
     });
     expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+  });
+
+  it('graduates a costed but desiless buffer entry as DESI_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // The cost came in time, but the product desi was never entered before the
+    // order's day ended (plan PR-2c): the day-end flush stamps the desi reason.
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-NODESI', orderDate);
+    await clearVariantDesi(store.id, 'EAN13-FLUSH-NODESI');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-desiless',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-desiless',
+        barcode: 'EAN13-FLUSH-NODESI',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-desiless');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
+    expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  it('graduates an uncosted and desiless buffer entry as COST_DEADLINE_MISSED (cost wins)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedUncostedDesilessVariant(org.id, store.id, 'EAN13-FLUSH-NOTHING');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-nothing',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-nothing',
+        barcode: 'EAN13-FLUSH-NOTHING',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
   });
 
   it('excludes a past-day entry whose cost arrived after its day at the day-end flush', async () => {

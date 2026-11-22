@@ -57,14 +57,17 @@ import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
  */
 export interface UpsertOrderOpts {
   /**
-   * Cost-window exclusion (Berkin 2026-11-03): when set, the order is stamped
-   * profit-excluded. Written ONLY on a genuine create -- the UPDATE branch omits
-   * both columns, so a later re-delivery of an already-excluded order can never
-   * clear the stamp, and the stale-event case never overwrites it. Only two
-   * callers set it: intake-order's past-day route (LATE_UNCOSTED_ARRIVAL) and the
-   * buffer day-end graduation (COST_DEADLINE_MISSED). The permanence trigger
-   * (Faz 3E, Gorev 3) additionally rejects any attempt to clear or change an
-   * automatic exclusion at the database layer.
+   * Cost-window + desi exclusion (Berkin 2026-11-03, 2026-11-22): when set, the order
+   * is stamped profit-excluded. Written ONLY on a genuine create -- the UPDATE branch
+   * omits both columns, so a later re-delivery of an already-excluded order can never
+   * clear the stamp, and the stale-event case never overwrites it. Only two callers
+   * set it, with four automatic reasons: intake-order's past-day route
+   * (LATE_UNCOSTED_ARRIVAL / LATE_DESILESS_ARRIVAL, or the two deadline reasons when it
+   * graduates a coexisting buffer row) and the buffer day-end graduation
+   * (COST_DEADLINE_MISSED / DESI_DEADLINE_MISSED). The cost reason wins when both the
+   * cost and the desi are missing. The permanence trigger (Faz 3E, Gorev 3)
+   * additionally rejects any attempt to clear or change an automatic exclusion at the
+   * database layer.
    */
   profitExclusion?: { readonly reason: ProfitExclusionReason };
   /**

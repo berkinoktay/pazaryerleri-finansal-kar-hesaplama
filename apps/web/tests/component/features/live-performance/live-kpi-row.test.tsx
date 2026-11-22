@@ -76,7 +76,7 @@ describe('LiveKpiRow', () => {
     render(<LiveKpiRow orgId={ORG_ID} storeId={STORE_ID} />);
 
     await waitFor(() => expect(screen.getByText('Kâr Marjı')).toBeInTheDocument());
-    expect(screen.queryByText(/maliyet bekliyor/)).toBeNull();
+    expect(screen.queryByText(/maliyet ya da desi bekliyor/)).toBeNull();
   });
 
   it('shows a dash for margin and profit/cost ratio when today has no costed order', async () => {

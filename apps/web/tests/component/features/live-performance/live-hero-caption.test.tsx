@@ -59,13 +59,13 @@ describe('LiveHeroCaption', () => {
   it('omits the pending-cost sub-label when no orders await cost', () => {
     render(<LiveHeroCaption kpis={{ ...BASE, pendingOrderCountToday: 0 }} />);
 
-    expect(screen.queryByText(/maliyet bekliyor/)).toBeNull();
+    expect(screen.queryByText(/maliyet ya da desi bekliyor/)).toBeNull();
   });
 
   it('shows the pending-cost sub-label with the pending order count when orders await cost', () => {
     render(<LiveHeroCaption kpis={{ ...BASE, pendingOrderCountToday: 3 }} />);
 
-    const pending = screen.getByText(/maliyet bekliyor/);
+    const pending = screen.getByText(/maliyet ya da desi bekliyor/);
     expect(pending).toHaveTextContent('3');
   });
 

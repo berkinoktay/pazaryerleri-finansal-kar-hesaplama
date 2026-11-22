@@ -9,6 +9,12 @@
  * See docs/plans/2026-11-03-profit-engine-faz-3e-plan.md (decision 1) and the root
  * CLAUDE.md money/tenant rules. Callers: intake-order (past-day route) and the
  * sync-worker buffer day-end graduation.
+ *
+ * This module asks ONLY about cost timing. The product desi is required too (plan
+ * PR-2c), but that gate lives in `resolveOrderCalculability` (`@pazarsync/profit`),
+ * which only checks the desi is present: no entry time is recorded for a desi. The
+ * operator backfill below (`stampCostWindowExclusions`) stays cost-only: there is no
+ * retroactive desi exclusion.
  */
 
 import type { Prisma } from '@pazarsync/db';

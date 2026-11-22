@@ -76,7 +76,7 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
       description:
         "Filter by profit universe. 'calculated' = orders not excluded from profit " +
         "(profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe " +
-        '(profit_excluded_at set, cost window missed - permanent). Omit for all.',
+        '(profit_excluded_at set, cost or desi window missed - permanent). Omit for all.',
       example: 'excluded',
     }),
   lossOnly: z
@@ -231,14 +231,22 @@ export const OrderListItemSchema = z
       .nullable()
       .openapi({
         description:
-          'Set when the order is permanently outside the profit universe (cost window missed). ' +
+          'Set when the order is permanently outside the profit universe ' +
+          '(cost or desi window missed). ' +
           'Irreversible — enforced by a DB trigger (spec 2026-06-12).',
         example: null,
       }),
-    profitExclusionReason: z.enum(ProfitExclusionReason).nullable().openapi({
-      description: 'Why the order left the profit universe. Paired with profitExcludedAt.',
-      example: null,
-    }),
+    profitExclusionReason: z
+      .enum(ProfitExclusionReason)
+      .nullable()
+      .openapi({
+        description:
+          'Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, ' +
+          'LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, ' +
+          'LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both ' +
+          'are missing. Paired with profitExcludedAt.',
+        example: null,
+      }),
   })
   .openapi('OrderListItem');
 
@@ -672,14 +680,22 @@ export const OrderDetailSchema = z
       .nullable()
       .openapi({
         description:
-          'Set when the order is permanently outside the profit universe (cost window missed). ' +
+          'Set when the order is permanently outside the profit universe ' +
+          '(cost or desi window missed). ' +
           'Irreversible — enforced by a DB trigger (spec 2026-06-12).',
         example: null,
       }),
-    profitExclusionReason: z.enum(ProfitExclusionReason).nullable().openapi({
-      description: 'Why the order left the profit universe. Paired with profitExcludedAt.',
-      example: null,
-    }),
+    profitExclusionReason: z
+      .enum(ProfitExclusionReason)
+      .nullable()
+      .openapi({
+        description:
+          'Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, ' +
+          'LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, ' +
+          'LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both ' +
+          'are missing. Paired with profitExcludedAt.',
+        example: null,
+      }),
 
     reconciliationStatus: ReconciliationStatusSchema,
 

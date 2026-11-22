@@ -1225,6 +1225,15 @@ section "Versioning" for details.
 
 ### Added
 
+- **Two desi profit exclusion reasons** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET .../orders/{orderId}`). `profitExclusionReason` gains `DESI_DEADLINE_MISSED` (the order
+  waited in the live-performance buffer and a product still had no desi when its day ended) and
+  `LATE_DESILESS_ARRIVAL` (the order arrived from a past day while a product had no desi). An
+  order now enters profit only when every non-digital item has both a cost and a product desi (a
+  desi of 0 counts), so an order can now also be permanently excluded for a missing desi. When
+  both the cost and the desi are missing, the cost reason is written. Like the cost reasons, the
+  new ones are permanent. The `costStatus=excluded` filter includes them. Additive (a client
+  that switches over the enum needs the two new values).
 - **The six workbook import responses carry `prefilledRows`**
   (`POST /v1/organizations/{orgId}/stores/{storeId}/{discount-lists|marketplace-campaigns|flash-products|advantage-tariffs|plus-commission-tariffs|commission-tariffs}/import`).
   `prefilledRows` (integer, required) is the number of kept rows that already held a choice in

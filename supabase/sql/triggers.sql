@@ -74,13 +74,17 @@ DROP FUNCTION IF EXISTS public.reject_profit_freeze_breach();
 -- Berkin's rule (2026-11-03): an order whose cost missed its order day must
 -- stay out of profit PERMANENTLY. Supply prices drift, so a cost entered after
 -- the day is no longer that day's cost and must never pull the order back into
--- any net-profit figure. Once an order carries an AUTOMATIC exclusion reason it
--- can never be un-excluded or re-pointed at another reason.
+-- any net-profit figure. Berkin extended it to the product desi on 2026-11-22
+-- (plan PR-2c): an order whose desi was still missing when its day closed, or
+-- when it arrived from a past day, stays out of profit permanently too, even if
+-- a desi or a cargo invoice arrives later. Once an order carries an AUTOMATIC
+-- exclusion reason it can never be un-excluded or re-pointed at another reason.
 --
 -- The guard covers ONLY the automatic reasons -- COST_DEADLINE_MISSED (the
 -- day-end buffer flush), LATE_UNCOSTED_ARRIVAL (a past-day order that arrived
--- uncosted) and LEGACY_BACKFILL (the old 2026-06-12 profit-freeze backfill; no
--- writer stamps it today, it is listed defensively). A future
+-- uncosted), their desi counterparts DESI_DEADLINE_MISSED and
+-- LATE_DESILESS_ARRIVAL, and LEGACY_BACKFILL (the old 2026-06-12 profit-freeze
+-- backfill; no writer stamps it today, it is listed defensively). A future
 -- user-chosen exclusion is meant to be reversible and will carry its own
 -- distinct reason, so it is deliberately left out of this list. Stamping an
 -- exclusion on an order that currently has none stays allowed, because OLD's
@@ -95,12 +99,18 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  IF OLD.profit_exclusion_reason IN ('COST_DEADLINE_MISSED', 'LATE_UNCOSTED_ARRIVAL', 'LEGACY_BACKFILL')
+  IF OLD.profit_exclusion_reason IN (
+       'COST_DEADLINE_MISSED',
+       'LATE_UNCOSTED_ARRIVAL',
+       'DESI_DEADLINE_MISSED',
+       'LATE_DESILESS_ARRIVAL',
+       'LEGACY_BACKFILL'
+     )
      AND (NEW.profit_excluded_at IS DISTINCT FROM OLD.profit_excluded_at
           OR NEW.profit_exclusion_reason IS DISTINCT FROM OLD.profit_exclusion_reason) THEN
     RAISE EXCEPTION 'automatic profit exclusion is permanent'
       USING ERRCODE = '42501',
-            HINT = 'An automatic profit exclusion (cost missed the order day) can never be cleared or re-pointed.';
+            HINT = 'An automatic profit exclusion (cost or desi missed the order day) can never be cleared or re-pointed.';
   END IF;
   RETURN NEW;
 END;

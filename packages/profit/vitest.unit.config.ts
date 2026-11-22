@@ -22,6 +22,7 @@ export default defineConfig({
       'src/persistence/__tests__/tariff-version.test.ts',
       'src/persistence/__tests__/order-profit-snapshot.test.ts',
       'src/persistence/__tests__/recompute-parcel-profit-snapshot.test.ts',
+      'src/__tests__/build-calc-check-lines.test.ts',
     ],
   },
 });

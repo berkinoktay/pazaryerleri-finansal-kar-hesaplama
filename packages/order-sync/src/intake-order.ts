@@ -12,13 +12,16 @@
  *   - status CANCELLED             → purge buffer rows + upsert (audit row; aggregates exclude by status)
  *   - variant_not_found            → cost_missing route (order IS written; line keeps barcode, null variant FK; resolution in PR-2)
  *   - calculable + today           -> persist + graduate any buffer row (queue recompute)
- *   - past-day + timely cost       -> persist + graduate any buffer row (the queued recompute profits it)
+ *   - past-day + timely cost + desi -> persist + graduate any buffer row (the queued recompute profits it)
  *   - past-day + cost missed day   -> persist + graduate any buffer row; the permanent
  *                                      exclusion reason is derived from the graduation
  *                                      (buffer row removed -> COST_DEADLINE_MISSED, else
  *                                      LATE_UNCOSTED_ARRIVAL)
- *   - cost_missing + today + in orders -> persist + graduate any buffer row (idempotent)
- *   - cost_missing + today + new   → live_performance_buffer (PENDING, same-day cost-flip window)
+ *   - past-day + timely cost + no desi -> persist + graduate any buffer row; reason
+ *                                      DESI_DEADLINE_MISSED (buffer row removed) or
+ *                                      LATE_DESILESS_ARRIVAL
+ *   - cost/desi_missing + today + in orders -> persist + graduate any buffer row (idempotent)
+ *   - cost/desi_missing + today + new → live_performance_buffer (PENDING, same-day cost/desi window)
  *
  * The "already in orders" guard prevents a phantom buffer row for an order that
  * was costed earlier then had its cost profile archived (would otherwise live in
@@ -45,14 +48,27 @@
  * net profit never shows. The exclusion reason is derived from whether a live-performance
  * buffer row for the same order is graduated in the persisting transaction: a coexisting
  * buffer row proves the order ARRIVED within its business day (the buffer only holds
- * same-day cost-missing orders) and merely missed its cost deadline -> COST_DEADLINE_MISSED
- * (the same reason the day-end flush stamps); with no buffer row we first saw the order
- * after its day had closed -> LATE_UNCOSTED_ARRIVAL. Only a missing COST excludes; a
- * missing desi / commission / carrier never does, and a cancelled order is never
- * excluded (its CANCELLED branch returns above). The order is still enqueued for a
- * profit recompute like every other write. This supersedes the phase-3B "no
- * auto-exclusion" stance. The live-performance buffer still owns the same-day
- * cost-flip window for today's orders.
+ * same-day waiting orders) and merely missed its deadline; with no buffer row we first saw
+ * the order after its day had closed.
+ *
+ * Desi rule (Berkin 2026-11-22, plan PR-2c): the gate (`resolveOrderCalculability`) wants
+ * a cost AND an effective desi (override ?? synced; 0 is a real desi) on every
+ * non-digital item. Today's desiless order waits in the buffer exactly like a cost-missing
+ * one. For a past-day order the cost keeps its "entered before the order day ended" check;
+ * the desi is only checked for presence when the order is written (a desi is a physical
+ * measure that does not drift, and no entry time is recorded for it). The order's
+ * cargo-measured desi (`cargoDeci`) never stands in for a product desi. Reasons, with the
+ * cost winning when both are missing:
+ *
+ *                       buffer row graduated     no buffer row
+ *   cost missed day     COST_DEADLINE_MISSED     LATE_UNCOSTED_ARRIVAL
+ *   cost ok, no desi    DESI_DEADLINE_MISSED     LATE_DESILESS_ARRIVAL
+ *
+ * A missing commission / carrier never excludes, and a cancelled order is never excluded
+ * (its CANCELLED branch returns above). The order is still enqueued for a profit
+ * recompute like every other write. This supersedes the phase-3B "no auto-exclusion"
+ * stance. The live-performance buffer still owns the same-day cost/desi window for
+ * today's orders.
  */
 
 import { refreshProductAggregates } from '@pazarsync/catalog-sync';
@@ -70,7 +86,12 @@ import { upsertOrderWithSnapshot } from './upsert-order';
 export type OrderIntakeOutcome =
   | {
       kind: 'persisted';
-      reason: 'calculable' | 'late_uncosted_arrival' | 'already_in_orders' | 'cancelled_audit';
+      reason:
+        | 'calculable'
+        | 'late_uncosted_arrival'
+        | 'late_desiless_arrival'
+        | 'already_in_orders'
+        | 'cancelled_audit';
     }
   | { kind: 'buffered' }
   // `refreshed` is an OPTIONAL flag (never a new kind) on purpose: consumers with
@@ -82,6 +103,28 @@ export type OrderIntakeOutcome =
   // an Awaiting order before the payment check). It cannot be keyed (every one
   // would be platformOrderId '0'), so intake skips it with no DB access at all.
   | { kind: 'skipped'; reason: 'package_pending' };
+
+/** Which requirement a past-day order missed; the cost wins when both are missing. */
+type PastDayGap = 'cost' | 'desi';
+
+/**
+ * Permanent exclusion reason per past-day gap: `graduated` when a coexisting buffer
+ * row is removed in the persisting transaction (the order arrived within its day and
+ * missed the deadline), `direct` when there was none (the order arrived after its day).
+ */
+const PAST_DAY_GAP_REASONS = {
+  cost: {
+    graduated: ProfitExclusionReason.COST_DEADLINE_MISSED,
+    direct: ProfitExclusionReason.LATE_UNCOSTED_ARRIVAL,
+  },
+  desi: {
+    graduated: ProfitExclusionReason.DESI_DEADLINE_MISSED,
+    direct: ProfitExclusionReason.LATE_DESILESS_ARRIVAL,
+  },
+} as const satisfies Record<
+  PastDayGap,
+  { graduated: ProfitExclusionReason; direct: ProfitExclusionReason }
+>;
 
 export async function intakeOrder(args: {
   storeId: string;
@@ -233,17 +276,20 @@ export async function intakeOrder(args: {
   const calcLines = await buildCalcCheckLines(prisma, { storeId, lines: mapped.lines });
   const calc = resolveOrderCalculability(calcLines);
 
-  // Past-day cost-window gate (Berkin 2026-11-03). A past-day order's cost window
-  // (its own business day) has already closed, so it enters profit ONLY when it is
-  // calculable now AND every non-cancelled item had its cost entered before that day
-  // ended. Otherwise -- no cost at all, or a cost entered only after the day (decision
-  // 2) -- it is persisted but PERMANENTLY excluded; the exclusion reason is derived in
-  // persistWithBufferGraduation (a graduated buffer row -> COST_DEADLINE_MISSED,
-  // otherwise LATE_UNCOSTED_ARRIVAL). The order is never cancelled here (the CANCELLED
-  // branch returned above), so every line is non-cancelled.
+  // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22). A past-day order's
+  // window (its own business day) has already closed, so it enters profit ONLY when every
+  // non-cancelled item had its cost entered before that day ended AND the gate is
+  // calculable now (cost + desi present). Otherwise it is persisted but PERMANENTLY
+  // excluded. The cost is judged first and wins: no cost at all, or a cost entered only
+  // after the day (decision 2), is a cost gap; a timely cost with a desiless item is a
+  // desi gap (the desi is checked for presence only -- no entry time is recorded). The
+  // exclusion reason is derived in persistWithBufferGraduation from the gap and from
+  // whether a buffer row is graduated. When the gate already reports a missing cost, the
+  // timing query is skipped. The order is never cancelled here (the CANCELLED branch
+  // returned above), so every line is non-cancelled.
   if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
-    const hasTimelyCost =
-      calc.kind === 'calculable' &&
+    const costTimely =
+      !(calc.kind === 'skip' && calc.reason === 'cost_missing') &&
       (await hadCostWithinOrderDay(prisma, {
         organizationId,
         storeId,
@@ -253,28 +299,31 @@ export async function intakeOrder(args: {
           isCancelled: false,
         })),
       }));
-    if (hasTimelyCost) {
+    if (costTimely && calc.kind === 'calculable') {
       await persistWithBufferGraduation(storeId, organizationId, mapped);
       return { kind: 'persisted', reason: 'calculable' };
     }
-    // Past-day uncosted: the order is permanently excluded, but the REASON is derived
-    // inside the persisting transaction (see persistWithBufferGraduation) from whether a
+    // Past-day gap: the order is permanently excluded, but the REASON is derived inside
+    // the persisting transaction (see persistWithBufferGraduation) from whether a
     // coexisting buffer row is graduated, not stamped unconditionally here -- so a buffered
     // order re-delivered just after midnight gets the same reason the day-end flush would.
-    await persistWithBufferGraduation(storeId, organizationId, mapped, {
-      pastDayUncosted: true,
-    });
-    return { kind: 'persisted', reason: 'late_uncosted_arrival' };
+    const pastDayGap = costTimely ? 'desi' : 'cost';
+    await persistWithBufferGraduation(storeId, organizationId, mapped, { pastDayGap });
+    return {
+      kind: 'persisted',
+      reason: pastDayGap === 'cost' ? 'late_uncosted_arrival' : 'late_desiless_arrival',
+    };
   }
 
-  // Today's order from here. Fully costable -> persist with profit.
+  // Today's order from here. Fully calculable (cost + desi) -> persist with profit.
   if (calc.kind === 'calculable') {
     await persistWithBufferGraduation(storeId, organizationId, mapped);
     return { kind: 'persisted', reason: 'calculable' };
   }
 
-  // calc is { kind: 'skip', reason: 'cost_missing', ... } from here (today only).
-  // Today's cost-missing — but if it is already in orders, persist (idempotent),
+  // calc is { kind: 'skip', reason: 'cost_missing' | 'desi_missing', ... } from here
+  // (today only): both wait in the buffer until the seller enters the missing value.
+  // Today's waiting order — but if it is already in orders, persist (idempotent),
   // never create a parallel buffer row (double-count guard). Org-scoped query
   // (CLAUDE.md: every order read filters by organizationId — defense-in-depth).
   const existing = await prisma.order.findFirst({
@@ -286,7 +335,7 @@ export async function intakeOrder(args: {
     return { kind: 'persisted', reason: 'already_in_orders' };
   }
 
-  // Today's cost-missing, new → buffer (PENDING). Idempotent on (storeId,
+  // Today's cost- or desi-missing, new → buffer (PENDING). Idempotent on (storeId,
   // platformOrderId): a re-delivery hits the composite unique → P2002 → dedupe.
   //
   // The create and the optimistic stock decrement share ONE transaction so the
@@ -349,34 +398,33 @@ export async function intakeOrder(args: {
  * persist) the flag is false and the write decrements once as before.
  *
  * Tenant-scoped: the buffer delete filters organizationId + storeId (CLAUDE.md -- every
- * order/buffer read or write pins the tenant). When the caller flags pastDayUncosted, the
- * permanent exclusion reason is derived HERE from the SAME buffer-removal signal: a buffer
- * row was removed -> COST_DEADLINE_MISSED (the order arrived within its business day -- the
- * buffer only ever holds a same-day cost-missing order -- so it merely missed its cost
- * deadline, exactly what the midnight flush stamps); no buffer row -> LATE_UNCOSTED_ARRIVAL
- * (we first saw the order after its day had already closed). Computing it inside the
- * transaction is what fixes the race: a buffered order re-delivered just after midnight but
- * before the flush tick can no longer get a different reason depending on which side wins.
+ * order/buffer read or write pins the tenant). When the caller passes a pastDayGap, the
+ * permanent exclusion reason is derived HERE from that gap and the SAME buffer-removal
+ * signal (PAST_DAY_GAP_REASONS): a buffer row was removed -> the deadline reason
+ * (COST_DEADLINE_MISSED / DESI_DEADLINE_MISSED: the order arrived within its business day
+ * -- the buffer only ever holds a same-day waiting order -- so it merely missed its
+ * deadline, exactly what the midnight flush stamps); no buffer row -> the late-arrival
+ * reason (LATE_UNCOSTED_ARRIVAL / LATE_DESILESS_ARRIVAL: we first saw the order after its
+ * day had already closed). Computing it inside the transaction is what fixes the race: a
+ * buffered order re-delivered just after midnight but before the flush tick can no longer
+ * get a different reason depending on which side wins.
  */
 async function persistWithBufferGraduation(
   storeId: string,
   organizationId: string,
   mapped: MappedOrder,
-  opts?: { readonly pastDayUncosted: boolean },
+  opts?: { readonly pastDayGap: PastDayGap },
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const removed = await tx.livePerformanceBuffer.deleteMany({
       where: { organizationId, storeId, platformOrderId: mapped.platformOrderId },
     });
     const graduated = removed.count > 0;
+    const gapReasons = opts === undefined ? undefined : PAST_DAY_GAP_REASONS[opts.pastDayGap];
     const profitExclusion =
-      opts?.pastDayUncosted === true
-        ? {
-            reason: graduated
-              ? ProfitExclusionReason.COST_DEADLINE_MISSED
-              : ProfitExclusionReason.LATE_UNCOSTED_ARRIVAL,
-          }
-        : undefined;
+      gapReasons === undefined
+        ? undefined
+        : { reason: graduated ? gapReasons.graduated : gapReasons.direct };
     await upsertOrderWithSnapshot(storeId, organizationId, mapped, tx, {
       promotedFromBuffer: graduated,
       profitExclusion,

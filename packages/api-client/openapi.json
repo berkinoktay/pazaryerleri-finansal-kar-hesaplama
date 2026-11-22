@@ -937,7 +937,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set when the order is permanently outside the profit universe (cost window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
+            "description": "Set when the order is permanently outside the profit universe (cost or desi window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
             "example": null
           },
           "profitExclusionReason": {
@@ -949,9 +949,11 @@
               "COST_DEADLINE_MISSED",
               "LATE_UNCOSTED_ARRIVAL",
               "LEGACY_BACKFILL",
+              "DESI_DEADLINE_MISSED",
+              "LATE_DESILESS_ARRIVAL",
               null
             ],
-            "description": "Why the order left the profit universe. Paired with profitExcludedAt.",
+            "description": "Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both are missing. Paired with profitExcludedAt.",
             "example": null
           }
         },
@@ -1200,7 +1202,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set when the order is permanently outside the profit universe (cost window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
+            "description": "Set when the order is permanently outside the profit universe (cost or desi window missed). Irreversible — enforced by a DB trigger (spec 2026-06-12).",
             "example": null
           },
           "profitExclusionReason": {
@@ -1212,9 +1214,11 @@
               "COST_DEADLINE_MISSED",
               "LATE_UNCOSTED_ARRIVAL",
               "LEGACY_BACKFILL",
+              "DESI_DEADLINE_MISSED",
+              "LATE_DESILESS_ARRIVAL",
               null
             ],
-            "description": "Why the order left the profit universe. Paired with profitExcludedAt.",
+            "description": "Why the order left the profit universe: the cost (COST_DEADLINE_MISSED, LATE_UNCOSTED_ARRIVAL) or the product desi (DESI_DEADLINE_MISSED, LATE_DESILESS_ARRIVAL) missed the order day; the cost reason wins when both are missing. Paired with profitExcludedAt.",
             "example": null
           },
           "reconciliationStatus": {
@@ -10451,11 +10455,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },
@@ -10708,11 +10712,11 @@
                 "calculated",
                 "excluded"
               ],
-              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+              "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
               "example": "excluded"
             },
             "required": false,
-            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost window missed - permanent). Omit for all.",
+            "description": "Filter by profit universe. 'calculated' = orders not excluded from profit (profit_excluded_at is null); 'excluded' = orders stamped out of the profit universe (profit_excluded_at set, cost or desi window missed - permanent). Omit for all.",
             "name": "costStatus",
             "in": "query"
           },

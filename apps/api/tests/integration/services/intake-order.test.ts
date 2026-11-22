@@ -46,6 +46,8 @@ function buildMapped(over: {
   packagePending?: boolean;
   /** Multi-line orders: each entry clones the single-line template below. */
   lines?: Array<{ barcode: string; platformLineId: string }>;
+  /** Trendyol's cargo-measured desi of the package. Defaults null. */
+  cargoDeci?: MappedOrder['cargoDeci'];
 }): MappedOrder {
   // GROSS konvansiyon (2026-06-16): MappedOrderLine gross alanlar.
   // lineSaleGross 100 = net 84.75 + KDV 15.25 (%18). Raw commission rate 15%.
@@ -82,7 +84,7 @@ function buildMapped(over: {
     estimatedDeliveryEndDate: null,
     cargoProviderName: null,
     cargoTrackingNumber: null,
-    cargoDeci: null,
+    cargoDeci: over.cargoDeci ?? null,
     usesSellerCargoAgreement: false,
     platformCreatedBy: null,
     originShipmentDate: null,
@@ -190,6 +192,16 @@ async function attachCost(orgId: string, storeId: string, barcode: string): Prom
   const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
   await prisma.productVariantCostProfile.create({
     data: { organizationId: orgId, productVariantId: variant.id, profileId: profile.id },
+  });
+}
+
+// Leave the variant behind `barcode` with no desi at all: no Trendyol desi and no
+// seller desi. The column default is 0, which is a REAL desi (plan PR-2c decision 1),
+// so a desiless fixture has to write null explicitly.
+async function clearDesi(storeId: string, barcode: string): Promise<void> {
+  await prisma.productVariant.updateMany({
+    where: { storeId, barcode },
+    data: { syncedDimensionalWeight: null, dimensionalWeightOverride: null },
   });
 }
 
@@ -479,13 +491,12 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
-  it('does not exclude a past-day order blocked only by a missing desi', async () => {
+  it('does not exclude a past-day order with a timely cost and a desi (0 is a real desi)', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
-    // Timely cost but no desi seeded: only a missing COST excludes, never a missing
-    // desi — so the order enters profit (not excluded), even if its shipping estimate
-    // later resolves to not-computable.
+    // Timely cost, and the variant keeps the column default desi 0, which is a REAL
+    // desi (plan PR-2c): both requirements are met, so the order enters profit.
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
 
     const outcome = await intakeOrder({
@@ -498,6 +509,117 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
     expect(order.profitExcludedAt).toBeNull();
     expect(order.profitExclusionReason).toBeNull();
+  });
+
+  // --- Desi gate (plan PR-2c, Berkin 2026-11-22) ---
+  // Every non-digital item needs an effective desi like a cost: today's desiless
+  // order waits in the buffer; a past-day desiless order is permanently excluded.
+  // When the cost is missing (or late) too, the cost reason wins.
+
+  it('buffers a costed but desiless order of today', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'desiless-today', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('buffers a costed but desiless order of today even when the package carries a cargo-measured desi', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+
+    // cargoDeci is Trendyol's measurement of the package, not the product desi; it
+    // never stands in for a missing product desi (spec 2026-11-22).
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'desiless-cargo-deci',
+        orderDate: new Date(),
+        cargoDeci: '3',
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('excludes a past-day order with a timely cost but no desi as LATE_DESILESS_ARRIVAL', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = new Date(Date.now() - PAST_DAY_MS);
+    await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'late-desiless', orderDate }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_desiless_arrival' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('LATE_DESILESS_ARRIVAL');
+    // Still enqueued for a profit recompute like every other write.
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: order.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.ORDER_CHANGED);
+  });
+
+  it('excludes a past-day order with neither a cost nor a desi as LATE_UNCOSTED_ARRIVAL (cost wins)', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'late-nothing',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+  });
+
+  it('excludes a past-day order whose cost came after its day and has no desi as LATE_UNCOSTED_ARRIVAL', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // seedVariant(..., true) attaches the cost at now(), after the order's day.
+    await seedVariant(org.id, store.id, BARCODE, true);
+    await clearDesi(store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'late-cost-desiless',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
   });
 
   it('cost-missing + today but already in orders → persists (idempotent), never buffers', async () => {
@@ -1156,6 +1278,39 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       where: { storeId: store.id, barcode: BARCODE },
     });
     expect(variant.quantity).toBe(39);
+  });
+
+  it('graduates a coexisting past-day buffer entry with a timely cost but no desi as DESI_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const pastOrderDate = new Date(Date.now() - PAST_DAY_MS);
+    // Cost attached in time for the past day, but the product has no desi.
+    await seedVariantWithTimelyCost(org.id, store.id, BARCODE, pastOrderDate);
+    await clearDesi(store.id, BARCODE);
+    const platformOrderId = 'graduate-past-desiless';
+
+    // 1. Same-day intake: costed but desiless -> buffered (PENDING).
+    const first = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId, orderDate: new Date() }),
+    });
+    expect(first).toEqual({ kind: 'buffered' });
+
+    // 2. The order re-delivers once its day has closed while the buffer row still
+    //    coexists: the graduation removes a buffer row and the cost was timely, so
+    //    the reason is the desi deadline (the same one the day-end flush stamps).
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId, orderDate: pastOrderDate }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_desiless_arrival' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
   });
 
   it('heals an order that sits in both tables without restamping or decrementing again', async () => {
