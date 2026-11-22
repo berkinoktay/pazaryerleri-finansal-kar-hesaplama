@@ -275,6 +275,8 @@ export {
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,
   enqueueStaleProfitStatements,
+  enqueueCarrierGapRecomputes,
+  enqueueReferenceDataGapRecomputes,
   claimProfitRecomputeRequests,
   processClaimedRecompute,
   drainProfitRecomputeQueue,

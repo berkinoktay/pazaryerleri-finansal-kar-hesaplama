@@ -1,8 +1,16 @@
 import { Prisma, type PrismaClient } from '@pazarsync/db';
-import { ProfitRecomputeReason, ProfitStatementView } from '@pazarsync/db/enums';
+import {
+  OrderStatus,
+  Platform,
+  ProfitIssueCode,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
 
 import { PROFIT_ENGINE_VERSION } from '../core/engine-version';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
+import { loadActiveTrendyolCarriers, resolveOrderCarrier } from './load-trendyol-parcel';
 import { PROFIT_ENGINE_PLATFORMS, recomputeParcelProfit } from './recompute-parcel-profit';
 
 /**
@@ -220,6 +228,166 @@ export function enqueueStaleProfitStatements(
   `;
 }
 
+/**
+ * An order whose capture holds a cargo name no carrier was recognised from, and whose
+ * profit still depends on that carrier (alias `c`): captured, no carrier, shipped under
+ * Trendyol's agreement (an order on the seller's own agreement never looks at the
+ * carrier), not excluded from profit and not cancelled. Only Trendyol stores: the
+ * carriers are Trendyol's and only a Trendyol order is captured. An order that already
+ * has a queue row is left to that row: re-enqueuing it would reset a failing request's
+ * backoff on every sweep.
+ */
+const CARRIER_GAP_ORDER = Prisma.sql`c.profit_snapshot_at IS NOT NULL
+  AND c.snapshot_carrier_id IS NULL
+  AND c.uses_seller_cargo_agreement = false
+  AND c.profit_excluded_at IS NULL
+  AND c.status <> ${OrderStatus.CANCELLED}::"OrderStatus"
+  AND EXISTS (
+    SELECT 1 FROM stores st
+    WHERE st.id = c.store_id AND st.platform = ${Platform.TRENDYOL}::"Platform"
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM profit_recompute_queue q WHERE q.order_id = c.id
+  )`;
+
+/**
+ * The carrier gap sweep (plan PR-3a, Gorev 4): enqueues the orders that wait only because
+ * their captured cargo name was not recognised, once a carrier claims that name. Newest
+ * order first, up to `limit`; returns the number of orders enqueued.
+ *
+ * It reads the distinct captured names of the waiting orders (a small set), matches each
+ * against the active carriers with `resolveOrderCarrier` -- the same matcher and the same
+ * normaliser as the capture, in TypeScript so the two can never drift -- and enqueues only
+ * the orders whose name is recognised now. An order on a recognised carrier never enters
+ * the queue this way, whoever added the mapping (seed, migration, admin screen). The
+ * recompute then fills the carrier on the capture (`captureOrderProfitSnapshot` gap fill),
+ * which takes the order out of the candidates.
+ *
+ * Global across tenants by design: the carriers and their cargo names are platform-wide
+ * reference data shared by every organization, so a new mapping concerns every tenant's
+ * orders at once. No caller id reaches the query -- the candidates are selected by their
+ * own columns only -- and `enqueueFromOrders` writes each row with its own order's
+ * organization and store, so no row can cross a tenant.
+ */
+export async function enqueueCarrierGapRecomputes(
+  db: PrismaClient,
+  params: { readonly limit: number },
+): Promise<number> {
+  const { limit } = params;
+  const nameRows = await db.$queryRaw<unknown[]>`
+    SELECT DISTINCT c.snapshot_cargo_provider_name AS "name"
+    FROM orders c
+    WHERE ${CARRIER_GAP_ORDER}
+      AND c.snapshot_cargo_provider_name IS NOT NULL
+      AND btrim(c.snapshot_cargo_provider_name) <> ''
+  `;
+  const names = nameRows.map(toCargoProviderName);
+  if (names.length === 0) {
+    return 0;
+  }
+  const carriers = await loadActiveTrendyolCarriers(db);
+  const recognised = names.filter((name) => resolveOrderCarrier(name, carriers) !== null);
+  if (recognised.length === 0) {
+    return 0;
+  }
+  return enqueueFromOrders(
+    db,
+    ProfitRecomputeReason.REFERENCE_CHANGED,
+    Prisma.sql`o.id IN (
+      SELECT c.id
+      FROM orders c
+      WHERE ${CARRIER_GAP_ORDER}
+        AND c.snapshot_cargo_provider_name = ANY(${recognised}::text[])
+      ORDER BY c.order_date DESC
+      LIMIT ${limit}
+    )`,
+  );
+}
+
+/** The stored issue list fragment a statement missing reference data contains. */
+const REFERENCE_DATA_MISSING_ISSUES_JSON = JSON.stringify([
+  { code: ProfitIssueCode.REFERENCE_DATA_MISSING },
+]);
+
+/**
+ * A best-known statement that is not computable because some dated reference data (a fee
+ * definition or a micro-export return tier) was missing on the order date (alias `s`).
+ */
+const REFERENCE_GAP_STATEMENT = Prisma.sql`s.view = ${ProfitStatementView.BEST_KNOWN}::"ProfitStatementView"
+  AND s.status = ${ProfitStatus.NOT_COMPUTABLE}::"ProfitStatus"
+  AND s.issues @> ${REFERENCE_DATA_MISSING_ISSUES_JSON}::jsonb`;
+
+/**
+ * The newest creation instant across the reference data a REFERENCE_DATA_MISSING gap can
+ * be filled from: fee definitions and micro-export return tier versions. NULL when both
+ * tables are empty.
+ */
+const NEWEST_GAP_REFERENCE_CREATED_AT = Prisma.sql`(
+  SELECT MAX(r.created_at) FROM (
+    SELECT created_at FROM fee_definitions
+    UNION ALL
+    SELECT created_at FROM micro_export_return_fee_tier_versions
+  ) r
+)`;
+
+/**
+ * The reference data gap sweep (plan PR-3a, Gorev 4): enqueues the orders whose best-known
+ * statement is not computable for missing reference data (REFERENCE_DATA_MISSING) and was
+ * last written before the newest fee definition or micro-export tier version was created.
+ * So once a definition is added, every such order is recomputed once; an order the new
+ * definition does not fill is not taken again until a newer one arrives (the drain stamps
+ * its statement as re-checked, `markReferenceGapRechecked`). Newest order first, up to
+ * `limit`; returns the number of orders enqueued.
+ *
+ * Only orders of a platform the engine can compute (as the stale sweep), and none that
+ * already has a queue row (as the carrier gap sweep).
+ *
+ * Global across tenants by design: fee definitions and tier versions are platform-wide
+ * reference data shared by every organization, so a new definition concerns every
+ * tenant's orders at once. No caller id reaches the query, and `enqueueFromOrders` writes
+ * each row with its own order's organization and store, so no row can cross a tenant.
+ */
+export function enqueueReferenceDataGapRecomputes(
+  db: PrismaClient,
+  params: { readonly limit: number },
+): Promise<number> {
+  const { limit } = params;
+  return enqueueFromOrders(
+    db,
+    ProfitRecomputeReason.REFERENCE_CHANGED,
+    Prisma.sql`o.id IN (
+      SELECT c.id
+      FROM orders c
+      JOIN order_profit_statements s ON s.order_id = c.id
+      WHERE ${REFERENCE_GAP_STATEMENT}
+        AND s.updated_at < ${NEWEST_GAP_REFERENCE_CREATED_AT}
+        AND EXISTS (
+          SELECT 1 FROM stores st
+          WHERE st.id = c.store_id
+            AND st.platform = ANY(${[...PROFIT_ENGINE_PLATFORMS]}::"Platform"[])
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM profit_recompute_queue q WHERE q.order_id = c.id
+        )
+      ORDER BY c.order_date DESC
+      LIMIT ${limit}
+    )`,
+  );
+}
+
+/** Narrows a raw distinct-name row to its cargo name, throwing on an unexpected shape. */
+function toCargoProviderName(value: unknown): string {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('name' in value) ||
+    typeof value.name !== 'string'
+  ) {
+    throw new Error('carrier gap sweep returned an unexpected row shape');
+  }
+  return value.name;
+}
+
 /** One request claimed off the queue, with the request time the claimer must match back. */
 export interface ClaimedRecompute {
   readonly id: string;
@@ -272,7 +440,9 @@ export async function claimProfitRecomputeRequests(
 
 /**
  * Recomputes one claimed request in its own short transaction and removes the mark.
- * The delete matches both `id` and the claimed `requested_at`: a request that arrived
+ * A statement still missing reference data is stamped as re-checked in the same
+ * transaction (`markReferenceGapRechecked`), so the reference gap sweep does not take
+ * the order again. The delete matches both `id` and the claimed `requested_at`: a request that arrived
  * while we were computing changed `requested_at`, so the mark survives for another
  * pass. A vanished order yields `ORDER_GONE` (the FK cascade may already have removed
  * the mark; the delete is then a harmless no-op). An order whose store platform the
@@ -293,6 +463,7 @@ export async function processClaimedRecompute(
           organizationId: claimed.organizationId,
           orderId: claimed.orderId,
         });
+        await markReferenceGapRechecked(tx, claimed);
         await tx.$executeRaw`
           DELETE FROM profit_recompute_queue
           WHERE id = ${claimed.id}::uuid AND requested_at = ${claimed.requestedAt}::timestamp(3)
@@ -318,6 +489,30 @@ export async function processClaimedRecompute(
     await recordRecomputeFailure(db, claimed, error);
     return 'FAILED';
   }
+}
+
+/**
+ * Stamps the order's best-known statement as re-checked against the reference data while
+ * it still misses some (REFERENCE_DATA_MISSING); matches no other statement. A recompute
+ * whose content hash did not change writes nothing, so without this stamp the statement
+ * would stay older than the newest fee definition or tier version, and the reference gap
+ * sweep would take the order again on every sweep. The stamp is at least the newest
+ * reference creation instant, so the order leaves the sweep's candidates even when the
+ * clock that created the definition runs ahead of the database's, until a newer
+ * definition arrives. Only `updated_at` moves: `computed_at` stays the time the content
+ * was computed. Scoped by the claimed order's organization.
+ */
+function markReferenceGapRechecked(
+  tx: Prisma.TransactionClient,
+  claimed: ClaimedRecompute,
+): Promise<number> {
+  return tx.$executeRaw`
+    UPDATE order_profit_statements s
+    SET updated_at = GREATEST(clock_timestamp()::timestamp(3), ${NEWEST_GAP_REFERENCE_CREATED_AT})
+    WHERE s.order_id = ${claimed.orderId}::uuid
+      AND s.organization_id = ${claimed.organizationId}::uuid
+      AND ${REFERENCE_GAP_STATEMENT}
+  `;
 }
 
 /**

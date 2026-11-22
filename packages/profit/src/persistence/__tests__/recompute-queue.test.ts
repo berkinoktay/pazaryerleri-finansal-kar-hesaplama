@@ -11,8 +11,9 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { prisma } from '@pazarsync/db';
+import { prisma, type Prisma } from '@pazarsync/db';
 import {
+  type OrderStatus,
   Platform,
   ProfitExclusionReason,
   ProfitIssueCode,
@@ -20,7 +21,7 @@ import {
   ProfitStatementView,
   ProfitStatus,
 } from '@pazarsync/db/enums';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PROFIT_ENGINE_VERSION } from '../../core/engine-version';
 import { parseStoredIssues } from '../../read/stored-issues';
@@ -28,9 +29,11 @@ import {
   type ClaimedRecompute,
   claimProfitRecomputeRequests,
   drainProfitRecomputeQueue,
+  enqueueCarrierGapRecomputes,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForStore,
   enqueueProfitRecomputeForVariants,
+  enqueueReferenceDataGapRecomputes,
   enqueueStaleProfitStatements,
   processClaimedRecompute,
 } from '../recompute-queue';
@@ -39,9 +42,11 @@ import {
   createAdditionalStore,
   ensureDbReachable,
   MELONTIK,
+  type MelontikParcel,
   seedBareOrder,
   seedMelontikParcel,
   truncateAll,
+  upsertCarrierWithTariffs,
 } from './helpers/melontik-parcel';
 
 /** The window a disjoint claim gets before we treat it as blocked on a held lock. */
@@ -698,5 +703,314 @@ describe('profit recompute queue', () => {
       where: { orderId: hepsiOrderId },
     });
     expect(hepsiRow).toBeNull();
+  });
+});
+
+/** The test carrier the carrier gap test maps a new cargo name to (deleted after each test). */
+const GAP_FILL_CARRIER = {
+  code: 'TEST_QUEUE_GAP_FILL',
+  externalId: 990_501,
+  displayName: 'Test Queue Gap Fill Kargo',
+} as const;
+
+/** The cargo name no carrier claims until the carrier gap test maps it. */
+const NEW_CARGO_NAME = 'Test Yeni Kargo Marketplace';
+
+/** The same name in capitals with a Turkish dotted I: recognised through the normaliser. */
+const NEW_CARGO_NAME_CAPITALS = 'TEST YENİ KARGO MARKETPLACE';
+
+/** An instant well before any test row, for backdating the seeded fee definitions. */
+const LONG_AGO = new Date('2020-01-01T00:00:00.000Z');
+
+/** Upserts the gap-fill test carrier with a melontik-priced desi tariff and the given order names. */
+function upsertGapFillCarrier(orderCargoNames: readonly string[]): Promise<string> {
+  return upsertCarrierWithTariffs({
+    ...GAP_FILL_CARRIER,
+    orderCargoNames,
+    desiRows: [
+      { desi: 1, priceNet: MELONTIK.desiNet },
+      { desi: 2, priceNet: MELONTIK.desiNet },
+    ],
+    baremRows: [],
+  });
+}
+
+/** Seeds a melontik parcel whose order carries `cargoProviderName` (and the given flags). */
+async function seedParcelWithCargoName(params: {
+  readonly cargoProviderName: string;
+  readonly status?: OrderStatus;
+  readonly usesSellerCargoAgreement?: boolean;
+}): Promise<MelontikParcel> {
+  const parcel = await seedMelontikParcel(
+    params.status === undefined ? {} : { status: params.status },
+  );
+  await prisma.order.update({
+    where: { id: parcel.orderId },
+    data: {
+      cargoProviderName: params.cargoProviderName,
+      usesSellerCargoAgreement: params.usesSellerCargoAgreement ?? false,
+    },
+  });
+  return parcel;
+}
+
+/**
+ * Enqueues and drains the given parcels, so every order is captured and gets its
+ * statements. Asserts the queue is empty afterwards: a failed recompute would keep its
+ * mark, and a queued order is never a sweep candidate, which would mask the filter under
+ * test.
+ */
+async function computeParcels(parcels: readonly MelontikParcel[]): Promise<void> {
+  for (const parcel of parcels) {
+    await enqueueProfitRecompute(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      reason: ProfitRecomputeReason.ORDER_CHANGED,
+      orderIds: [parcel.orderId],
+    });
+  }
+  const result = await drainProfitRecomputeQueue(prisma, { batchSize: 50 });
+  expect(result.failed).toBe(0);
+  expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+}
+
+/** The order's statement of one view; throws when it is missing. */
+function readStatement(
+  orderId: string,
+  view: ProfitStatementView,
+): Promise<{
+  readonly status: ProfitStatus;
+  readonly issues: Prisma.JsonValue;
+  readonly updatedAt: Date;
+}> {
+  return prisma.orderProfitStatement.findUniqueOrThrow({
+    where: { orderId_view: { orderId, view } },
+    select: { status: true, issues: true, updatedAt: true },
+  });
+}
+
+/** The issue codes of the order's best-known statement. */
+async function bestKnownIssueCodes(orderId: string): Promise<ProfitIssueCode[]> {
+  const statement = await readStatement(orderId, ProfitStatementView.BEST_KNOWN);
+  return parseStoredIssues(statement.issues).map((issue) => issue.code);
+}
+
+/** A queue row's order, tenant scope and reason. */
+interface QueueRow {
+  readonly orderId: string;
+  readonly organizationId: string;
+  readonly storeId: string;
+  readonly reason: ProfitRecomputeReason;
+}
+
+/** Orders queue rows by order id (plain code-unit compare, no locale collation). */
+function byOrderId(a: QueueRow, b: QueueRow): number {
+  if (a.orderId === b.orderId) {
+    return 0;
+  }
+  return a.orderId < b.orderId ? -1 : 1;
+}
+
+/** Every queue row with its tenant scope and reason, ordered by order id. */
+async function queueRows(): Promise<QueueRow[]> {
+  const rows = await prisma.profitRecomputeRequest.findMany({
+    select: { orderId: true, organizationId: true, storeId: true, reason: true },
+  });
+  return rows.sort(byOrderId);
+}
+
+/** The queue row a gap sweep should write for a parcel: the order's own tenant scope. */
+function expectedGapRow(parcel: MelontikParcel): QueueRow {
+  return {
+    orderId: parcel.orderId,
+    organizationId: parcel.organizationId,
+    storeId: parcel.storeId,
+    reason: ProfitRecomputeReason.REFERENCE_CHANGED,
+  };
+}
+
+/** Creates a Trendyol platform service fee definition with an explicit creation instant. */
+async function createPlatformServiceFee(params: {
+  readonly effectiveFrom: Date;
+  readonly createdAt: Date;
+}): Promise<void> {
+  await prisma.feeDefinition.create({
+    data: {
+      platform: 'TRENDYOL',
+      feeType: 'PLATFORM_SERVICE',
+      displayName: 'Platform Hizmet Bedeli',
+      calculationKind: 'FIXED',
+      fixedAmountNet: '10.99',
+      defaultVatRate: '20.00',
+      effectiveFrom: params.effectiveFrom,
+      createdAt: params.createdAt,
+    },
+  });
+}
+
+describe('gap-fill sweeps', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  afterEach(async () => {
+    await prisma.shippingCarrier.deleteMany({
+      where: { platform: Platform.TRENDYOL, code: GAP_FILL_CARRIER.code },
+    });
+  });
+
+  it('enqueues only the waiting orders whose cargo name a carrier now claims, each in its own tenant scope', async () => {
+    const gapCarrierId = await upsertGapFillCarrier([]);
+
+    // Two waiting orders in two organizations; the second writes the name in capitals.
+    const waitingA = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const waitingB = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME_CAPITALS });
+    // Same name, but never a candidate: seller's own agreement, excluded, cancelled.
+    const sellerAgreement = await seedParcelWithCargoName({
+      cargoProviderName: NEW_CARGO_NAME,
+      usesSellerCargoAgreement: true,
+    });
+    const excluded = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const cancelled = await seedParcelWithCargoName({
+      cargoProviderName: NEW_CARGO_NAME,
+      status: 'CANCELLED',
+    });
+    // Same name, never captured: no snapshot, so the regular producers own it.
+    const uncaptured = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    // A recognised carrier on the capture: never re-resolved.
+    const recognised = await seedMelontikParcel();
+
+    await computeParcels([waitingA, waitingB, sellerAgreement, excluded, cancelled, recognised]);
+    await prisma.order.update({
+      where: { id: excluded.orderId },
+      data: {
+        profitExcludedAt: new Date(),
+        profitExclusionReason: ProfitExclusionReason.COST_DEADLINE_MISSED,
+      },
+    });
+
+    for (const parcel of [waitingA, waitingB]) {
+      const order = await prisma.order.findUniqueOrThrow({
+        where: { id: parcel.orderId },
+        select: { snapshotCarrierId: true, profitSnapshotAt: true },
+      });
+      expect(order.snapshotCarrierId).toBeNull();
+      expect(order.profitSnapshotAt).not.toBeNull();
+      const bestKnown = await readStatement(parcel.orderId, ProfitStatementView.BEST_KNOWN);
+      expect(bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+      expect(await bestKnownIssueCodes(parcel.orderId)).toContain(
+        ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
+      );
+    }
+
+    // No carrier claims the name yet: nothing to fill.
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(0);
+    expect(await queueRows()).toEqual([]);
+
+    // The name is mapped to a carrier: only the two waiting orders are enqueued, each
+    // with its own organization and store. The uncaptured, seller-agreement, excluded,
+    // cancelled and recognised orders stay out.
+    await upsertGapFillCarrier([NEW_CARGO_NAME]);
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(2);
+    const queued = await queueRows();
+    expect(queued).toEqual([expectedGapRow(waitingA), expectedGapRow(waitingB)].sort(byOrderId));
+    expect(queued.map((row) => row.orderId)).not.toContain(uncaptured.orderId);
+
+    // The drain recognises the carrier on the capture and the order becomes computable.
+    const drained = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(drained).toMatchObject({ claimed: 2, changed: 2, failed: 0 });
+    for (const parcel of [waitingA, waitingB]) {
+      const order = await prisma.order.findUniqueOrThrow({
+        where: { id: parcel.orderId },
+        select: { snapshotCarrierId: true },
+      });
+      expect(order.snapshotCarrierId).toBe(gapCarrierId);
+      for (const view of [ProfitStatementView.BEST_KNOWN, ProfitStatementView.ESTIMATE]) {
+        const statement = await readStatement(parcel.orderId, view);
+        expect(statement.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+      }
+    }
+
+    // Filled orders leave the candidates: the next sweep finds nothing.
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 10 })).toBe(0);
+  });
+
+  it('honours the limit of the carrier gap sweep', async () => {
+    await upsertGapFillCarrier([]);
+    const first = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    const second = await seedParcelWithCargoName({ cargoProviderName: NEW_CARGO_NAME });
+    await computeParcels([first, second]);
+    await upsertGapFillCarrier([NEW_CARGO_NAME]);
+
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 1 })).toBe(1);
+    expect(await enqueueCarrierGapRecomputes(prisma, { limit: 1 })).toBe(1);
+    expect((await queueRows()).map((row) => row.orderId).sort()).toEqual(
+      [first.orderId, second.orderId].sort(),
+    );
+  });
+
+  it('re-enqueues an order missing reference data once per newer definition, until it is filled', async () => {
+    // Every parcel is seeded before the definition is deleted: a later seed would put
+    // it back.
+    const open = await seedMelontikParcel();
+    const excluded = await seedMelontikParcel();
+    const cancelled = await seedMelontikParcel({ status: 'CANCELLED' });
+    await prisma.order.update({
+      where: { id: excluded.orderId },
+      data: {
+        profitExcludedAt: new Date(),
+        profitExclusionReason: ProfitExclusionReason.COST_DEADLINE_MISSED,
+      },
+    });
+    await prisma.feeDefinition.deleteMany({
+      where: { platform: 'TRENDYOL', feeType: 'PLATFORM_SERVICE' },
+    });
+    // The remaining definitions predate every statement, whatever the clocks say.
+    await prisma.feeDefinition.updateMany({ data: { createdAt: LONG_AGO } });
+    await computeParcels([open, excluded, cancelled]);
+
+    expect(await bestKnownIssueCodes(open.orderId)).toContain(
+      ProfitIssueCode.REFERENCE_DATA_MISSING,
+    );
+    const written = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(written.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+
+    // No definition newer than the statement: nothing to fill.
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    // A definition that does not cover the order date (it starts later): the order is
+    // taken once, recomputed without change, and not taken again.
+    await createPlatformServiceFee({
+      effectiveFrom: new Date('2027-01-01T00:00:00.000Z'),
+      createdAt: new Date(written.updatedAt.getTime() + 1000),
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(open)]);
+    const unchanged = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(unchanged).toMatchObject({ claimed: 1, unchanged: 1, failed: 0 });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
+
+    // A definition that covers the order date: taken once, the order becomes computable,
+    // and it is not taken again.
+    const rechecked = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(rechecked.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    await createPlatformServiceFee({
+      effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
+      createdAt: new Date(rechecked.updatedAt.getTime() + 1000),
+    });
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(1);
+    expect(await queueRows()).toEqual([expectedGapRow(open)]);
+    const filled = await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect(filled).toMatchObject({ claimed: 1, changed: 1, failed: 0 });
+    const bestKnown = await readStatement(open.orderId, ProfitStatementView.BEST_KNOWN);
+    expect(bestKnown.status).not.toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(await bestKnownIssueCodes(open.orderId)).not.toContain(
+      ProfitIssueCode.REFERENCE_DATA_MISSING,
+    );
+    expect(await enqueueReferenceDataGapRecomputes(prisma, { limit: 10 })).toBe(0);
   });
 });

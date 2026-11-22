@@ -7,11 +7,15 @@
 // next tick. The batches run one after another, never in parallel. When a tick
 // claimed nothing at all, it sweeps a batch of stale orders into the queue -- those
 // with no best-known statement, or one stamped by an older engine version -- so a
-// new engine version and the phase 3D backfill migrate themselves.
+// new engine version and the phase 3D backfill migrate themselves. At the same time
+// it runs the two gap-fill sweeps (plan PR-3a, Gorev 4): orders waiting on a cargo
+// name no carrier claimed, once one does, and orders missing a fee definition or a
+// micro-export tier, once a newer one is added. Whoever adds the mapping or the
+// definition, a waiting order is computed within one sweep interval.
 //
-// The sweep is a full `orders` scan, so it is throttled (queue-review finding): it
-// runs at most once every PROFIT_STALE_SWEEP_INTERVAL_MS, but immediately on the
-// next tick while it is still finding work (catch-up). A single-process "running"
+// The sweeps scan `orders`, so they are throttled (queue-review finding): they run
+// at most once every PROFIT_STALE_SWEEP_INTERVAL_MS, but immediately on the next
+// tick while any of them is still finding work (catch-up). A single-process "running"
 // flag skips an overlapping tick -- the 5 s interval (or a boot run) can fire again
 // while a long drain is still going. The flag and the sweep bookkeeping live in the
 // closure createProfitRecomputeTick builds, so each test gets a fresh tick with no
@@ -21,6 +25,8 @@ import { prisma, type PrismaClient } from '@pazarsync/db';
 import {
   PROFIT_RECOMPUTE_BATCH_SIZE,
   drainProfitRecomputeQueue,
+  enqueueCarrierGapRecomputes,
+  enqueueReferenceDataGapRecomputes,
   enqueueStaleProfitStatements,
   type DrainResult,
 } from '@pazarsync/profit';
@@ -52,13 +58,42 @@ export const PROFIT_STALE_SWEEP_INTERVAL_MS = 3_600_000;
 // consecutive batches, usually within the next tick or two.
 export const PROFIT_STALE_SWEEP_LIMIT = 500;
 
+// How many waiting orders each gap-fill sweep (carrier, reference data) enqueues.
+// Both pick only orders that leave their candidates once recomputed, so a backlog
+// larger than this drains through the catch-up within a few ticks.
+export const PROFIT_GAP_SWEEP_LIMIT = 500;
+
 // What one tick did: skipped (a previous tick was still running), or the drain
-// totals summed over every pass of the tick plus the number of stale orders swept
-// (null when the tick did not sweep).
+// totals summed over every pass of the tick plus the number of orders each sweep
+// enqueued -- stale, carrier gap, reference data gap (each null when the tick did
+// not sweep).
 export interface ProfitRecomputeTickResult {
   readonly skipped: boolean;
   readonly drain: DrainResult | null;
   readonly swept: number | null;
+  readonly carrierGapSwept: number | null;
+  readonly referenceGapSwept: number | null;
+}
+
+// The orders each sweep of one tick enqueued.
+interface SweepCounts {
+  readonly stale: number;
+  readonly carrierGap: number;
+  readonly referenceGap: number;
+}
+
+/**
+ * Runs the stale sweep and the two gap-fill sweeps one after another and returns how
+ * many orders each enqueued. Each sweep commits its own enqueue, so a later sweep that
+ * throws loses nothing an earlier one wrote.
+ */
+async function runSweeps(db: PrismaClient): Promise<SweepCounts> {
+  const stale = await enqueueStaleProfitStatements(db, { limit: PROFIT_STALE_SWEEP_LIMIT });
+  const carrierGap = await enqueueCarrierGapRecomputes(db, { limit: PROFIT_GAP_SWEEP_LIMIT });
+  const referenceGap = await enqueueReferenceDataGapRecomputes(db, {
+    limit: PROFIT_GAP_SWEEP_LIMIT,
+  });
+  return { stale, carrierGap, referenceGap };
 }
 
 // The running total a tick starts from before its first pass.
@@ -89,22 +124,29 @@ function addDrainPass(total: DrainResult, pass: DrainResult): DrainResult {
  * line with the failed order ids. A tick cut short by a failing pass marks both
  * lines `interrupted: true`.
  */
-function logTick(drain: DrainResult, swept: number | null, interrupted: boolean): void {
+function logTick(drain: DrainResult, sweep: SweepCounts | null, interrupted: boolean): void {
   const marker = interrupted ? { interrupted: true } : {};
-  if (drain.claimed > 0 || (swept !== null && swept > 0)) {
+  if (drain.claimed > 0 || (sweep !== null && sweptAny(sweep))) {
     syncLog.info('profit-recompute.tick', {
       claimed: drain.claimed,
       changed: drain.changed,
       unchanged: drain.unchanged,
       failed: drain.failed,
       unsupported: drain.unsupported,
-      swept: swept ?? 0,
+      swept: sweep?.stale ?? 0,
+      carrierGapSwept: sweep?.carrierGap ?? 0,
+      referenceGapSwept: sweep?.referenceGap ?? 0,
       ...marker,
     });
   }
   if (drain.failedOrderIds.length > 0) {
     syncLog.warn('profit-recompute.failed', { orderIds: [...drain.failedOrderIds], ...marker });
   }
+}
+
+/** True when any sweep of the tick enqueued at least one order. */
+function sweptAny(sweep: SweepCounts): boolean {
+  return sweep.stale > 0 || sweep.carrierGap > 0 || sweep.referenceGap > 0;
 }
 
 /**
@@ -137,7 +179,13 @@ export function createProfitRecomputeTick(deps: {
     // A long drain can outlast the interval; skip the overlapping tick rather than
     // run two drains at once.
     if (running) {
-      return { skipped: true, drain: null, swept: null };
+      return {
+        skipped: true,
+        drain: null,
+        swept: null,
+        carrierGapSwept: null,
+        referenceGapSwept: null,
+      };
     }
     running = true;
     try {
@@ -159,22 +207,30 @@ export function createProfitRecomputeTick(deps: {
         drain = addDrainPass(drain, pass);
       } while (pass.claimed >= batchSize && now() - startedAt < tickBudgetMs);
 
-      let swept: number | null = null;
+      let sweep: SweepCounts | null = null;
       if (drain.claimed === 0) {
         // Catch-up (the last sweep found work) runs immediately; otherwise wait out
-        // the interval so an idle worker does not scan `orders` every 5 s.
+        // the interval so an idle worker does not scan `orders` every 5 s. Every
+        // sweep skips an order that already has a queue row, and an order it enqueues
+        // leaves its candidates once recomputed, so the catch-up ends.
         const sweepDue =
           lastSweepFoundWork || now() - lastSweepAt >= PROFIT_STALE_SWEEP_INTERVAL_MS;
         if (sweepDue) {
-          swept = await enqueueStaleProfitStatements(db, { limit: PROFIT_STALE_SWEEP_LIMIT });
+          sweep = await runSweeps(db);
           lastSweepAt = now();
-          lastSweepFoundWork = swept > 0;
+          lastSweepFoundWork = sweptAny(sweep);
         }
       }
 
-      logTick(drain, swept, false);
+      logTick(drain, sweep, false);
 
-      return { skipped: false, drain, swept };
+      return {
+        skipped: false,
+        drain,
+        swept: sweep?.stale ?? null,
+        carrierGapSwept: sweep?.carrierGap ?? null,
+        referenceGapSwept: sweep?.referenceGap ?? null,
+      };
     } finally {
       running = false;
     }
