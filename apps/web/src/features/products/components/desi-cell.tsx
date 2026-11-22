@@ -47,12 +47,12 @@ export interface DesiCellProps {
  *
  * Three visual states:
  *   - Missing desi (the backend's `isDimensionalWeightMissing`: no override
- *     and Trendyol sent no desi, so the wire value is a placeholder "0"):
- *       the "Desi gir" call to action, mirroring the cost cell's empty
- *       affordance. The rule lives in the backend only; this cell reads the
- *       flag and never re-derives it from the values.
+ *     and Trendyol sent no desi, so the wire value is null): the "Desi gir"
+ *     call to action, mirroring the cost cell's empty affordance. The rule
+ *     lives in the backend only; this cell reads the flag and never
+ *     re-derives it from the values.
  *   - A desi, no user override: the number in Turkish format ("1,5") with
- *       `tabular-nums`.
+ *       `tabular-nums`. A Trendyol desi of 0 is a real value and renders "0".
  *   - A desi, user override: the number tinted in `text-primary` with a
  *       small trailing dot. The override is the load-bearing UX signal, so
  *       it gets a semantic color, not an alpha shortcut. An override of 0 is
@@ -63,8 +63,8 @@ export interface DesiCellProps {
 export function DesiCell({ variant, onClick }: DesiCellProps): React.ReactElement {
   const t = useTranslations('products.desiCell');
 
-  // A null effective desi never reaches the wire (the synced column is NOT
-  // NULL); with no value to show, the call to action is the honest rendering.
+  // An empty desi the backend does not flag (a digital variant needs none)
+  // still has no value to show, so the call to action is the honest rendering.
   if (variant.isDimensionalWeightMissing || variant.dimensionalWeight === null) {
     return <DesiAddButton onClick={onClick} />;
   }

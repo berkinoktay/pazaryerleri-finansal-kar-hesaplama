@@ -750,6 +750,85 @@ describe('processProductsChunk', () => {
     expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
   });
 
+  it('a re-sync without a Trendyol desi empties the synced desi and keeps the user override', async () => {
+    const user = await createUserProfile();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const { storeId } = await createTestStore(org.id);
+
+    const page = (dimensionalWeight?: number): Response =>
+      jsonResponse({
+        totalElements: 1,
+        totalPages: 1,
+        page: 0,
+        size: 100,
+        nextPageToken: null,
+        content: [
+          buildContent({
+            contentId: 800_006,
+            productMainId: 'TS-DESI-6',
+            title: 'Desi Dropped',
+            variants: [
+              {
+                variantId: 800_106,
+                barcode: 'desi-bc-6',
+                stockCode: 'desi-sk-6',
+                ...(dimensionalWeight !== undefined && { dimensionalWeight }),
+              },
+            ],
+          }),
+        ],
+      });
+    const runSync = async (): Promise<void> => {
+      const log = await prisma.syncLog.create({
+        data: {
+          organizationId: org.id,
+          storeId,
+          syncType: 'PRODUCTS',
+          status: 'RUNNING',
+          startedAt: new Date(),
+          claimedAt: new Date(),
+          claimedBy: 'worker-test',
+          lastTickAt: new Date(),
+          attemptCount: 1,
+        },
+      });
+      await processProductsChunk({ syncLog: log, cursor: null, workerId: 'worker-test' });
+      // Complete the log so the (store_id, sync_type) active-sync uniqueness
+      // constraint allows the next one.
+      await prisma.syncLog.update({
+        where: { id: log.id },
+        data: { status: 'COMPLETED', completedAt: new Date() },
+      });
+    };
+    const readVariant = () =>
+      prisma.productVariant.findFirstOrThrow({
+        where: { storeId, platformVariantId: BigInt(800_106) },
+      });
+
+    // First sync: Trendyol sends a desi of 2.5.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(page(2.5));
+    await runSync();
+    expect((await readVariant()).syncedDimensionalWeight?.toString()).toBe('2.5');
+
+    // The seller enters a desi of their own.
+    await prisma.productVariant.updateMany({
+      where: { storeId, platformVariantId: BigInt(800_106) },
+      data: { dimensionalWeightOverride: '5.00' },
+    });
+
+    // Second sync: Trendyol no longer sends the field.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(page());
+    await runSync();
+
+    const variant = await readVariant();
+    // The synced column mirrors Trendyol: no desi now, so it is empty (not 0, not
+    // the old 2.5).
+    expect(variant.syncedDimensionalWeight).toBeNull();
+    // The seller's desi is untouched.
+    expect(variant.dimensionalWeightOverride?.toString()).toBe('5');
+  });
+
   it('stores an omitted or null dimensionalWeight from Trendyol as null and a 0 as a real 0', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();

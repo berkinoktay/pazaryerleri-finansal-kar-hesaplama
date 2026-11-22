@@ -20,10 +20,12 @@ interface SeedVariantSpec {
   status?: ProductVariantStatus;
   statusReason?: string | null;
   delistedAt?: Date | null;
-  // Desi state. Defaults match a fresh sync of a product Trendyol sent no desi
-  // for: synced 0 and no seller override (the "missing desi" state).
-  syncedDimensionalWeight?: string;
+  // Desi state. Omitted: synced 0 (the column default, a real desi) and no
+  // seller override. A variant Trendyol sent no desi for passes
+  // `syncedDimensionalWeight: null` explicitly.
+  syncedDimensionalWeight?: string | null;
   dimensionalWeightOverride?: string | null;
+  isDigital?: boolean;
 }
 
 interface SeedProductSpec {
@@ -82,8 +84,10 @@ async function seedProduct(
         status: v.status ?? 'ON_SALE',
         statusReason: v.statusReason ?? null,
         delistedAt: v.delistedAt ?? null,
-        syncedDimensionalWeight: v.syncedDimensionalWeight ?? '0',
+        syncedDimensionalWeight:
+          v.syncedDimensionalWeight === undefined ? '0' : v.syncedDimensionalWeight,
         dimensionalWeightOverride: v.dimensionalWeightOverride ?? null,
+        isDigital: v.isDigital ?? false,
       },
     });
   }
@@ -850,10 +854,15 @@ describe('GET /v1/.../products: overrideMissing=cost', () => {
 });
 
 // --- overrideMissing=desi ---
-// A variant misses desi when the seller has entered no override AND Trendyol
-// sent no desi (synced 0). An explicit override of 0 is the seller's choice and
-// is NOT missing. The filter composes with status (or the default listing
-// scope) via AND, exactly like overrideMissing=cost.
+// A variant misses desi when its effective desi is empty: the seller has
+// entered no override AND Trendyol sent no desi (synced null). A desi of 0 is a
+// real desi in either column, so it is NOT missing; a digital variant ships no
+// parcel and needs no desi, so it is NOT missing either. The filter composes
+// with status (or the default listing scope) via AND, exactly like
+// overrideMissing=cost.
+
+// The no-desi state of a fresh sync: no seller override, no Trendyol desi.
+const NO_DESI = { syncedDimensionalWeight: null, dimensionalWeightOverride: null } as const;
 
 describe('GET /v1/.../products: overrideMissing=desi', () => {
   beforeAll(async () => {
@@ -864,13 +873,13 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
     await truncateAll();
   });
 
-  it('returns only products with a variant that has no override and synced desi 0', async () => {
+  it('returns only products with a variant that has no override and no synced desi', async () => {
     const fixtures = await setupBareTenant();
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 5001,
       productMainId: 'P-MISSING',
       title: 'No desi anywhere',
-      variants: [{ platformVariantId: 5101, barcode: 'D1', stockCode: 'S1' }],
+      variants: [{ platformVariantId: 5101, barcode: 'D1', stockCode: 'S1', ...NO_DESI }],
     });
     await seedProduct(fixtures.orgId, fixtures.storeId, {
       platformContentId: 5002,
@@ -889,6 +898,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
           platformVariantId: 5103,
           barcode: 'D3',
           stockCode: 'S3',
+          ...NO_DESI,
           dimensionalWeightOverride: '1.5',
         },
       ],
@@ -898,7 +908,29 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       productMainId: 'P-OVERRIDE-ZERO',
       title: 'Seller entered desi 0',
       variants: [
-        { platformVariantId: 5104, barcode: 'D4', stockCode: 'S4', dimensionalWeightOverride: '0' },
+        {
+          platformVariantId: 5104,
+          barcode: 'D4',
+          stockCode: 'S4',
+          ...NO_DESI,
+          dimensionalWeightOverride: '0',
+        },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5014,
+      productMainId: 'P-SYNCED-ZERO',
+      title: 'Trendyol sent desi 0',
+      variants: [
+        { platformVariantId: 5117, barcode: 'D17', stockCode: 'S17', syncedDimensionalWeight: '0' },
+      ],
+    });
+    await seedProduct(fixtures.orgId, fixtures.storeId, {
+      platformContentId: 5015,
+      productMainId: 'P-DIGITAL',
+      title: 'Digital product without desi',
+      variants: [
+        { platformVariantId: 5118, barcode: 'D18', stockCode: 'S18', ...NO_DESI, isDigital: true },
       ],
     });
 
@@ -919,7 +951,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       title: 'Half measured',
       variants: [
         { platformVariantId: 5105, barcode: 'D5', stockCode: 'S5', syncedDimensionalWeight: '3' },
-        { platformVariantId: 5106, barcode: 'D6', stockCode: 'S6' },
+        { platformVariantId: 5106, barcode: 'D6', stockCode: 'S6', ...NO_DESI },
       ],
     });
 
@@ -938,8 +970,14 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       productMainId: 'P-OUT-OF-SCOPE',
       title: 'Out of scope',
       variants: [
-        { platformVariantId: 5107, barcode: 'D7', stockCode: 'S7', status: 'ARCHIVED' },
-        { platformVariantId: 5108, barcode: 'D8', stockCode: 'S8', delistedAt: DELISTED_AT },
+        { platformVariantId: 5107, barcode: 'D7', stockCode: 'S7', status: 'ARCHIVED', ...NO_DESI },
+        {
+          platformVariantId: 5108,
+          barcode: 'D8',
+          stockCode: 'S8',
+          delistedAt: DELISTED_AT,
+          ...NO_DESI,
+        },
       ],
     });
     await seedProduct(fixtures.orgId, fixtures.storeId, {
@@ -947,7 +985,13 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       productMainId: 'P-CLOSED',
       title: 'Closed for sale',
       variants: [
-        { platformVariantId: 5109, barcode: 'D9', stockCode: 'S9', status: 'NOT_ON_SALE' },
+        {
+          platformVariantId: 5109,
+          barcode: 'D9',
+          stockCode: 'S9',
+          status: 'NOT_ON_SALE',
+          ...NO_DESI,
+        },
       ],
     });
 
@@ -974,7 +1018,13 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       productMainId: 'P-A',
       title: 'A',
       variants: [
-        { platformVariantId: 5110, barcode: 'DA', stockCode: 'SA', status: 'NOT_ON_SALE' },
+        {
+          platformVariantId: 5110,
+          barcode: 'DA',
+          stockCode: 'SA',
+          status: 'NOT_ON_SALE',
+          ...NO_DESI,
+        },
       ],
     });
     // P-B: on sale with a synced desi, excluded by overrideMissing=desi
@@ -991,7 +1041,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       platformContentId: 5012,
       productMainId: 'P-C',
       title: 'C',
-      variants: [{ platformVariantId: 5112, barcode: 'DC', stockCode: 'SC' }],
+      variants: [{ platformVariantId: 5112, barcode: 'DC', stockCode: 'SC', ...NO_DESI }],
     });
 
     const { status, body } = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
@@ -1010,7 +1060,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       productMainId: 'P-FLAGS',
       title: 'Every desi state',
       variants: [
-        { platformVariantId: 5113, barcode: 'F-MISSING', stockCode: 'SF1' },
+        { platformVariantId: 5113, barcode: 'F-MISSING', stockCode: 'SF1', ...NO_DESI },
         {
           platformVariantId: 5114,
           barcode: 'F-SYNCED',
@@ -1021,13 +1071,28 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
           platformVariantId: 5115,
           barcode: 'F-OVERRIDE',
           stockCode: 'SF3',
+          ...NO_DESI,
           dimensionalWeightOverride: '4',
         },
         {
           platformVariantId: 5116,
           barcode: 'F-OVERRIDE-ZERO',
           stockCode: 'SF4',
+          syncedDimensionalWeight: '0',
           dimensionalWeightOverride: '0',
+        },
+        {
+          platformVariantId: 5119,
+          barcode: 'F-SYNCED-ZERO',
+          stockCode: 'SF5',
+          syncedDimensionalWeight: '0',
+        },
+        {
+          platformVariantId: 5120,
+          barcode: 'F-DIGITAL',
+          stockCode: 'SF6',
+          ...NO_DESI,
+          isDigital: true,
         },
       ],
     });
@@ -1037,8 +1102,8 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
     expect(status).toBe(200);
     const byBarcode = new Map(body.data.flatMap((p) => p.variants).map((v) => [v.barcode, v]));
     expect(byBarcode.get('F-MISSING')).toMatchObject({
-      dimensionalWeight: '0',
-      syncedDimensionalWeight: '0',
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: false,
       isDimensionalWeightMissing: true,
     });
@@ -1050,7 +1115,7 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
     });
     expect(byBarcode.get('F-OVERRIDE')).toMatchObject({
       dimensionalWeight: '4',
-      syncedDimensionalWeight: '0',
+      syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
@@ -1060,6 +1125,78 @@ describe('GET /v1/.../products: overrideMissing=desi', () => {
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
+    // A Trendyol desi of 0 is a real desi, not a missing one.
+    expect(byBarcode.get('F-SYNCED-ZERO')).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: '0',
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
+    });
+    // A digital variant needs no desi, so an empty one is not missing.
+    expect(byBarcode.get('F-DIGITAL')).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('the per-variant flag, the overrideMissing=desi list and the facets count agree', async () => {
+    // One product per desi state, so the facets count (products with a
+    // missing-desi variant) can be compared one to one with the flagged rows.
+    const fixtures = await setupBareTenant();
+    const states: SeedVariantSpec[] = [
+      { platformVariantId: 5121, barcode: 'A-MISSING', stockCode: 'SA1', ...NO_DESI },
+      { platformVariantId: 5122, barcode: 'A-SYNCED-ZERO', stockCode: 'SA2' },
+      {
+        platformVariantId: 5123,
+        barcode: 'A-OVERRIDE',
+        stockCode: 'SA3',
+        ...NO_DESI,
+        dimensionalWeightOverride: '2',
+      },
+      {
+        platformVariantId: 5124,
+        barcode: 'A-DIGITAL',
+        stockCode: 'SA4',
+        ...NO_DESI,
+        isDigital: true,
+      },
+      { platformVariantId: 5125, barcode: 'A-MISSING-2', stockCode: 'SA5', ...NO_DESI },
+    ];
+    for (const [i, variant] of states.entries()) {
+      await seedProduct(fixtures.orgId, fixtures.storeId, {
+        platformContentId: 5100 + i,
+        productMainId: `P-AGREE-${variant.barcode}`,
+        title: `Agree ${variant.barcode}`,
+        variants: [variant],
+      });
+    }
+
+    const all = await callList(fixtures.user, fixtures.orgId, fixtures.storeId);
+    const flagged = all.body.data
+      .flatMap((p) => p.variants)
+      .filter((v) => v.isDimensionalWeightMissing)
+      .map((v) => v.barcode)
+      .sort();
+    const filtered = await callList(fixtures.user, fixtures.orgId, fixtures.storeId, {
+      overrideMissing: 'desi',
+    });
+    const facetsRes = await app.request(
+      `/v1/organizations/${fixtures.orgId}/stores/${fixtures.storeId}/products/facets`,
+      { headers: { Authorization: bearer(fixtures.user.accessToken) } },
+    );
+    expect(facetsRes.status).toBe(200);
+    const facets = (await facetsRes.json()) as { overrideCounts: { missingDesi: number } };
+
+    expect(flagged).toEqual(['A-MISSING', 'A-MISSING-2']);
+    expect(
+      filtered.body.data
+        .flatMap((p) => p.variants)
+        .map((v) => v.barcode)
+        .sort(),
+    ).toEqual(flagged);
+    expect(facets.overrideCounts.missingDesi).toBe(flagged.length);
   });
 });
 
@@ -1186,10 +1323,11 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
     await truncateAll();
   });
 
-  it('includes shipping fields with correct OK values per variant (desi 0 resolves the lowest tier)', async () => {
-    // Build a store wired to SENDEOMP with two products:
+  it('includes shipping fields per variant (desi 0 resolves the lowest tier, no desi is NO_DESI)', async () => {
+    // Build a store wired to SENDEOMP with three products:
     //   - okProduct: variant has desi=3.0, so OK / NORMAL / SENDEOMP desi-3 = 101.99
-    //   - noDesiProduct: variant has no override and synced desi 0
+    //   - zeroDesiProduct: variant has no override and synced desi 0
+    //   - noDesiProduct: variant has no override and no synced desi
     const carrier = await prisma.shippingCarrier.findFirst({ where: { code: 'SENDEOMP' } });
     if (!carrier) {
       throw new Error('SENDEOMP missing: PR 1 (shipping seed) must run first');
@@ -1235,16 +1373,41 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
       },
     });
 
-    // Desi-0 variant: no override, synced desi defaults to 0, which resolves the
-    // lowest tariff tier (SENDEOMP desi-0 = 91.99). "No desi, no estimate" is
-    // retired: desi is always >= 0 and the tariff table covers desi 0.
-    const noDesiProduct = await prisma.product.create({
+    // Desi-0 variant: no override, a synced desi of 0, which is a real desi and
+    // resolves the lowest tariff tier (SENDEOMP desi-0 = 91.99).
+    const zeroDesiProduct = await prisma.product.create({
       data: {
         organizationId: org.id,
         storeId: store.id,
         platformContentId: 9002n,
-        productMainId: 'PM-SHIP-NODESI',
+        productMainId: 'PM-SHIP-ZERODESI',
         title: 'Zero Desi Product',
+      },
+    });
+    const zeroDesiVariant = await prisma.productVariant.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        productId: zeroDesiProduct.id,
+        platformVariantId: 90020n,
+        barcode: 'SHIP-ZERODESI',
+        stockCode: 'SHIP-ZERODESI',
+        salePrice: '500.00',
+        listPrice: '500.00',
+        dimensionalWeightOverride: null,
+        syncedDimensionalWeight: '0',
+      },
+    });
+
+    // No-desi variant: no override and Trendyol sent no desi, so there is no
+    // tariff row to price from (NO_DESI, no amount).
+    const noDesiProduct = await prisma.product.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        platformContentId: 9003n,
+        productMainId: 'PM-SHIP-NODESI',
+        title: 'No Desi Product',
       },
     });
     const noDesiVariant = await prisma.productVariant.create({
@@ -1252,13 +1415,13 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
         organizationId: org.id,
         storeId: store.id,
         productId: noDesiProduct.id,
-        platformVariantId: 90020n,
+        platformVariantId: 90030n,
         barcode: 'SHIP-NODESI',
         stockCode: 'SHIP-NODESI',
         salePrice: '500.00',
         listPrice: '500.00',
         dimensionalWeightOverride: null,
-        syncedDimensionalWeight: '0',
+        syncedDimensionalWeight: null,
       },
     });
 
@@ -1269,8 +1432,10 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
     const body = (await res.json()) as ShippingFieldsBody;
 
     // Pull each variant out by its id (order-independent assertions).
-    const okV = body.data.flatMap((p) => p.variants).find((v) => v.id === okVariant.id);
-    const noDesiV = body.data.flatMap((p) => p.variants).find((v) => v.id === noDesiVariant.id);
+    const variants = body.data.flatMap((p) => p.variants);
+    const okV = variants.find((v) => v.id === okVariant.id);
+    const zeroDesiV = variants.find((v) => v.id === zeroDesiVariant.id);
+    const noDesiV = variants.find((v) => v.id === noDesiVariant.id);
 
     expect(okV).toBeDefined();
     expect(okV?.shippingEstimateStatus).toBe('OK');
@@ -1278,11 +1443,17 @@ describe('GET /v1/.../products: shipping estimate fields', () => {
     expect(okV?.shippingCarrierCode).toBe('SENDEOMP');
     expect(okV?.estimatedShippingNet).toBe('101.99');
 
-    expect(noDesiV).toBeDefined();
+    expect(zeroDesiV).toBeDefined();
     // Desi 0 resolves the lowest tariff tier: a real estimate, not NO_DESI.
-    expect(noDesiV?.shippingEstimateStatus).toBe('OK');
-    expect(noDesiV?.shippingTariffApplied).toBe('NORMAL');
-    expect(noDesiV?.estimatedShippingNet).toBe('91.99');
+    expect(zeroDesiV?.shippingEstimateStatus).toBe('OK');
+    expect(zeroDesiV?.shippingTariffApplied).toBe('NORMAL');
+    expect(zeroDesiV?.estimatedShippingNet).toBe('91.99');
+    expect(zeroDesiV?.shippingCarrierCode).toBe('SENDEOMP');
+
+    expect(noDesiV).toBeDefined();
+    expect(noDesiV?.shippingEstimateStatus).toBe('NO_DESI');
+    expect(noDesiV?.shippingTariffApplied).toBeNull();
+    expect(noDesiV?.estimatedShippingNet).toBeNull();
     expect(noDesiV?.shippingCarrierCode).toBe('SENDEOMP');
   });
 });

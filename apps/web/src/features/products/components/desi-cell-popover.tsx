@@ -27,22 +27,21 @@ export interface DesiCellPopoverProps {
 }
 
 /**
- * The editing string the input opens with: empty for a missing-desi variant
- * (its wire value is a placeholder "0", not a desi to edit), otherwise the
- * effective value in Turkish format ("1.50" opens as "1,5"). Formatted with
- * the locale-fixed tr formatter, never next-intl's: the field's convention is
- * Turkish whatever the UI locale.
+ * The editing string the input opens with: empty for a variant with no desi
+ * (null on the wire), otherwise the effective value in Turkish format ("1.50"
+ * opens as "1,5"; a real 0 opens as "0"). Formatted with the locale-fixed tr
+ * formatter, never next-intl's: the field's convention is Turkish whatever the
+ * UI locale.
  */
 function initialInputValue(variant: VariantSummary): string {
-  if (variant.isDimensionalWeightMissing || variant.dimensionalWeight === null) return '';
+  if (variant.dimensionalWeight === null) return '';
   return formatTrDecimal(variant.dimensionalWeight);
 }
 
-/** Trendyol's desi when it is a real one (> 0); null when Trendyol has none. */
-function positiveSyncedDesi(variant: VariantSummary): Decimal | null {
+/** Trendyol's desi (0 is a real one); null when Trendyol sent none. */
+function syncedDesi(variant: VariantSummary): Decimal | null {
   if (variant.syncedDimensionalWeight === null) return null;
-  const synced = new Decimal(variant.syncedDimensionalWeight);
-  return synced.gt(0) ? synced : null;
+  return new Decimal(variant.syncedDimensionalWeight);
 }
 
 /**
@@ -50,9 +49,9 @@ function positiveSyncedDesi(variant: VariantSummary): Decimal | null {
  * synced (marketplace) value is never written by this flow.
  *
  * Open: the input is pre-filled (see initialInputValue). Below it, a note
- *   says Trendyol has no desi for the product when the synced value is 0;
- *   otherwise the synced value is shown for reference while the input
- *   differs from it.
+ *   says Trendyol has no desi for the product when the synced value is
+ *   empty; otherwise the synced value (0 included) is shown for reference
+ *   while the input differs from it.
  * Save: the input is parsed the Turkish way ("1,5" and "1.5" both mean 1.5)
  *   and validated inline; only a valid value is sent, as the dot string
  *   "1.5". An empty input clears the override.
@@ -123,10 +122,10 @@ export function DesiCellPopover({
     commit(null);
   }
 
-  const syncedDesi = positiveSyncedDesi(variant);
+  const synced = syncedDesi(variant);
   const parsedInput = parseDesiInput(value);
   const inputMatchesSynced =
-    syncedDesi !== null && parsedInput.kind === 'valid' && parsedInput.value.eq(syncedDesi);
+    synced !== null && parsedInput.kind === 'valid' && parsedInput.value.eq(synced);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -156,11 +155,11 @@ export function DesiCellPopover({
             />
             {errorCode !== null ? (
               <p className="text-destructive text-xs">{t(`errors.${errorCode}`)}</p>
-            ) : syncedDesi === null ? (
+            ) : synced === null ? (
               <p className="text-muted-foreground text-xs">{t('syncedMissing')}</p>
             ) : inputMatchesSynced ? null : (
               <p className="text-muted-foreground text-xs tabular-nums">
-                {t('syncedHint', { value: formatTrDecimal(syncedDesi) })}
+                {t('syncedHint', { value: formatTrDecimal(synced) })}
               </p>
             )}
           </div>

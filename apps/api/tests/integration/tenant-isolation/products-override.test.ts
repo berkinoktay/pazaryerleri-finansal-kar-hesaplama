@@ -38,8 +38,8 @@ interface ListBody {
 // Seeds `missing` products whose only variant has no cost profile, then
 // `costed` products whose only variant has an active profile. The last
 // `withDesi` products (default 0) get a synced desi; every other product misses
-// desi (synced 0, no override). Titles carry the tag so a leaked row is easy to
-// spot.
+// desi (no synced desi, no override). Titles carry the tag so a leaked row is
+// easy to spot.
 interface SeedCounts {
   missing: number;
   costed: number;
@@ -74,7 +74,7 @@ async function seedProducts(
         stockCode: `sk-${tag}-${i.toString()}`,
         salePrice: '10.00',
         listPrice: '10.00',
-        syncedDimensionalWeight: i >= firstWithDesi ? '2' : '0',
+        syncedDimensionalWeight: i >= firstWithDesi ? '2' : null,
       },
     });
     if (i >= counts.missing) {

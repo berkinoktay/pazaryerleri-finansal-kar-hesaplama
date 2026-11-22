@@ -684,8 +684,8 @@ type RowDisplayFields = Omit<
 /**
  * Maps a SHIPPING_ESTIMATE_UNAVAILABLE issue's `detail` (a ShippingUnavailableReason)
  * to the wire ShippingEstimateStatus. A Record keyed by the reason union, so a new
- * reason is a compile error here until it is placed. UNKNOWN_DESI surfaces as NO_DESI
- * (defensive: the scenario desi has a 0 floor, so it is never returned in practice).
+ * reason is a compile error here until it is placed. UNKNOWN_DESI (the variant has no
+ * desi: no seller desi and none from Trendyol) surfaces as NO_DESI.
  */
 const SHIPPING_DETAIL_TO_STATUS: Record<ShippingUnavailableReason, ShippingEstimateStatus> = {
   UNKNOWN_DESI: 'NO_DESI',

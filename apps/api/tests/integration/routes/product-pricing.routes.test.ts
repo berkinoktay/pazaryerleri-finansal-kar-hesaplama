@@ -1021,12 +1021,13 @@ describe('POST /v1/organizations/:orgId/stores/:storeId/product-pricing/quote â€
 
 // -- Scenario-engine behaviours: digital, active tariff band, degradation --
 //
-// One fixture, four variants in the same category (597, 18% rule), all sharing the
+// One fixture, six variants in the same category (597, 18% rule), all sharing the
 // SENDEOMP / TRENDYOL_CONTRACT store and a single 200 GROSS cost profile (+version):
 //   - physical:   desi 3, 18% category commission, shipping + PSF deducted;
 //   - digital:    isDigital -- no shipping, no PSF (its profit beats the physical one);
 //   - tariffBand: an active 10% tariff band on its barcode -- IGNORED by product pricing,
-//   - failing:    a negative desi override that makes the scenario evaluation throw.
+//   - failing:    two negative sale prices that make the scenario evaluation throw;
+//   - noDesi:     no desi at all (no override, Trendyol sent none) -- NO_DESI, no profit.
 // Built once in beforeAll; every test is a read.
 
 const SCENARIO_CATEGORY_ID = 597n;
@@ -1040,6 +1041,7 @@ interface ScenarioEngineCtx {
   tariffBandVariantId: string;
   failingVariantId: string;
   failingVariant2Id: string;
+  noDesiVariantId: string;
 }
 
 async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
@@ -1109,7 +1111,13 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
   let seq = 95000n;
   async function makeVariant(
     suffix: string,
-    extra: { isDigital?: boolean; dimensionalWeightOverride?: string; salePrice?: string },
+    extra: {
+      isDigital?: boolean;
+      dimensionalWeightOverride?: string;
+      // Omitted: the column default 0 (a real desi). Null: Trendyol sent no desi.
+      syncedDimensionalWeight?: string | null;
+      salePrice?: string;
+    },
   ): Promise<string> {
     const variant = await prisma.productVariant.create({
       data: {
@@ -1127,6 +1135,9 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
           extra.dimensionalWeightOverride !== undefined
             ? new Decimal(extra.dimensionalWeightOverride)
             : null,
+        ...(extra.syncedDimensionalWeight !== undefined && {
+          syncedDimensionalWeight: extra.syncedDimensionalWeight,
+        }),
       },
     });
     await prisma.productVariantCostProfile.create({
@@ -1150,6 +1161,7 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
     dimensionalWeightOverride: '3.0',
     salePrice: '-2.00',
   });
+  const noDesiVariantId = await makeVariant('NODESI', { syncedDimensionalWeight: null });
 
   // An active commission tariff for BC-TARIFF: one band at 10% covering now. Product
   // pricing never consults tariff bands, so this must be ignored (the test proves it).
@@ -1189,6 +1201,7 @@ async function setupScenarioEngineFixture(): Promise<ScenarioEngineCtx> {
     tariffBandVariantId,
     failingVariantId,
     failingVariant2Id,
+    noDesiVariantId,
   };
 }
 
@@ -1234,6 +1247,19 @@ describe('GET .../product-pricing -- scenario engine (digital / ignored tariff /
     expect(banded?.netProfit).toBe(physical?.netProfit);
   });
 
+  it('reports NO_DESI and no profit for a variant without any desi', async () => {
+    const rows = await fetchRows();
+    const noDesi = rows.find((r) => r.variantId === sctx.noDesiVariantId);
+    // The scenario loader passes the empty desi on as is (no desi-0 fallback), so the
+    // engine finds no tariff row: the shipping status is NO_DESI and the row has no
+    // profit, while its cost and commission still resolve.
+    expect(noDesi?.shippingEstimateStatus).toBe('NO_DESI');
+    expect(noDesi?.calculable).toBe(false);
+    expect(noDesi?.netProfit).toBeNull();
+    expect(noDesi?.costStatus).toBe('OK');
+    expect(noDesi?.commissionStatus).toBe('OK');
+  });
+
   it('keeps the list up when variants fail to compute and logs the failures once', async () => {
     // Silence + capture the deliberate fallback log so the one-line-per-request rule
     // can be asserted (two failing variants must still produce a single [profit-read]).
@@ -1241,7 +1267,7 @@ describe('GET .../product-pricing -- scenario engine (digital / ignored tariff /
     try {
       const rows = await fetchRows();
       // Every variant is still present (the list always returns 200 -- owner rule).
-      expect(rows).toHaveLength(5);
+      expect(rows).toHaveLength(6);
       const failing = rows.find((r) => r.variantId === sctx.failingVariantId);
       const failing2 = rows.find((r) => r.variantId === sctx.failingVariant2Id);
       expect(failing).toBeDefined();

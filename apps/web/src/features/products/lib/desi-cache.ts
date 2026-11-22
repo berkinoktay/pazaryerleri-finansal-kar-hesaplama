@@ -1,5 +1,4 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import Decimal from 'decimal.js';
 
 import type { ListProductsResponse, VariantSummary } from '../api/list-products.api';
 import type { VariantDimensionalWeightResponse } from '../api/update-variant-dimensional-weight.api';
@@ -16,9 +15,11 @@ export type ListSnapshot = readonly [QueryKey, ListProductsResponse | undefined]
  * the dot string being saved) or clearing (`null`) the user override.
  *
  * The missing flag is the backend's (VariantSummary.isDimensionalWeightMissing:
- * no override and a synced desi of 0). This preview mirrors it only for the
- * moment between the click and the server answer; the PATCH response or the
- * list refetch then replaces it with the backend's own value.
+ * no override and no Trendyol desi; a desi of 0 is a real desi). This preview
+ * mirrors it only for the moment between the click and the server answer; the
+ * PATCH response or the list refetch then replaces it with the backend's own
+ * value. The wire carries no digital flag, so clearing the override of a
+ * digital variant without a Trendyol desi previews as missing until then.
  */
 export function previewVariantDesi(
   variant: VariantSummary,
@@ -37,7 +38,7 @@ export function previewVariantDesi(
     ...variant,
     dimensionalWeight: synced,
     isDimensionalWeightOverridden: false,
-    isDimensionalWeightMissing: synced === null || new Decimal(synced).isZero(),
+    isDimensionalWeightMissing: synced === null,
   };
 }
 

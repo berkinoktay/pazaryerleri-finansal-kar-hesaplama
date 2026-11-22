@@ -36,17 +36,16 @@
  * when several bands of that table contain the price it takes the one with the
  * lowest min_order_amount, as the service does.
  *
- * CASE branch ordering for `shipping_estimate_status` mirrors the service:
- *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) — service line 124
- *      takes precedence over the NO_DESI check on line 127.
- *   2. NO_DESI     (effective desi NULL) — service line 102/127. Kept as a
- *      guard but unreachable: synced_dimensional_weight is NOT NULL with a 0
- *      default, so a variant Trendyol sent no desi for is priced at desi 0
- *      (the products list flags it via isDimensionalWeightMissing).
+ * CASE branch ordering for `shipping_estimate_status` mirrors the service's
+ * resolver (`resolveTariffForDesi` in `@pazarsync/profit`):
+ *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) takes precedence over
+ *      the NO_DESI check, as the resolver checks the carrier first.
+ *   2. NO_DESI     (effective desi NULL: no seller override and no desi from
+ *      the marketplace). A desi of 0 is a real desi and is priced.
  *   3. OWN_CONTRACT_EMPTY (OWN_CONTRACT + no own_shipping_tariffs row).
  *   4. OK          (any tariff resolved).
  *   5. DESI_OVERFLOW (fall-through).
- * The OWN_CONTRACT branch in the service evaluates NO_DESI BEFORE
+ * The resolver's OWN_CONTRACT branch evaluates NO_DESI BEFORE
  * OWN_CONTRACT_EMPTY; the order above honours that on the OWN_CONTRACT
  * source by checking NO_DESI before OWN_CONTRACT_EMPTY.
  */

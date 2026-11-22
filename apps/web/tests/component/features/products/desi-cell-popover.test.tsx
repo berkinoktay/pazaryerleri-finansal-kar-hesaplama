@@ -6,7 +6,7 @@ import { DesiCellPopover } from '@/features/products/components/desi-cell-popove
 
 import trMessages from '../../../../messages/tr.json';
 import { http, HttpResponse, server } from '../../../helpers/msw';
-import { makeVariantSummary } from '../../../helpers/product-fixtures';
+import { MISSING_DESI_FIELDS, makeVariantSummary } from '../../../helpers/product-fixtures';
 import { render, screen, waitFor } from '../../../helpers/render';
 
 // Turkish copy comes from the catalog so this file stays ASCII.
@@ -19,13 +19,7 @@ const STORE_ID = '00000000-0000-0000-0000-000000000002';
 const VARIANT_ID = '00000000-0000-0000-0000-0000000000a1';
 const PATCH_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/products/variants/${VARIANT_ID}/dimensional-weight`;
 
-const MISSING_VARIANT = makeVariantSummary({
-  id: VARIANT_ID,
-  dimensionalWeight: '0',
-  syncedDimensionalWeight: '0',
-  isDimensionalWeightOverridden: false,
-  isDimensionalWeightMissing: true,
-});
+const MISSING_VARIANT = makeVariantSummary({ id: VARIANT_ID, ...MISSING_DESI_FIELDS });
 
 const OVERRIDDEN_VARIANT = makeVariantSummary({
   id: VARIANT_ID,
@@ -45,7 +39,7 @@ function capturePatches(): unknown[] {
       return HttpResponse.json({
         id: VARIANT_ID,
         dimensionalWeight: '1.5',
-        syncedDimensionalWeight: '0',
+        syncedDimensionalWeight: null,
         isDimensionalWeightOverridden: true,
         isDimensionalWeightMissing: false,
       });
@@ -75,7 +69,7 @@ describe('DesiCellPopover', () => {
     expect(screen.queryByText(syncedHint('0'))).toBeNull();
   });
 
-  it('pre-fills the override in Turkish format and shows the synced value hint when synced > 0', async () => {
+  it('pre-fills the override in Turkish format and shows the synced value hint when Trendyol has a desi', async () => {
     const { user } = renderPopover(OVERRIDDEN_VARIANT);
     await user.click(screen.getByRole('button', { name: desiCell.overrideAria }));
 
@@ -107,12 +101,12 @@ describe('DesiCellPopover', () => {
     expect(screen.getByText(syncedHint('1,2'))).toBeInTheDocument();
   });
 
-  it('shows the "no Trendyol desi" note for an override of 0 when synced is 0', async () => {
+  it('shows the "no Trendyol desi" note for an override of 0 when Trendyol has no desi', async () => {
     const { user } = renderPopover(
       makeVariantSummary({
         id: VARIANT_ID,
         dimensionalWeight: '0',
-        syncedDimensionalWeight: '0',
+        syncedDimensionalWeight: null,
         isDimensionalWeightOverridden: true,
         isDimensionalWeightMissing: false,
       }),
@@ -121,6 +115,29 @@ describe('DesiCellPopover', () => {
 
     expect(screen.getByLabelText(popover.title)).toHaveValue('0');
     expect(screen.getByText(popover.syncedMissing)).toBeInTheDocument();
+  });
+
+  it('treats a Trendyol desi of 0 as a real value: pre-filled "0", hint instead of the note', async () => {
+    const { user } = renderPopover(
+      makeVariantSummary({
+        id: VARIANT_ID,
+        dimensionalWeight: '0',
+        syncedDimensionalWeight: '0',
+        isDimensionalWeightOverridden: false,
+        isDimensionalWeightMissing: false,
+      }),
+    );
+    await user.click(screen.getByRole('button', { name: '0' }));
+
+    const input = screen.getByLabelText(popover.title);
+    expect(input).toHaveValue('0');
+    expect(screen.queryByText(popover.syncedMissing)).toBeNull();
+    // The input equals the Trendyol value, so the hint is hidden until it differs.
+    expect(screen.queryByText(syncedHint('0'))).toBeNull();
+
+    await user.clear(input);
+    await user.type(input, '2');
+    expect(screen.getByText(syncedHint('0'))).toBeInTheDocument();
   });
 
   it('saves "1,5" as the dot string "1.5" and closes', async () => {

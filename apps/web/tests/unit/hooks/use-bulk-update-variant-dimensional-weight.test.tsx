@@ -32,8 +32,9 @@ function wrap(client: QueryClient) {
   };
 }
 
-// V1 carries an override over a synced 0 (clearing it makes it missing again);
-// V2 has a real synced desi (clearing it is never missing).
+// V1 carries an override over no Trendyol desi (clearing it makes it missing
+// again); V2 carries one over a Trendyol desi of 0, a real desi (clearing it
+// falls back to 0 and is never missing).
 function seedListCache(client: QueryClient) {
   const key = productKeys.list(ORG_ID, STORE_ID, {
     page: 1,
@@ -47,14 +48,14 @@ function seedListCache(client: QueryClient) {
           makeVariantSummary({
             id: V1,
             dimensionalWeight: '3.00',
-            syncedDimensionalWeight: '0',
+            syncedDimensionalWeight: null,
             isDimensionalWeightOverridden: true,
             isDimensionalWeightMissing: false,
           }),
           makeVariantSummary({
             id: V2,
             dimensionalWeight: '4.00',
-            syncedDimensionalWeight: '1.20',
+            syncedDimensionalWeight: '0',
             isDimensionalWeightOverridden: true,
             isDimensionalWeightMissing: false,
           }),
@@ -150,12 +151,12 @@ describe('useBulkUpdateVariantDimensionalWeight', () => {
     await waitFor(() => {
       const variants = client.getQueryData<ListProductsResponse>(key)?.data[0]?.variants;
       expect(variants?.[0]).toMatchObject({
-        dimensionalWeight: '0',
+        dimensionalWeight: null,
         isDimensionalWeightOverridden: false,
         isDimensionalWeightMissing: true,
       });
       expect(variants?.[1]).toMatchObject({
-        dimensionalWeight: '1.20',
+        dimensionalWeight: '0',
         isDimensionalWeightOverridden: false,
         isDimensionalWeightMissing: false,
       });

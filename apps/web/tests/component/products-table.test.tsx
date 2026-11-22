@@ -12,6 +12,7 @@ import trMessages from '../../messages/tr.json';
 // Shared builders under this file's historical local names, so the test
 // bodies below (and later edits to them) keep reading unchanged.
 import {
+  MISSING_DESI_FIELDS,
   makeProductWithVariants as makeProduct,
   makeVariantSummary as makeVariant,
 } from '@/../tests/helpers/product-fixtures';
@@ -464,18 +465,8 @@ describe('ProductsTable', () => {
       title: 'All Missing Desi',
       variantCount: 2,
       variants: [
-        makeVariant({
-          id: 'v-m1',
-          size: 'S',
-          stockCode: 'STK-M1',
-          isDimensionalWeightMissing: true,
-        }),
-        makeVariant({
-          id: 'v-m2',
-          size: 'M',
-          stockCode: 'STK-M2',
-          isDimensionalWeightMissing: true,
-        }),
+        makeVariant({ id: 'v-m1', size: 'S', stockCode: 'STK-M1', ...MISSING_DESI_FIELDS }),
+        makeVariant({ id: 'v-m2', size: 'M', stockCode: 'STK-M2', ...MISSING_DESI_FIELDS }),
       ],
     });
     // Rendered with the full tr.json catalog from the shared render helper.
@@ -498,7 +489,7 @@ describe('ProductsTable', () => {
           dimensionalWeight: '1.50',
           syncedDimensionalWeight: '1.50',
         }),
-        makeVariant({ id: 'v-m', size: 'M', stockCode: 'STK-M', isDimensionalWeightMissing: true }),
+        makeVariant({ id: 'v-m', size: 'M', stockCode: 'STK-M', ...MISSING_DESI_FIELDS }),
       ],
     });
     render(<ProductsTable {...baseProps} data={[product]} />);
@@ -561,9 +552,7 @@ describe('ProductsTable store switch', () => {
       makeProduct({
         id: 'p-desi',
         variantCount: 1,
-        variants: [
-          makeVariant({ id: 'v-desi', stockCode: 'STK-DESI', isDimensionalWeightMissing: true }),
-        ],
+        variants: [makeVariant({ id: 'v-desi', stockCode: 'STK-DESI', ...MISSING_DESI_FIELDS })],
       }),
     ];
 

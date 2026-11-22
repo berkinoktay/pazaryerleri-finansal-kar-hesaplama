@@ -28,8 +28,8 @@ const ShippingEstimateStatusSchema = z
       'Shipping availability from the engine shipping estimate at the variant own sale price ' +
       '(the Barem / carrier tariff band is chosen at that price). A digital variant has no ' +
       'shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier ' +
-      'configured on this store. NO_DESI = defensive fallback, not returned in practice: ' +
-      'desi has a 0 floor, so a variant with no Trendyol desi is priced at desi 0. ' +
+      'configured on this store. NO_DESI = the variant has no desi (no seller desi and none ' +
+      'from Trendyol), so no shipping can be priced; a desi of 0 is a real desi and is priced. ' +
       'OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. ' +
       'DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.',
     example: 'OK',

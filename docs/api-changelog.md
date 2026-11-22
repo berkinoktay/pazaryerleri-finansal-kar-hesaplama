@@ -26,6 +26,15 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Empty desi is missing, 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
+  `GET .../products/facets`, `PATCH .../products/variants/{variantId}/dimensional-weight`, the
+  product pricing routes). A variant Trendyol sends no desi for now has `syncedDimensionalWeight`
+  `null` (and `dimensionalWeight` `null` when the seller entered none) instead of `"0"`; a `"0"` is
+  a real desi Trendyol sent. `overrideMissing=desi`, `overrideCounts.missingDesi` and
+  `isDimensionalWeightMissing` count only a non-digital variant with no desi at all (no seller
+  desi, no Trendyol desi); a desi of 0 and a digital variant are not missing. The shipping estimate
+  of a variant with no desi is `NO_DESI` with no amount (a desi of 0 is priced at the desi-0 row).
+  Shapes unchanged.
 - **Barem table 1 / table 2** (order profit, the products list shipping estimate, the single
   shipping estimate and the pricing scenario routes). From Trendyol's 10 Aug 2026 rule a shipment
   inside the Barem limits is priced at table 1 when it carries a fast-delivery promise and shipped

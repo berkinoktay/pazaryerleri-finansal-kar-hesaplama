@@ -1,8 +1,10 @@
 /**
  * Integration tests for captureOrderProfitSnapshot (plan PR-2, Gorev 2): the order's
  * undated product and seller inputs are copied once, afterwards only missing parts
- * are filled (a desi of synced 0, commission inputs none of which gives a rate, an
- * empty cost list), and a known value is never overwritten with a live one. The
+ * are filled (commission inputs none of which gives a rate, an empty cost list), and
+ * a known value is never overwritten with a live one. The desi is never filled: a
+ * captured desi (0 included) is known, and an item captured without one stays empty
+ * (plan PR-2c decision 9). The
  * events that change a filled value are the order's own cargo name changing, an
  * item's variant changing, and the cost-window rule: the cost list follows the cost
  * links until the order's business day ends.
@@ -783,6 +785,23 @@ describe('captureOrderProfitSnapshot', () => {
 
     // Still no desi anywhere: nothing to write.
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+
+    // A desi entered later (a seller correction, a Trendyol desi from a later sync) does
+    // not reach the capture: the item captured without a desi stays empty.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '2.50' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    for (const itemId of [parcel.itemA, parcel.itemB]) {
+      const item = await readItemSnapshot(itemId);
+      expect(item.snapshotUnitDesi).toBeNull();
+      expect(item.snapshotDesiSource).toBeNull();
+    }
   });
 
   it('keeps a Trendyol desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {

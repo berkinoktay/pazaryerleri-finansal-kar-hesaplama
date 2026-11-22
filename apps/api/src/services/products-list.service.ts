@@ -24,6 +24,7 @@ import type {
 } from '../validators/product.validator';
 import {
   DELISTED_STATUS_FILTER,
+  MISSING_DESI_VARIANT_WHERE,
   toProductWithVariantsResponse,
   type ListProductsResponseSchema,
   type ProductFacetsResponseSchema,
@@ -42,16 +43,10 @@ const MISSING_COST_VARIANT_WHERE = {
   costProfileLinks: { none: { profile: { archivedAt: null } } },
 } satisfies Prisma.ProductVariantWhereInput;
 
-// A variant "misses desi" when the seller entered no override and Trendyol sent
-// no desi (the catalog mapper stores an absent value as 0). An explicit override
-// of 0 is the seller's choice and is NOT missing. One predicate for the
-// overrideMissing=desi list and the facets missingDesi badge, so the two always
-// agree; toVariantDesiFields (product.validator.ts) applies the same rule to
-// each variant as isDimensionalWeightMissing.
-const MISSING_DESI_VARIANT_WHERE = {
-  dimensionalWeightOverride: null,
-  syncedDimensionalWeight: 0,
-} satisfies Prisma.ProductVariantWhereInput;
+// A variant "misses desi" per MISSING_DESI_VARIANT_WHERE (product.validator.ts):
+// the one predicate for the overrideMissing=desi list and the facets missingDesi
+// badge, defined next to toVariantDesiFields, which reads the same fields per
+// variant as isDimensionalWeightMissing, so the three always agree.
 
 function variantStatusWhere(status: ProductListStatusFilter): Prisma.ProductVariantWhereInput {
   // DELISTED ignores the status column (a delisted variant keeps its last

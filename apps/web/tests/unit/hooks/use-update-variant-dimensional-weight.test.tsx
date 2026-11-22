@@ -12,7 +12,11 @@ import { useUpdateVariantDimensionalWeight } from '@/features/products/hooks/use
 import { productKeys } from '@/features/products/query-keys';
 
 import { http, HttpResponse, server } from '../../helpers/msw';
-import { makeProductWithVariants, makeVariantSummary } from '../../helpers/product-fixtures';
+import {
+  MISSING_DESI_FIELDS,
+  makeProductWithVariants,
+  makeVariantSummary,
+} from '../../helpers/product-fixtures';
 
 // Local QueryClient: gcTime is non-zero so a setQueryData-seeded cache entry
 // survives an invalidate-without-observer (the standard createTestQueryClient
@@ -166,16 +170,11 @@ describe('useUpdateVariantDimensionalWeight', () => {
 
   it('optimistically clears the missing flag when a desi is entered', async () => {
     const client = makeClient();
-    const key = seedListCache(client, {
-      dimensionalWeight: '0',
-      syncedDimensionalWeight: '0',
-      isDimensionalWeightOverridden: false,
-      isDimensionalWeightMissing: true,
-    });
+    const key = seedListCache(client, MISSING_DESI_FIELDS);
     const gate = gatedPatch({
       id: VARIANT_ID,
       dimensionalWeight: '1.5',
-      syncedDimensionalWeight: '0',
+      syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
@@ -201,7 +200,41 @@ describe('useUpdateVariantDimensionalWeight', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
-  it('optimistically flags the variant as missing when the override is cleared and synced is 0', async () => {
+  it('optimistically flags the variant as missing when the override is cleared and Trendyol has no desi', async () => {
+    const client = makeClient();
+    const key = seedListCache(client, {
+      dimensionalWeight: '2.00',
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+    const gate = gatedPatch({
+      id: VARIANT_ID,
+      ...MISSING_DESI_FIELDS,
+    });
+
+    const { result } = renderHook(() => useUpdateVariantDimensionalWeight(), {
+      wrapper: wrap(client),
+    });
+    result.current.mutate({
+      orgId: ORG_ID,
+      storeId: STORE_ID,
+      variantId: VARIANT_ID,
+      dimensionalWeight: null,
+    });
+
+    await waitFor(() =>
+      expect(readVariant(client, key)).toMatchObject({
+        dimensionalWeight: null,
+        isDimensionalWeightOverridden: false,
+        isDimensionalWeightMissing: true,
+      }),
+    );
+    gate.release();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it('optimistically keeps the variant not missing when the override is cleared over a Trendyol desi of 0', async () => {
     const client = makeClient();
     const key = seedListCache(client, {
       dimensionalWeight: '2.00',
@@ -214,7 +247,7 @@ describe('useUpdateVariantDimensionalWeight', () => {
       dimensionalWeight: '0',
       syncedDimensionalWeight: '0',
       isDimensionalWeightOverridden: false,
-      isDimensionalWeightMissing: true,
+      isDimensionalWeightMissing: false,
     });
 
     const { result } = renderHook(() => useUpdateVariantDimensionalWeight(), {
@@ -231,7 +264,7 @@ describe('useUpdateVariantDimensionalWeight', () => {
       expect(readVariant(client, key)).toMatchObject({
         dimensionalWeight: '0',
         isDimensionalWeightOverridden: false,
-        isDimensionalWeightMissing: true,
+        isDimensionalWeightMissing: false,
       }),
     );
     gate.release();

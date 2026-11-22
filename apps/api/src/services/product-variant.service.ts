@@ -25,7 +25,9 @@ export async function setDimensionalWeight(opts: {
   storeId: string;
   variantId: string;
   value: string | null;
-}): Promise<Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight'>> {
+}): Promise<
+  Pick<ProductVariant, 'id' | 'dimensionalWeightOverride' | 'syncedDimensionalWeight' | 'isDigital'>
+> {
   const { organizationId, storeId, variantId, value } = opts;
 
   // A stored order keeps the desi captured at intake, so the override reaches
@@ -43,9 +45,15 @@ export async function setDimensionalWeight(opts: {
     // updateMany doesn't return rows; fetch the canonical state to
     // serialize back to the client. The where-clause is the same tenant
     // filter, so a successful update guarantees this read returns a row.
+    // isDigital feeds the missing-desi flag (a digital variant needs no desi).
     return tx.productVariant.findFirstOrThrow({
       where: { id: variantId, organizationId, storeId },
-      select: { id: true, dimensionalWeightOverride: true, syncedDimensionalWeight: true },
+      select: {
+        id: true,
+        dimensionalWeightOverride: true,
+        syncedDimensionalWeight: true,
+        isDigital: true,
+      },
     });
   });
 }

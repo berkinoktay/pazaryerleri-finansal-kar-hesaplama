@@ -38,7 +38,11 @@ interface Ctx {
   variantId: string;
 }
 
-async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<Ctx> {
+// Omitted `syncedDimensionalWeight` keeps the column default 0 (a real desi);
+// null is a variant Trendyol sent no desi for.
+async function setup(
+  opts: { syncedDimensionalWeight?: string | null; isDigital?: boolean } = {},
+): Promise<Ctx> {
   const user = await createAuthenticatedTestUser();
   const org = await createOrganization();
   await createMembership(org.id, user.id);
@@ -66,6 +70,7 @@ async function setup(opts: { syncedDimensionalWeight?: string } = {}): Promise<C
       ...(opts.syncedDimensionalWeight !== undefined
         ? { syncedDimensionalWeight: opts.syncedDimensionalWeight }
         : {}),
+      isDigital: opts.isDigital ?? false,
     },
   });
 
@@ -150,28 +155,61 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(row.syncedDimensionalWeight?.toString()).toBe('1.2');
   });
 
-  it('isDimensionalWeightMissing follows the missing-desi rule on a variant with synced desi 0', async () => {
-    // No synced value: the column default 0 means Trendyol sent no desi.
-    const ctx = await setup();
+  it('isDimensionalWeightMissing follows the missing-desi rule on a variant Trendyol sent no desi for', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null });
 
     // An explicit override of 0 is the seller's choice, so it is not missing.
     const setZero = await patchDesi(ctx, { dimensionalWeight: '0' });
     expect(setZero.status).toBe(200);
     expect(await setZero.json()).toMatchObject({
       dimensionalWeight: '0',
-      syncedDimensionalWeight: '0',
+      syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
     });
 
-    // Clearing the override puts the variant back into the missing-desi state.
+    // Clearing the override leaves no desi at all: back to the missing-desi state.
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
+  });
+
+  it('a synced desi of 0 is a real desi: clearing the override over it is not missing', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: '0' });
+    await prisma.productVariant.update({
+      where: { id: ctx.variantId },
+      data: { dimensionalWeightOverride: '3.00' },
+    });
+
     const cleared = await patchDesi(ctx, { dimensionalWeight: null });
     expect(cleared.status).toBe(200);
     expect(await cleared.json()).toMatchObject({
       dimensionalWeight: '0',
       syncedDimensionalWeight: '0',
       isDimensionalWeightOverridden: false,
-      isDimensionalWeightMissing: true,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('a digital variant needs no desi: clearing its override is not missing', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: null, isDigital: true });
+    await prisma.productVariant.update({
+      where: { id: ctx.variantId },
+      data: { dimensionalWeightOverride: '3.00' },
+    });
+
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
     });
   });
 

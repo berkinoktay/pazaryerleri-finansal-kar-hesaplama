@@ -11,11 +11,15 @@
  * Cases (one variant per test, both paths run on it):
  *   - OK / NORMAL         - price above every Barem range, desi-based tariff
  *   - OK / BAREM          - Barem destek tier (deliveryDuration = carrier max)
- *   - OK / NORMAL desi-0  - no override, synced desi 0 (a valid tariff tier)
+ *   - OK / NORMAL desi-0  - no override, synced desi 0 (a real desi, a valid
+ *                           tariff tier)
+ *   - NO_DESI             - no override and no synced desi: no estimate on
+ *                           either contract; with no carrier as well, the
+ *                           TRENDYOL_CONTRACT path reports NO_CARRIER first
  *   - NO_CARRIER          - TRENDYOL_CONTRACT but no defaultShippingCarrierId
  *   - OWN_CONTRACT_EMPTY  - OWN_CONTRACT but no own_shipping_tariffs rows, once
- *                           with an override desi and once with the synced
- *                           desi-0 default
+ *                           with an override desi and once with a synced desi
+ *                           of 0
  *   - DESI_OVERFLOW       - desi exceeds the carrier's tariff coverage
  *   - Barem eligibility   - deliveryDuration 0 (ships today) is eligible; a null
  *                           deliveryDuration and one above the carrier window
@@ -60,7 +64,8 @@ interface VariantFixtureOptions {
   defaultShippingCarrierId?: string | null;
   salePrice?: string;
   dimensionalWeightOverride?: string | null;
-  syncedDimensionalWeight?: string;
+  // Omitted: 0 (the column default, a real desi). Null: Trendyol sent no desi.
+  syncedDimensionalWeight?: string | null;
   deliveryDuration?: number | null;
 }
 
@@ -110,8 +115,8 @@ async function createVariantFixture(opts: VariantFixtureOptions): Promise<Varian
       salePrice: opts.salePrice ?? '100.00',
       listPrice: opts.salePrice ?? '100.00',
       dimensionalWeightOverride: opts.dimensionalWeightOverride ?? null,
-      // Synced desi NON-NULL, floor 0 (marketplace omits it → stored 0).
-      syncedDimensionalWeight: opts.syncedDimensionalWeight ?? '0',
+      syncedDimensionalWeight:
+        opts.syncedDimensionalWeight === undefined ? '0' : opts.syncedDimensionalWeight,
       deliveryDuration: opts.deliveryDuration ?? null,
       attributes: [],
     },
@@ -222,10 +227,9 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     expect(row.estimated_shipping_net).toBe('51.24');
   });
 
-  it('OK / NORMAL desi-0 — no override, synced desi defaults to 0', async () => {
-    // Desi 0 is a valid tariff tier (marketplace omits desi → stored 0, not
-    // null). Both paths resolve the desi-0 row (SENDEOMP desi-0 = 91.99) rather
-    // than the retired "no desi → no estimate" outcome.
+  it('OK / NORMAL desi-0 — no override, a synced desi of 0', async () => {
+    // Desi 0 is a real desi and a valid tariff tier (Trendyol sent 0). Both
+    // paths resolve the desi-0 row (SENDEOMP desi-0 = 91.99), not NO_DESI.
     const carrier = await getSendeomp();
     const fixture = await createVariantFixture({
       barcode: 'eq3',
@@ -245,6 +249,60 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     expect(row.shipping_carrier_code).toBe(fnResult.estimate.carrierCode);
     expect(row.estimated_shipping_net).toBe(fnResult.estimate.amount.toFixed(2));
     expect(row.estimated_shipping_net).toBe('91.99');
+  });
+
+  it('NO_DESI — no override and no synced desi: no estimate on either path', async () => {
+    // Trendyol sent no desi and the seller entered none: there is no desi row to
+    // price from, so neither path falls back to the desi-0 row.
+    const carrier = await getSendeomp();
+    const fixture = await createVariantFixture({
+      barcode: 'eq3n',
+      defaultShippingCarrierId: carrier.id,
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('NO_DESI');
+    expect(fnResult).toEqual({ ok: false, reason: 'NO_DESI' });
+    expect(row.shipping_tariff_applied).toBeNull();
+    expect(row.estimated_shipping_net).toBeNull();
+    expect(row.eff_desi).toBeNull();
+  });
+
+  it('NO_CARRIER before NO_DESI — no carrier and no desi on TRENDYOL_CONTRACT', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq4n',
+      shippingTariffSource: 'TRENDYOL_CONTRACT',
+      defaultShippingCarrierId: null,
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('NO_CARRIER');
+    expect(fnResult).toEqual({ ok: false, reason: 'NO_CARRIER' });
+    expect(row.shipping_tariff_applied).toBeNull();
+    expect(row.estimated_shipping_net).toBeNull();
+  });
+
+  it('NO_DESI before OWN_CONTRACT_EMPTY — no desi on an OWN_CONTRACT store', async () => {
+    const fixture = await createVariantFixture({
+      barcode: 'eq5n',
+      shippingTariffSource: 'OWN_CONTRACT',
+      defaultShippingCarrierId: null,
+      dimensionalWeightOverride: null,
+      syncedDimensionalWeight: null,
+    });
+
+    const { fnResult, row } = await runBothPaths(fixture);
+
+    expect(row.shipping_estimate_status).toBe('NO_DESI');
+    expect(fnResult).toEqual({ ok: false, reason: 'NO_DESI' });
+    expect(row.shipping_tariff_applied).toBeNull();
+    expect(row.estimated_shipping_net).toBeNull();
   });
 
   it('NO_CARRIER — TRENDYOL_CONTRACT store with no defaultShippingCarrierId', async () => {
@@ -297,11 +355,11 @@ describe('Equivalence: service fn vs raw SQL CTE', () => {
     expect(row.shipping_carrier_code).toBe('SENDEOMP');
   });
 
-  // OWN_CONTRACT with the default synced desi (0) and no override: ceil(0) = 0
-  // resolves an own_shipping_tariffs lookup that finds nothing (none seeded) →
-  // OWN_CONTRACT_EMPTY. Distinct from eq5 (which sets an override desi of 1.0):
-  // this pins the synced-0 default path. Service and CTE must agree.
-  it('OWN_CONTRACT + desi 0 (default synced) → OWN_CONTRACT_EMPTY', async () => {
+  // OWN_CONTRACT with a synced desi of 0 and no override: 0 is a real desi, so
+  // ceil(0) = 0 resolves an own_shipping_tariffs lookup that finds nothing (none
+  // seeded) → OWN_CONTRACT_EMPTY, not NO_DESI. Distinct from eq5 (which sets an
+  // override desi of 1.0): this pins the synced-0 path. Service and CTE must agree.
+  it('OWN_CONTRACT + synced desi 0 → OWN_CONTRACT_EMPTY', async () => {
     const fixture = await createVariantFixture({
       barcode: 'eq7',
       shippingTariffSource: 'OWN_CONTRACT',
