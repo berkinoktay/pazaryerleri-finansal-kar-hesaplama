@@ -35,13 +35,26 @@ interface TodayProductsBody {
     unitCost: string | null;
     unresolved: boolean;
     vendorMissing: boolean;
+    dimensionalWeight: string | null;
+    syncedDimensionalWeight: string | null;
+    isDimensionalWeightOverridden: boolean;
+    isDimensionalWeightMissing: boolean;
   }[];
 }
 
 async function createVariant(
   orgId: string,
   storeId: string,
-  opts: { title: string; barcode: string; seq: number },
+  opts: {
+    title: string;
+    barcode: string;
+    seq: number;
+    // Passed through as-is: undefined keeps the column default (synced 0), an
+    // explicit null stores an empty desi.
+    syncedDimensionalWeight?: string | null;
+    dimensionalWeightOverride?: string | null;
+    isDigital?: boolean;
+  },
 ): Promise<string> {
   const product = await prisma.product.create({
     data: {
@@ -62,6 +75,9 @@ async function createVariant(
       stockCode: `SC-${opts.seq}`,
       salePrice: '100.00',
       listPrice: '120.00',
+      syncedDimensionalWeight: opts.syncedDimensionalWeight,
+      dimensionalWeightOverride: opts.dimensionalWeightOverride,
+      isDigital: opts.isDigital,
     },
   });
   return variant.id;
@@ -187,6 +203,141 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.revenue).toBe('90.00');
     expect(row?.costStatus).toBe('missing');
     expect(row?.unitCost).toBeNull();
+    // No variant, so no desi state: the row is never counted as missing desi.
+    expect(row?.dimensionalWeight).toBeNull();
+    expect(row?.syncedDimensionalWeight).toBeNull();
+    expect(row?.isDimensionalWeightOverridden).toBe(false);
+    expect(row?.isDimensionalWeightMissing).toBe(false);
+  });
+
+  it('reports the desi fields of a resolved row', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // Buffer path: a physical variant with no seller desi and no marketplace desi.
+    const missingId = await createVariant(org.id, store.id, {
+      title: 'No Desi Variant',
+      barcode: 'BC-NO-DESI',
+      seq: 20,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      isDigital: false,
+    });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '50.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'BC-NO-DESI', quantity: 1, lineSaleGross: '50.00' }],
+      },
+    });
+
+    // Orders path: a variant with only a seller desi.
+    const overriddenId = await createVariant(org.id, store.id, {
+      title: 'Seller Desi Variant',
+      barcode: 'BC-SELLER-DESI',
+      seq: 21,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: '2.50',
+    });
+    await sellInOrders(org.id, store.id, overriddenId, { count: 1, lineSaleGross: '40.00' });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    expect(body.data).toHaveLength(2);
+
+    const missing = body.data.find((r) => r.variantId === missingId);
+    expect(missing).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: true,
+    });
+
+    const overridden = body.data.find((r) => r.variantId === overriddenId);
+    expect(overridden).toMatchObject({
+      dimensionalWeight: '2.5',
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('treats a seller desi of 0 as present', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Zero Desi Variant',
+      barcode: 'BC-ZERO-DESI',
+      seq: 22,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: '0',
+    });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '50.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'BC-ZERO-DESI', quantity: 1, lineSaleGross: '50.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    const row = body.data.find((r) => r.variantId === variantId);
+    expect(row).toMatchObject({
+      dimensionalWeight: '0',
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: true,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('does not flag a digital variant without desi', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Digital Variant',
+      barcode: 'BC-DIGITAL',
+      seq: 23,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      isDigital: true,
+    });
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '30.00' });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TodayProductsBody;
+    const row = body.data.find((r) => r.variantId === variantId);
+    expect(row).toMatchObject({
+      dimensionalWeight: null,
+      syncedDimensionalWeight: null,
+      isDimensionalWeightOverridden: false,
+      isDimensionalWeightMissing: false,
+    });
   });
 
   it('derives vendorMissing on unresolved buffer rows from CatalogBarcodeMiss', async () => {

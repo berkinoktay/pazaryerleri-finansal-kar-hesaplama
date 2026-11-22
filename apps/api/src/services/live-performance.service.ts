@@ -3,6 +3,7 @@ import { prisma } from '@pazarsync/db';
 import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
+  buildCalcCheckLines,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
@@ -15,6 +16,7 @@ import Decimal from 'decimal.js';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
+import { toVariantDesiFields, type VariantDesiFields } from '../validators/product.validator';
 import {
   computeParcelProfitForRead,
   logProfitReadFailure,
@@ -483,7 +485,22 @@ export async function getChart(args: { orgId: string; storeId: string }): Promis
 
 // ─── Today's Products (orders ∪ today buffer, per barcode) ──────────────────────
 
-export interface TodayProductRow {
+/**
+ * The desi fields of a row whose barcode resolves to no catalog variant: no desi to
+ * show and nothing the seller can fill in, so it is never counted as missing desi.
+ */
+const UNRESOLVED_DESI_FIELDS = {
+  dimensionalWeight: null,
+  syncedDimensionalWeight: null,
+  isDimensionalWeightOverridden: false,
+  isDimensionalWeightMissing: false,
+} as const satisfies VariantDesiFields;
+
+/**
+ * The desi fields (VariantDesiFields) come from toVariantDesiFields, the products
+ * list's own rule, or UNRESOLVED_DESI_FIELDS on an unresolved row.
+ */
+export interface TodayProductRow extends VariantDesiFields {
   /** Null on an unresolved row — the barcode has no catalog variant (yet). */
   variantId: string | null;
   barcode: string;
@@ -535,6 +552,7 @@ interface ProductAccumulator {
   // only when no ESTIMATED one exists, so a not-yet-estimated order still shows a cost.
   anyStatementItem: ChosenOrderItem | null;
   unresolved: boolean;
+  desi: VariantDesiFields;
 }
 
 /**
@@ -607,6 +625,7 @@ interface VariantIdentity {
   productName: string | null;
   thumbUrl: string | null;
   unresolved: boolean;
+  desi: VariantDesiFields;
 }
 
 /**
@@ -664,6 +683,9 @@ export async function getTodayProducts(args: {
             id: true,
             barcode: true,
             stockCode: true,
+            dimensionalWeightOverride: true,
+            syncedDimensionalWeight: true,
+            isDigital: true,
             product: {
               select: {
                 title: true,
@@ -700,6 +722,7 @@ export async function getTodayProducts(args: {
       estimatedItem: null,
       anyStatementItem: null,
       unresolved: identity.unresolved,
+      desi: identity.desi,
     };
     byVariant.set(identity.id, created);
     return created;
@@ -717,6 +740,7 @@ export async function getTodayProducts(args: {
       productName: variant.product.title,
       thumbUrl: variant.product.imageUrls[0] ?? null,
       unresolved: false,
+      desi: toVariantDesiFields(variant),
     });
     acc.orderIds.add(item.orderId);
     acc.unitsSold += item.quantity;
@@ -783,6 +807,9 @@ export async function getTodayProducts(args: {
             id: true,
             barcode: true,
             stockCode: true,
+            dimensionalWeightOverride: true,
+            syncedDimensionalWeight: true,
+            isDigital: true,
             product: {
               select: {
                 title: true,
@@ -792,7 +819,12 @@ export async function getTodayProducts(args: {
           },
         })
       : [];
-  const variantByBarcode = new Map(bufferVariants.map((variant) => [variant.barcode, variant]));
+  // First match per barcode, as the calculability gate (buildCalcCheckLines) resolves
+  // it, so a barcode shared by two variants shows the variant the gate holds the order for.
+  const variantByBarcode = new Map<string, (typeof bufferVariants)[number]>();
+  for (const variant of bufferVariants) {
+    if (!variantByBarcode.has(variant.barcode)) variantByBarcode.set(variant.barcode, variant);
+  }
 
   for (const [barcode, agg] of bufferByBarcode) {
     const variant = variantByBarcode.get(barcode);
@@ -809,6 +841,7 @@ export async function getTodayProducts(args: {
             productName: variant.product.title,
             thumbUrl: variant.product.imageUrls[0] ?? null,
             unresolved: false,
+            desi: toVariantDesiFields(variant),
           }
         : {
             id: `barcode:${barcode}`,
@@ -818,6 +851,7 @@ export async function getTodayProducts(args: {
             productName: null,
             thumbUrl: null,
             unresolved: true,
+            desi: UNRESOLVED_DESI_FIELDS,
           },
     );
     acc.bufferEntryCount += agg.entryIds.size;
@@ -885,6 +919,7 @@ export async function getTodayProducts(args: {
         unitCost,
         unresolved: acc.unresolved,
         vendorMissing: acc.variantId === null && vendorMissingBarcodes.has(acc.barcode),
+        ...acc.desi,
       };
       // Retain the Decimal revenue for the tiebreaker so the sort compares
       // numerically, not lexicographically over the `.toFixed(2)` string.
@@ -1063,7 +1098,7 @@ export interface NewOrderNotificationSummary {
 
 // --- Buffer Detail ---
 
-export interface BufferDetailLine {
+export interface BufferDetailLine extends VariantDesiFields {
   barcode: string;
   productName: string;
   thumbUrl: string | null;
@@ -1072,6 +1107,13 @@ export interface BufferDetailLine {
   quantity: number;
   // GROSS konvansiyon (2026-06-16): lineSaleGross satır toplamı (KDV-dahil, × quantity).
   lineSaleGross: string;
+  /**
+   * The line's gap in the calculability gate that holds the order in the buffer
+   * (buildCalcCheckLines): no cost profile linked, or the barcode resolves to no
+   * variant. Deliberately the gate's own check, not the products page's
+   * active-profile rule, so it names exactly what keeps this order waiting.
+   */
+  isCostMissing: boolean;
 }
 
 export interface BufferDetail {
@@ -1110,6 +1152,9 @@ export async function getBufferDetail(args: {
             id: true,
             barcode: true,
             stockCode: true,
+            dimensionalWeightOverride: true,
+            syncedDimensionalWeight: true,
+            isDigital: true,
             product: {
               select: {
                 title: true,
@@ -1119,10 +1164,23 @@ export async function getBufferDetail(args: {
           },
         })
       : [];
-  const byBarcode = new Map(variants.map((v) => [v.barcode, v]));
+  const variantById = new Map(variants.map((v) => [v.id, v]));
 
-  const lines: BufferDetailLine[] = mapped.lines.map((line) => {
-    const variant = byBarcode.get(line.barcode);
+  // The calculability gate's own lines for this order, scoped by organizationId +
+  // storeId. buildCalcCheckLines returns one line per input line in input order, so
+  // index i is mapped.lines[i].
+  const calcLines = await buildCalcCheckLines(prisma, {
+    organizationId: args.orgId,
+    storeId: args.storeId,
+    lines: mapped.lines.map((l) => ({ barcode: l.barcode })),
+  });
+
+  const lines: BufferDetailLine[] = mapped.lines.map((line, index) => {
+    const calcLine = calcLines[index];
+    // The variant the gate resolved for this line, so the name, the desi and the cost
+    // flag describe one variant even when two variants of the store share a barcode.
+    const gateVariantId = calcLine?.variantId ?? null;
+    const variant = gateVariantId === null ? undefined : variantById.get(gateVariantId);
     return {
       barcode: line.barcode,
       productName: variant?.product.title ?? line.barcode,
@@ -1131,6 +1189,9 @@ export async function getBufferDetail(args: {
       stockCode: variant?.stockCode ?? null,
       quantity: line.quantity,
       lineSaleGross: new Decimal(line.lineSaleGross).toFixed(2),
+      // Fail closed: a line the gate did not return counts as cost-missing.
+      isCostMissing: calcLine === undefined || calcLine.unitCostSnapshotNet === null,
+      ...(variant === undefined ? UNRESOLVED_DESI_FIELDS : toVariantDesiFields(variant)),
     };
   });
 
