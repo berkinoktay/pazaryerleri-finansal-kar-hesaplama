@@ -25,6 +25,7 @@ import {
 } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
+import { businessDateRangeFilter } from '../lib/business-date-range';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import {
@@ -146,12 +147,9 @@ function buildOrderListWhere(
 
   if (filters.status !== undefined) where.status = filters.status;
 
-  if (filters.from !== undefined || filters.to !== undefined) {
-    where.orderDate = {
-      ...(filters.from !== undefined ? { gte: filters.from } : {}),
-      ...(filters.to !== undefined ? { lte: filters.to } : {}),
-    };
-  }
+  // from/to are business dates: the range covers their whole business days.
+  const orderDateRange = businessDateRangeFilter(filters);
+  if (orderDateRange !== undefined) where.orderDate = orderDateRange;
 
   if (filters.q !== undefined) {
     where.OR = [

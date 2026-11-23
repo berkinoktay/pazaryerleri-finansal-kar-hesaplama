@@ -9,6 +9,7 @@ import {
 } from '@pazarsync/db/enums';
 
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
+import { businessDateQueryParam } from './business-date.validator';
 
 // ─── Domain enums (wire-shape) ────────────────────────────────────────────
 
@@ -57,14 +58,16 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
   reconciliationStatus: ReconciliationStatusSchema.optional().openapi({
     description: 'Filter by settlement progression. Omit for all.',
   }),
-  from: z.coerce.date().optional().openapi({
-    description: 'Inclusive lower bound on Order.orderDate (ISO 8601).',
-    example: '2026-04-01T00:00:00.000Z',
-  }),
-  to: z.coerce.date().optional().openapi({
-    description: 'Inclusive upper bound on Order.orderDate (ISO 8601).',
-    example: '2026-05-23T23:59:59.999Z',
-  }),
+  from: businessDateQueryParam(
+    'Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the ' +
+      'start of that business day.',
+    '2026-04-01',
+  ),
+  to: businessDateQueryParam(
+    'Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose ' +
+      'orderDate is before the end of that business day.',
+    '2026-05-23',
+  ),
   q: z.string().trim().min(1).max(120).optional().openapi({
     description: 'Substring match on platformOrderNumber or platformOrderId.',
     example: 'TY-2024',

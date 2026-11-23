@@ -6,6 +6,7 @@ import {
   getBusinessDate,
   getBusinessDateAnchor,
   getBusinessDayRange,
+  getBusinessDayRangeOfDate,
   toUtcIsoDate,
   getBusinessHour,
 } from '../src/timezone';
@@ -76,6 +77,45 @@ describe('getBusinessDayRange', () => {
     const { start, end } = getBusinessDayRange(new Date('2026-03-29T12:00:00Z'));
     expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000);
   });
+});
+
+describe('getBusinessDayRangeOfDate', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // An instant three days back and the business date it falls on.
+  const anchor = new Date(Date.now() - 3 * DAY_MS);
+  const businessDate = getBusinessDate(anchor);
+
+  it('starts at the business midnight of the named date', () => {
+    const { start } = getBusinessDayRangeOfDate(businessDate);
+
+    expect(getBusinessDate(start)).toBe(businessDate);
+    expect(getBusinessDate(new Date(start.getTime() - 1)) < businessDate).toBe(true);
+  });
+
+  it('ends at the next business midnight, 24h after the start', () => {
+    const { start, end } = getBusinessDayRangeOfDate(businessDate);
+
+    expect(end.getTime() - start.getTime()).toBe(DAY_MS);
+    expect(getBusinessDate(new Date(end.getTime() - 1))).toBe(businessDate);
+    expect(getBusinessDate(end) > businessDate).toBe(true);
+  });
+
+  it('is the same window as getBusinessDayRange of any instant on that date', () => {
+    expect(getBusinessDayRangeOfDate(businessDate)).toEqual(getBusinessDayRange(anchor));
+  });
+
+  it.each(['2026-6-1', '', '2026-02-30'])(
+    'throws an error naming the bad value for %j',
+    (badValue) => {
+      // Positive control: a real YYYY-MM-DD date, a leap day included, is accepted.
+      expect(() => getBusinessDayRangeOfDate(businessDate)).not.toThrow();
+      expect(() => getBusinessDayRangeOfDate('2024-02-29')).not.toThrow();
+
+      expect(() => getBusinessDayRangeOfDate(badValue)).toThrow(
+        `Invalid business date ${JSON.stringify(badValue)}`,
+      );
+    },
+  );
 });
 
 describe('getBusinessHour', () => {

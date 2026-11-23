@@ -9,6 +9,7 @@ import {
   ProfitLineType,
 } from '@pazarsync/db/enums';
 
+import { businessDateRangeFilter } from '../lib/business-date-range';
 import { NotFoundError } from '../lib/errors';
 import type { ClaimsSummaryQuery, ListClaimsQuery } from '../validators/claim.validator';
 import {
@@ -73,12 +74,9 @@ function buildClaimListWhere(
   if (filters.status === 'open') where.resolved = false;
   if (filters.status === 'resolved') where.resolved = true;
 
-  if (filters.from !== undefined || filters.to !== undefined) {
-    where.claimDate = {
-      ...(filters.from !== undefined ? { gte: filters.from } : {}),
-      ...(filters.to !== undefined ? { lte: filters.to } : {}),
-    };
-  }
+  // from/to are business dates: the range covers their whole business days.
+  const claimDateRange = businessDateRangeFilter(filters);
+  if (claimDateRange !== undefined) where.claimDate = claimDateRange;
 
   if (filters.q !== undefined) {
     where.OR = [
@@ -204,16 +202,26 @@ export async function getClaimsSummary(
   // (its own ACTUAL + SELLER_INPUT line) counts only when its order item also
   // carries such a dated SALE_RETURN line, so the cost return follows its item's
   // return line into the same period.
-  const to = range.to ?? new Date();
+  // `from`/`to` are business dates, the same contract as the claims list the
+  // returns page sends them to: `to` includes its whole Istanbul day, so the
+  // period ends (exclusive) at that day's end. Without `to` it ends now.
+  const period = businessDateRangeFilter(range);
+  const toExclusive = period?.lt ?? new Date();
   const from =
-    range.from ?? new Date(to.getTime() - SUMMARY_DEFAULT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+    period?.gte ??
+    new Date(toExclusive.getTime() - SUMMARY_DEFAULT_PERIOD_DAYS * 24 * 60 * 60 * 1000);
 
   const [openCount, resolvedInPeriod, moneyRows] = await Promise.all([
     prisma.orderClaim.count({
       where: { organizationId: orgId, storeId, resolved: false },
     }),
     prisma.orderClaim.count({
-      where: { organizationId: orgId, storeId, resolved: true, claimDate: { gte: from, lte: to } },
+      where: {
+        organizationId: orgId,
+        storeId,
+        resolved: true,
+        claimDate: { gte: from, lt: toExclusive },
+      },
     }),
     prisma.$queryRaw<ClaimsMoneyRow[]>`
       WITH dated_returns AS (
@@ -241,7 +249,7 @@ export async function getClaimsSummary(
             ${ProfitLineType.COMMISSION_REFUND}::"ProfitLineType"
           )
           AND ld.line_date >= ${from}::timestamp(3)
-          AND ld.line_date <= ${to}::timestamp(3)
+          AND ld.line_date < ${toExclusive}::timestamp(3)
       ),
       cost_return AS (
         SELECT COALESCE(SUM(pl.amount_gross), 0) AS total

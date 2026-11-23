@@ -13,6 +13,7 @@ import {
 import { createApp } from '../../../src/app';
 import { listOrders } from '../../../src/services/order.service';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
+import { businessDayEdges } from '../../helpers/business-day-edges';
 import { seedCalculableTrendyolOrder } from '../../helpers/calculable-order';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
@@ -845,6 +846,48 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { id: string }[] };
       expect(body.data.map((o) => o.id)).toEqual([inWindow.id]);
+    });
+
+    it('to=<day> lists an order placed at 23:30 Istanbul on that day', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const edges = businessDayEdges();
+
+      const lateInDay = await seedSimpleOrder(org.id, store.id, { orderDate: edges.lateInDay });
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.nextDayEarly });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?from=${edges.day}&to=${edges.day}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { data: { id: string }[]; pagination: { total: number } } = await res.json();
+      // The 00:10 order of the next day stays out.
+      expect(body.data.map((o) => o.id)).toEqual([lateInDay.id]);
+      expect(body.pagination.total).toBe(1);
+    });
+
+    it('from=<day> lists an order placed at 00:30 Istanbul on that day', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const edges = businessDayEdges();
+
+      const earlyInDay = await seedSimpleOrder(org.id, store.id, { orderDate: edges.earlyInDay });
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.prevDayLate });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders?from=${edges.day}&to=${edges.day}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: { data: { id: string }[]; pagination: { total: number } } = await res.json();
+      // The 23:30 order of the previous day stays out.
+      expect(body.data.map((o) => o.id)).toEqual([earlyInDay.id]);
+      expect(body.pagination.total).toBe(1);
     });
 
     it('filters by substring search on platformOrderNumber', async () => {
@@ -2556,6 +2599,31 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { avgMarginPct: string | null };
       expect(body.avgMarginPct).toBe('20'); // avg(10, 20, 30)
+    });
+
+    it('from=<day>&to=<day> counts both in-day orders and neither neighbour', async () => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const edges = businessDayEdges();
+
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.earlyInDay });
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.lateInDay });
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.prevDayLate });
+      await seedSimpleOrder(org.id, store.id, { orderDate: edges.nextDayEarly });
+
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/orders/summary?from=${edges.day}&to=${edges.day}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(200);
+      const body: {
+        totalRevenueGross: string;
+        lossOrderRate: { lossCount: number; totalCount: number };
+      } = await res.json();
+      expect(body.totalRevenueGross).toBe('480'); // 2 x 240, the neighbours stay out
+      expect(body.lossOrderRate).toMatchObject({ lossCount: 0, totalCount: 2 });
     });
   });
 });

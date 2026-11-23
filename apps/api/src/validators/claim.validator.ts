@@ -1,6 +1,7 @@
 import { z } from '@hono/zod-openapi';
 
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
+import { businessDateQueryParam } from './business-date.validator';
 
 // ─── List query ────────────────────────────────────────────────────────────
 
@@ -9,8 +10,16 @@ export const listClaimsQuerySchema = TablePaginationQuerySchema.extend({
     description: 'Tab filter — open (resolved=false) or resolved. Absent = all claims.',
     example: 'open',
   }),
-  from: z.coerce.date().optional().openapi({ description: 'claimDate >= (ISO date).' }),
-  to: z.coerce.date().optional().openapi({ description: 'claimDate <= (ISO date).' }),
+  from: businessDateQueryParam(
+    'Istanbul business date (YYYY-MM-DD): lists claims whose claimDate is at or after the ' +
+      'start of that business day.',
+    '2026-06-01',
+  ),
+  to: businessDateQueryParam(
+    'Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists claims whose ' +
+      'claimDate is before the end of that business day.',
+    '2026-06-30',
+  ),
   q: z.string().trim().min(1).max(120).optional().openapi({
     description: "Substring search over platformOrderNumber and the marketplace's claim id.",
   }),
@@ -94,10 +103,16 @@ export const ListClaimsResponseSchema = z
 
 export const claimsSummaryQuerySchema = z
   .object({
-    from: z.coerce.date().optional().openapi({
-      description: 'Period start — defaults to 30 days before `to` when absent.',
-    }),
-    to: z.coerce.date().optional().openapi({ description: 'Period end — defaults to now.' }),
+    from: businessDateQueryParam(
+      'Istanbul business date (YYYY-MM-DD): the period starts at the start of that business ' +
+        'day. Defaults to 30 days before the period end when absent.',
+      '2026-06-01',
+    ),
+    to: businessDateQueryParam(
+      'Istanbul business date (YYYY-MM-DD), inclusive of that whole day: the period ends at ' +
+        'the end of that business day. Defaults to now when absent.',
+      '2026-06-30',
+    ),
   })
   .openapi('ClaimsSummaryQuery');
 export type ClaimsSummaryQuery = z.infer<typeof claimsSummaryQuerySchema>;

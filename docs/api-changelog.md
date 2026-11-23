@@ -26,6 +26,23 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Orders and returns date filters select whole Istanbul business days**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/claims`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/claims/summary`). `from` and `to` are now
+  date-only Istanbul business dates (`YYYY-MM-DD`, OpenAPI `format: date`): `from` selects from the
+  start of that business day, and `to` includes that whole business day (up to, not including, the
+  next business midnight). Before, both were compared as UTC instants, so `from` dropped the first
+  three hours of its day and `to` dropped all of its day after 00:00 UTC. Any other value, a
+  timestamp with a time of day, another separator (`2026/06/01`) or a day the month does not have
+  (`2026-02-30`) included, is now `422 VALIDATION_ERROR` with `errors[].code`
+  `INVALID_BUSINESS_DATE`. The claims summary period follows the same rule (the returns page sends it the
+  list's `from`/`to`), so its KPI strip and the list cover the same days. A `from`/`to` outside
+  2000-01-01..2099-12-31 is now `422 VALIDATION_ERROR` with `errors[].code`
+  `INVALID_DATE_OUT_OF_RANGE`. The web client now sends the
+  calendar day the user picked instead of its UTC date (which was the previous day for picks east of
+  UTC).
 - **New profit issue code and a blocking not-recognized carrier**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/orders/{orderId}`, `profitIssues[].code`). The
   `ProfitIssue.code` enum gains `REFERENCE_DATA_MISSING` (blocking): a fee definition (`detail`

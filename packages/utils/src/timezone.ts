@@ -108,6 +108,35 @@ export function getBusinessDayRange(at: Date = new Date()): { start: Date; end: 
   return { start, end };
 }
 
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * True when `value` is `YYYY-MM-DD` naming a real calendar date. The round trip
+ * catches a day the month does not have: `Date` rolls `2026-02-30` over to
+ * March 2 instead of rejecting it.
+ */
+function isIsoCalendarDate(value: string): boolean {
+  if (!ISO_DATE_PATTERN.test(value)) return false;
+  const midnight = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(midnight.getTime()) && midnight.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * The half-open UTC instant window `[start, end)` of the business date
+ * `businessDate` (`YYYY-MM-DD`). Noon UTC of that calendar date lies inside the
+ * same business day for any zone less than 12h from UTC, so its window is the
+ * named day's window. Throws when `businessDate` is not `YYYY-MM-DD` naming a
+ * real calendar date.
+ */
+export function getBusinessDayRangeOfDate(businessDate: string): { start: Date; end: Date } {
+  if (!isIsoCalendarDate(businessDate)) {
+    throw new Error(
+      `Invalid business date ${JSON.stringify(businessDate)}: expected YYYY-MM-DD naming a real calendar date`,
+    );
+  }
+  return getBusinessDayRange(new Date(`${businessDate}T12:00:00.000Z`));
+}
+
 /** The business-timezone hour (0–23) of `at`, for hourly day-bucketing. */
 export function getBusinessHour(at: Date): number {
   const formatter = new Intl.DateTimeFormat('en-US', {
