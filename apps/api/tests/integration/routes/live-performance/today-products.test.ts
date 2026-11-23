@@ -1079,6 +1079,58 @@ describe('GET /v1/.../live-performance/today-products', () => {
     });
   });
 
+  it("merges an orphan line into a re-created variant's row without any buffer sale", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const deletedVariantId = await createVariant(org.id, store.id, {
+      title: 'Deleted Variant',
+      barcode: 'BC-REBORN',
+      seq: 33,
+    });
+    await sellLine(org.id, store.id, {
+      productVariantId: deletedVariantId,
+      barcode: 'BC-REBORN',
+      quantity: 2,
+      lineSaleGross: '80.00',
+    });
+    // The item's variant FK is ON DELETE SET NULL: the line stays, variantless, with its barcode.
+    await prisma.productVariant.delete({ where: { id: deletedVariantId } });
+
+    // The re-created variant carries the same barcode and sells in another of today's orders.
+    // No buffer entry: only the variantless line's own barcode can put it in the lookup.
+    const recreatedVariantId = await createVariant(org.id, store.id, {
+      title: 'Recreated Variant',
+      barcode: 'BC-REBORN',
+      seq: 34,
+    });
+    await sellLine(org.id, store.id, {
+      productVariantId: recreatedVariantId,
+      barcode: 'BC-REBORN',
+      quantity: 3,
+      lineSaleGross: '90.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: recreatedVariantId,
+      barcode: 'BC-REBORN',
+      unresolved: false,
+      orderCount: 2, // 2 orders, no buffer entry
+      unitsSold: 5, // 2 + 3
+      revenue: '170.00', // 80 + 90
+    });
+  });
+
   it('merges a variantless order line and a buffer line of the same unknown barcode, with vendorMissing from CatalogBarcodeMiss', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();

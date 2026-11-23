@@ -829,8 +829,9 @@ export async function getTodayProducts(args: {
     orphanItemsByBarcode.set(item.barcode, orphanItems);
   }
 
-  // Buffer: aggregate lines by barcode first (the entry carries no variant id),
-  // then resolve identity for barcodes not already seen in orders.
+  // Buffer: aggregate lines by barcode (the entry carries no variant id). These barcodes
+  // and the variantless order lines' barcodes resolve through the one organization +
+  // store barcode lookup below.
   interface BufferBarcodeAggregate {
     units: number;
     revenue: Decimal;
