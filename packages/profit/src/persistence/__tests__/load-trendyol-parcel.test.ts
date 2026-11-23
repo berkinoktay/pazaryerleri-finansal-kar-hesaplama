@@ -38,6 +38,7 @@ import { computeParcelProfit } from '../compute-parcel-profit';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
+  COST_FIXTURE_EPOCH,
   createAdditionalStore,
   ensureDbReachable,
   MELONTIK,
@@ -1614,6 +1615,8 @@ describe('loadTrendyolParcel', () => {
         organizationId: parcel.organizationId,
         productVariantId: parcel.variantA,
         profileId: profile.id,
+        // Linked before the order's day ended, so the link counts for it.
+        attachedAt: COST_FIXTURE_EPOCH,
       },
     });
 
@@ -1625,6 +1628,55 @@ describe('loadTrendyolParcel', () => {
     const result = estimateTrendyolParcel(loaded.estimateInput);
     const packaging = requireLine(result.lines, ProfitLineType.COST_PACKAGING, parcel.itemA);
     expect(packaging.amount.gross.toFixed(2)).toBe('300.00');
+  });
+
+  it('an uncaptured item ignores an archived-only link', async () => {
+    const parcel = await seedMelontikParcel();
+    // Item A's only profile was live at the order instant and archived later the same
+    // day: at the end of the order's business day it is not in force, so the item has
+    // no cost.
+    const linkA = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+      select: { profileId: true },
+    });
+    const archivedAt = new Date(MELONTIK.orderDate.getTime() + 60 * 60 * 1000);
+    await prisma.costProfile.update({
+      where: { id: linkA.profileId, organizationId: parcel.organizationId },
+      data: { archivedAt },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: linkA.profileId,
+        organizationId: parcel.organizationId,
+        version: 2,
+        name: `COGS ${MELONTIK.items.a.barcode}`,
+        type: 'COGS',
+        amountGross: MELONTIK.items.a.costGross,
+        vatRate: MELONTIK.costVatRate,
+        changedFields: ['archivedAt'],
+        effectiveFrom: archivedAt,
+        archivedAt,
+      },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.estimateInput.costs.map((entry) => entry.orderItemId)).toEqual([parcel.itemB]);
+    const result = estimateTrendyolParcel(loaded.estimateInput);
+    expect(
+      result.lines.find(
+        (line) => line.type === ProfitLineType.COST_COGS && line.orderItemId === parcel.itemA,
+      ),
+    ).toBeUndefined();
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: ProfitIssueCode.MISSING_COST, orderItemId: parcel.itemA }),
+    );
+    // Item B keeps its cost.
+    const costB = requireLine(result.lines, ProfitLineType.COST_COGS, parcel.itemB);
+    expect(costB.amount.gross.toFixed(2)).toBe('165.00');
   });
 
   it("uses the order's own carrier for the shipping estimate", async () => {

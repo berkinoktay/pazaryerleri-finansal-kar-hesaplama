@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 
 import { prisma } from '@pazarsync/db';
 
-import { createOrder } from './factories';
+import { COST_FIXTURE_EPOCH, createOrder } from './factories';
 import { ensureFeeDefinitions } from './seed-fee-definitions';
 
 /**
  * Seeds a calculable Trendyol order: a digital variant (so no shipping/PSF line can
  * block the estimate) with a COGS cost profile and a per-line commission rate, so the
- * engine computes a non-null net profit. No statement or line rows are written here --
+ * engine computes a non-null net profit. The cost's version and link date from
+ * COST_FIXTURE_EPOCH, so the cost is in force at any order date (plan PR-3b). No
+ * statement or line rows are written here --
  * the caller either runs the writer (recomputeParcelProfit) or lets a read path compute
  * the profit read-only in the request. Shared by the order-detail and the live-
  * performance notification tests so the seed lives in exactly one place. Returns the
@@ -60,10 +62,16 @@ export async function seedCalculableTrendyolOrder(orgId: string, storeId: string
       vatRate: '20',
       changedFields: [],
       changedAt: new Date('2024-01-01T00:00:00Z'),
+      effectiveFrom: COST_FIXTURE_EPOCH,
     },
   });
   await prisma.productVariantCostProfile.create({
-    data: { organizationId: orgId, productVariantId: variant.id, profileId: profile.id },
+    data: {
+      organizationId: orgId,
+      productVariantId: variant.id,
+      profileId: profile.id,
+      attachedAt: COST_FIXTURE_EPOCH,
+    },
   });
 
   const order = await createOrder(orgId, storeId, { status: 'DELIVERED' });

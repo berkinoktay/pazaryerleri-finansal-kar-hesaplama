@@ -76,7 +76,11 @@ export async function buildCalcCheckLines(
           profile: {
             select: {
               amountGross: true,
-              versions: { select: { effectiveFrom: true, version: true, archivedAt: true } },
+              // Only versions effective by `at`: the rule never reads a later one.
+              versions: {
+                where: { effectiveFrom: { lte: args.at } },
+                select: { effectiveFrom: true, version: true, archivedAt: true },
+              },
             },
           },
         },

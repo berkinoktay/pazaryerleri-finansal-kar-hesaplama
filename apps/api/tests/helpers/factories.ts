@@ -450,14 +450,17 @@ export async function createProductVariant(
  * same organization, store and product, every scalar of the source copied (prices, VAT,
  * desi, isDigital, synced commission rate, listing status, ...) except its id, barcode,
  * platformVariantId (random, as `createProductVariant` does) and timestamps; stockCode is
- * the new barcode. Every cost-profile link of the source is copied to the clone. Gives a
+ * the new barcode. Every cost-profile link of the source is copied to the clone, with its
+ * `attachedAt` (the cost rule judges a link by it, plan PR-3b). Gives a
  * campaign item's own barcode a catalog variant priced exactly like an existing fixture
  * variant (campaign reads resolve the variant from the item's barcode).
  */
 export async function cloneVariantWithBarcode(variantId: string, barcode: string) {
   const source = await prisma.productVariant.findUniqueOrThrow({
     where: { id: variantId },
-    include: { costProfileLinks: { select: { organizationId: true, profileId: true } } },
+    include: {
+      costProfileLinks: { select: { organizationId: true, profileId: true, attachedAt: true } },
+    },
   });
   const {
     id: _id,
@@ -482,6 +485,7 @@ export async function cloneVariantWithBarcode(variantId: string, barcode: string
         create: costProfileLinks.map((link) => ({
           organizationId: link.organizationId,
           profileId: link.profileId,
+          attachedAt: link.attachedAt,
         })),
       },
     },

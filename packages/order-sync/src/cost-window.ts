@@ -97,8 +97,8 @@ export async function hadCostWithinOrderDay(
 
   // Tenant-scoped: every cost profile link of these variants, where the link, the
   // variant (with its store) and the profile all belong to THIS organization. The
-  // in-force decision needs each profile's whole version history, so it runs in
-  // memory with the shared rule rather than as a SQL filter.
+  // in-force decision needs each profile's version history up to the day end, so it
+  // runs in memory with the shared rule rather than as a SQL filter.
   const links = await tx.productVariantCostProfile.findMany({
     where: {
       organizationId: params.organizationId,
@@ -110,7 +110,13 @@ export async function hadCostWithinOrderDay(
       productVariantId: true,
       attachedAt: true,
       profile: {
-        select: { versions: { select: { effectiveFrom: true, version: true, archivedAt: true } } },
+        select: {
+          // Only versions effective by the day end: the rule never reads a later one.
+          versions: {
+            where: { effectiveFrom: { lte: at } },
+            select: { effectiveFrom: true, version: true, archivedAt: true },
+          },
+        },
       },
     },
   });

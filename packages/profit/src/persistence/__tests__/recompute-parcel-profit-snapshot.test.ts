@@ -43,6 +43,7 @@ import { recomputeParcelProfit, type RecomputeParcelResult } from '../recompute-
 import {
   attachCostProfile,
   ensureDbReachable,
+  MELONTIK,
   type MelontikParcel,
   seedMelontikParcel,
   upsertCarrierWithTariffs,
@@ -616,6 +617,56 @@ describe('recomputeParcelProfit with the order profit snapshot', () => {
       select: { profitSnapshotAt: true },
     });
     expect(addedItem.profitSnapshotAt).toBeNull();
+  });
+
+  it("a cost linked after the order's business day leaves BEST_KNOWN not computable with MISSING_COST", async () => {
+    const parcel = await seedSnapshotParcel();
+    // Item A's only profile was archived before the order: no cost in force for it.
+    const linkA = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+      select: { profileId: true },
+    });
+    await prisma.costProfile.update({
+      where: { id: linkA.profileId, organizationId: parcel.organizationId },
+      data: { archivedAt: BEFORE_ORDER_DATE },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: linkA.profileId,
+        organizationId: parcel.organizationId,
+        version: 2,
+        name: 'COGS bc-a',
+        type: CostProfileType.COGS,
+        amountGross: MELONTIK.items.a.costGross,
+        vatRate: MELONTIK.costVatRate,
+        changedFields: ['archivedAt'],
+        effectiveFrom: BEFORE_ORDER_DATE,
+        archivedAt: BEFORE_ORDER_DATE,
+      },
+    });
+
+    const first = await recompute(parcel);
+    expect(first.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+
+    // The seller attaches a new profile now, long after the order's day ended.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: MELONTIK.items.a.costGross,
+      vatRate: MELONTIK.costVatRate,
+      attachedAt: new Date(),
+    });
+
+    const second = await recompute(parcel);
+    expect(second.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(second.bestKnown.netProfit).toBeNull();
+    const computed = await computeReadOnly(parcel.organizationId, parcel.orderId);
+    expect(computed.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(computed.bestKnown.issues).toContainEqual(
+      expect.objectContaining({ code: ProfitIssueCode.MISSING_COST, orderItemId: parcel.itemA }),
+    );
+    expect(findLine(computed, ProfitLineType.COST_COGS, parcel.itemA)).toBeUndefined();
   });
 
   it('a captured carrier that was later deactivated still prices the order', async () => {

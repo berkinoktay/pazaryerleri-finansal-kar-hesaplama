@@ -43,6 +43,7 @@ import {
 } from '../../src/handlers/orders';
 
 import {
+  COST_FIXTURE_EPOCH,
   createCostProfile,
   createMembership,
   createOrganization,
@@ -214,7 +215,8 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
   });
 
   // PR-B calculability gate: a seeded variant must carry a cost profile or the
-  // handler hard-skips its order. One profile per store, linked to each variant.
+  // handler hard-skips its order. One profile per store, linked to each variant since
+  // COST_FIXTURE_EPOCH, so the cost is in force for any order date (plan PR-3b).
   const costProfile = barcodes.length > 0 ? await createCostProfile(org.id) : null;
   for (const barcode of barcodes) {
     const product = await prisma.product.create({
@@ -237,7 +239,15 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
         salePrice: '100',
         listPrice: '120',
         ...(costProfile !== null
-          ? { costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } } }
+          ? {
+              costProfileLinks: {
+                create: {
+                  organizationId: org.id,
+                  profileId: costProfile.id,
+                  attachedAt: COST_FIXTURE_EPOCH,
+                },
+              },
+            }
           : {}),
       },
     });

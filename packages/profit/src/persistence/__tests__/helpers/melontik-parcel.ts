@@ -258,7 +258,17 @@ export async function createTrendyolOrg(opts: {
   return { organizationId: org.id, storeId: store.id };
 }
 
-/** Creates one product + variant + TRY COGS profile for one melontik item. */
+/**
+ * Far-past default for a fixture cost's version `effectiveFrom` and link `attachedAt`,
+ * so a cost is in force for any order date unless a test opts into a later instant.
+ */
+export const COST_FIXTURE_EPOCH = new Date('2000-01-01T00:00:00Z');
+
+/**
+ * Creates one product + variant + TRY COGS profile for one melontik item. The cost's
+ * version and link date from COST_FIXTURE_EPOCH, so the cost is in force at any
+ * order date.
+ */
 async function createVariantWithCost(params: {
   readonly organizationId: string;
   readonly storeId: string;
@@ -313,10 +323,16 @@ async function createVariantWithCost(params: {
       vatRate: MELONTIK.costVatRate,
       changedFields: [],
       changedAt: MELONTIK.costEffectiveFrom,
+      effectiveFrom: COST_FIXTURE_EPOCH,
     },
   });
   await prisma.productVariantCostProfile.create({
-    data: { organizationId, productVariantId: variant.id, profileId: profile.id },
+    data: {
+      organizationId,
+      productVariantId: variant.id,
+      profileId: profile.id,
+      attachedAt: COST_FIXTURE_EPOCH,
+    },
   });
   return variant.id;
 }
@@ -801,12 +817,6 @@ export async function seedBareOrder(params: {
   });
   return order.id;
 }
-
-/**
- * Far-past default for a fixture cost's version `effectiveFrom` and link `attachedAt`,
- * so a cost is in force for any order date unless a test opts into a later instant.
- */
-export const COST_FIXTURE_EPOCH = new Date('2000-01-01T00:00:00Z');
 
 /**
  * Attaches an extra single-version COGS profile to a variant and returns the profile

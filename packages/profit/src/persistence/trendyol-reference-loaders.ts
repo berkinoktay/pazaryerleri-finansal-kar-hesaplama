@@ -85,12 +85,19 @@ export interface IdentifiedCostProfileVersionInput extends CostProfileVersionInp
   readonly id: string;
 }
 
-/** A linked cost profile with its version history, each version shaped as `V`. */
+/**
+ * A linked cost profile with its version history, each version shaped as `V`, and
+ * the instant its link to the variant was made (the cost rule judges both).
+ */
 interface LoadedCostProfile<V> {
   readonly profileId: string;
   readonly profileType: CostProfileType;
+  readonly attachedAt: Date;
   readonly versions: readonly V[];
 }
+
+/** A linked cost profile with its full version history and its link instant (the engine's view). */
+export type LinkedItemCostProfileInput = LoadedCostProfile<CostProfileVersionInput>;
 
 /** A cost profile whose versions carry their row ids (the order snapshot's view). */
 export type IdentifiedItemCostProfileInput = LoadedCostProfile<IdentifiedCostProfileVersionInput>;
@@ -105,11 +112,12 @@ function toIdentifiedCostVersion(
 // --- Cost profiles -----------------------------------------------------------
 
 /**
- * The cost profiles linked to the given variants, org-filtered, each with its
- * full version history in (effectiveFrom, version) order, each version mapped by
- * `toVersion`. A profile with no version is dropped: the cost module throws on a
- * versionless profile, so it could never be costed anyway. The result maps only
- * variants that have at least one usable profile.
+ * The cost profiles linked to the given variants, org-filtered (the link and its
+ * profile), each with its link's `attachedAt` and its full version history in
+ * (effectiveFrom, version) order, each version mapped by `toVersion`. A profile with
+ * no version is dropped: the cost module throws on a versionless profile, so it could
+ * never be costed anyway. The result maps only variants that have at least one usable
+ * profile.
  */
 async function loadCostProfiles<V>(
   tx: Prisma.TransactionClient,
@@ -124,7 +132,11 @@ async function loadCostProfiles<V>(
   }
 
   const links = await tx.productVariantCostProfile.findMany({
-    where: { organizationId, productVariantId: { in: variantIds } },
+    where: {
+      organizationId,
+      productVariantId: { in: variantIds },
+      profile: { organizationId },
+    },
     include: {
       profile: {
         include: { versions: { orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] } },
@@ -138,7 +150,12 @@ async function loadCostProfiles<V>(
       continue; // a profile with no versions cannot be costed and would break indexing
     }
     const list = profilesByVariant.get(link.productVariantId) ?? [];
-    list.push({ profileId: link.profile.id, profileType: link.profile.type, versions });
+    list.push({
+      profileId: link.profile.id,
+      profileType: link.profile.type,
+      attachedAt: link.attachedAt,
+      versions,
+    });
     profilesByVariant.set(link.productVariantId, list);
   }
   return profilesByVariant;
@@ -146,22 +163,23 @@ async function loadCostProfiles<V>(
 
 /**
  * The seller cost profiles of every given variant, org-filtered, each with its
- * full version history in (effectiveFrom, version) order. A profile with no
- * version is dropped: the cost module throws on a versionless profile, so it
- * could never be costed anyway. The result maps only variants that have at least
- * one usable profile; a variant with none is simply absent from the map.
+ * link's `attachedAt` and its full version history in (effectiveFrom, version)
+ * order. A profile with no version is dropped: the cost module throws on a
+ * versionless profile, so it could never be costed anyway. The result maps only
+ * variants that have at least one usable profile; a variant with none is simply
+ * absent from the map.
  */
 export async function loadCostProfilesByVariant(
   tx: Prisma.TransactionClient,
   params: { readonly organizationId: string; readonly variantIds: readonly string[] },
-): Promise<Map<string, ItemCostProfileInput[]>> {
+): Promise<Map<string, LinkedItemCostProfileInput[]>> {
   return loadCostProfiles(tx, params, toCostVersion);
 }
 
 /**
  * The same cost profiles as `loadCostProfilesByVariant` (one query, same filter and
  * order), with each version also carrying its row id. Used by the order profit
- * snapshot to pin the version in force at the order date.
+ * snapshot to pin the version the cost rule chooses (`chooseOrderCostVersion`).
  */
 export async function loadIdentifiedCostProfilesByVariant(
   tx: Prisma.TransactionClient,

@@ -15,6 +15,10 @@ import {
   type ItemCostInput,
   type ItemCostProfileInput,
 } from '../core/seller-costs/build-seller-cost-lines';
+import {
+  chooseOrderCostVersion,
+  costDecisionTime,
+} from '../core/seller-costs/cost-profile-in-force';
 import { type TrendyolEstimateInput } from '../marketplaces/trendyol/estimate-parcel';
 import {
   isTrendyolTransactionType,
@@ -308,7 +312,7 @@ export async function loadTrendyolParcel(
 
   // --- Costs ---
   const costs = [
-    ...(await loadItemCosts(tx, { organizationId, orderItems: uncapturedItems })),
+    ...(await loadItemCosts(tx, { organizationId, orderDate, orderItems: uncapturedItems })),
     ...(await loadCapturedItemCosts(tx, { organizationId, orderItems: capturedItems })),
   ];
 
@@ -550,21 +554,27 @@ async function loadCommissionRules(
 }
 
 /**
- * The seller cost inputs per item: every cost profile attached to the item's
- * variant (org-filtered), with its full version history. An item without a variant
- * or without profiles is omitted; the cost module raises MISSING_COST itself.
+ * The seller cost inputs of the uncaptured items, by the same cost rule the order
+ * snapshot pins with (plan PR-3b): per cost profile linked to the item's variant
+ * (org-filtered), the version `chooseOrderCostVersion` picks at the end of the order's
+ * business day, as a one-version profile (the shape `loadCapturedItemCosts` produces).
+ * A profile not in force then (linked later, or archived) contributes nothing; an
+ * item without a variant or without such a profile is omitted, and the cost module
+ * raises MISSING_COST itself.
  */
 async function loadItemCosts(
   tx: Prisma.TransactionClient,
   params: {
     readonly organizationId: string;
+    readonly orderDate: Date;
     readonly orderItems: readonly {
       readonly id: string;
       readonly productVariantId: string | null;
     }[];
   },
 ): Promise<ItemCostInput[]> {
-  const { organizationId, orderItems } = params;
+  const { organizationId, orderDate, orderItems } = params;
+  const at = costDecisionTime(orderDate);
   const variantIds = orderItems
     .map((item) => item.productVariantId)
     .filter((variantId): variantId is string => variantId !== null);
@@ -573,8 +583,14 @@ async function loadItemCosts(
   const costs: ItemCostInput[] = [];
   for (const item of orderItems) {
     if (item.productVariantId === null) continue;
-    const profiles = profilesByVariant.get(item.productVariantId);
-    if (profiles === undefined || profiles.length === 0) continue;
+    const profiles: ItemCostProfileInput[] = [];
+    for (const profile of profilesByVariant.get(item.productVariantId) ?? []) {
+      const version = chooseOrderCostVersion(profile, { orderDate, at });
+      if (version === null) continue;
+      // The same linked profile (id, type, link instant), priced by the chosen version only.
+      profiles.push({ ...profile, versions: [version] });
+    }
+    if (profiles.length === 0) continue;
     costs.push({ orderItemId: item.id, profiles });
   }
   return costs;
