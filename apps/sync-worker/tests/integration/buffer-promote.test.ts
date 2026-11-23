@@ -1290,6 +1290,35 @@ describe('processPastDayBufferFlush', () => {
     expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
   });
 
+  it('a past-day entry whose only profile was archived before its day ended graduates with COST_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // The variant's only profile was linked long ago but archived one minute before
+    // the order's day ended (plan PR-3b): no cost was in force when the day closed,
+    // so the day-end flush must exclude it even though the link itself is old.
+    await seedVersionedCostVariant(org.id, store.id, 'EAN13-FLUSH-ARCHIVED', {
+      archivedAt: new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 1000),
+    });
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-archived',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-archived',
+        barcode: 'EAN13-FLUSH-ARCHIVED',
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('flush-archived');
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
   it('excludes a past-day PERMANENT_FAILED entry whose cost arrived after its day on its final flush attempt', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);

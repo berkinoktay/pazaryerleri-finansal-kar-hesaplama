@@ -15,7 +15,10 @@
 // entered in time from the live cost links (`attached_at`). An order whose link
 // was changed later but whose snapshot does carry a cost can therefore be wrongly,
 // and irreversibly, excluded from profit. Adapt it to read the snapshot before
-// running it again.
+// running it again. Since PR-3b the window also ignores a profile archived before
+// the day ended, while a captured cost list is frozen at capture: an order costed
+// in the morning whose only profile was archived later that day would be stamped
+// as COST_DEADLINE_MISSED even though its snapshot carries the cost.
 //
 // Run from inside the package (connects with DATABASE_URL from the workspace-root .env):
 //   cd packages/order-sync && pnpm exec tsx --env-file=../../.env scripts/backfill-cost-window-exclusions.ts --store <id> --dry-run
