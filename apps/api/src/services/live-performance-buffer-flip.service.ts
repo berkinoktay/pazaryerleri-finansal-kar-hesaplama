@@ -1,6 +1,7 @@
 import type { Prisma } from '@pazarsync/db';
 import {
   buildCalcCheckLines,
+  costDecisionTime,
   resolveOrderCalculability,
   type OrderLineForCalcCheck,
 } from '@pazarsync/profit';
@@ -37,17 +38,19 @@ function readLineBarcodes(mappedOrder: unknown): string[] | null {
  * Resolve every distinct barcode once with buildCalcCheckLines (one variant query,
  * scoped to the organization and store) and key the result by barcode. Its output
  * is one line per input line, in input order, so each distinct barcode maps to the
- * line it resolved to, an unresolved barcode included (variantId null).
+ * line it resolved to, an unresolved barcode included (variantId null). The cost
+ * links are judged at `at`, the cost decision time of the candidate orders.
  */
 async function resolveCalcLinesByBarcode(
   tx: Prisma.TransactionClient,
-  args: { organizationId: string; storeId: string; barcodes: readonly string[] },
+  args: { organizationId: string; storeId: string; barcodes: readonly string[]; at: Date },
 ): Promise<Map<string, OrderLineForCalcCheck>> {
   const distinct = [...new Set(args.barcodes)];
   const lines = await buildCalcCheckLines(tx, {
     organizationId: args.organizationId,
     storeId: args.storeId,
     lines: distinct.map((barcode) => ({ barcode })),
+    at: args.at,
   });
   return new Map(lines.map((line) => [line.barcode, line]));
 }
@@ -153,11 +156,14 @@ export async function flipBufferForVariants(
 
   // ONE variant query for every candidate's lines: each distinct barcode is
   // resolved once (same org + store scope), then every order's lines are rebuilt
-  // in its own line order, repeated barcodes included.
+  // in its own line order, repeated barcodes included. Every candidate is a today
+  // order, so one decision time serves them all: the end of today's business day
+  // (plan PR-3b cost rule).
   const lineByBarcode = await resolveCalcLinesByBarcode(tx, {
     organizationId,
     storeId,
     barcodes: readable.flatMap((entry) => entry.lineBarcodes),
+    at: costDecisionTime(new Date()),
   });
 
   const promotableIds: string[] = [];

@@ -24,8 +24,9 @@
  *   - cost/desi_missing + today + new → live_performance_buffer (PENDING, same-day cost/desi window)
  *
  * The "already in orders" guard prevents a phantom buffer row for an order that
- * was costed earlier then had its cost profile archived (would otherwise live in
- * BOTH orders and buffer → double-count on the Live Performance page).
+ * was costed earlier then had its cost profile archived or detached: the gate then
+ * reports the cost missing (plan PR-3b), and the order would otherwise live in
+ * BOTH orders and buffer → double-count on the Live Performance page.
  *
  * Buffer graduation on persist (Faz 4A, Gorev 8): a cost-missing order parks in the
  * buffer and drops its stock there; once its cost is attached (cost-attach service) or
@@ -76,7 +77,11 @@ import { prisma } from '@pazarsync/db';
 import { Prisma } from '@pazarsync/db';
 import { ProfitExclusionReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { buildCalcCheckLines, resolveOrderCalculability } from '@pazarsync/profit';
+import {
+  buildCalcCheckLines,
+  costDecisionTime,
+  resolveOrderCalculability,
+} from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { hadCostWithinOrderDay } from './cost-window';
@@ -276,17 +281,21 @@ export async function intakeOrder(args: {
     return { kind: 'persisted', reason: 'cancelled_audit' };
   }
 
+  // The cost rule judges links at the end of the order's business day (plan PR-3b):
+  // the current state for today's order, that day's end for a past-day one.
   const calcLines = await buildCalcCheckLines(prisma, {
     organizationId,
     storeId,
     lines: mapped.lines,
+    at: costDecisionTime(mapped.orderDate),
   });
   const calc = resolveOrderCalculability(calcLines);
 
   // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22). A past-day order's
   // window (its own business day) has already closed, so it enters profit ONLY when every
   // non-cancelled item had its cost entered before that day ended AND the gate is
-  // calculable now (cost + desi present). Otherwise it is persisted but PERMANENTLY
+  // calculable (a cost link in force at that day's end, and a desi present now).
+  // Otherwise it is persisted but PERMANENTLY
   // excluded. The cost is judged first and wins: no cost at all, or a cost entered only
   // after the day (decision 2), is a cost gap; a timely cost with a desiless item is a
   // desi gap (the desi is checked for presence only -- no entry time is recorded). The

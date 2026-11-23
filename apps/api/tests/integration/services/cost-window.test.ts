@@ -62,6 +62,7 @@ async function attachCost(params: {
   const profile = await createCostProfile(params.orgId, {
     storeId: params.storeId,
     amountGross: '40.00',
+    seedVersion: false,
   });
   await prisma.productVariantCostProfile.create({
     data: {
@@ -285,6 +286,7 @@ describe('hadCostWithinOrderDay', () => {
     const otherProfile = await createCostProfile(otherOrg.id, {
       storeId: otherStore.id,
       amountGross: '40.00',
+      seedVersion: false,
     });
     await prisma.productVariantCostProfile.create({
       data: {

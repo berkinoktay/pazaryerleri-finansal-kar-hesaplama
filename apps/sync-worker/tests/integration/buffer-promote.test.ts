@@ -183,7 +183,11 @@ async function seedTimelyCostedVariant(
   barcode: string,
   orderDate: Date,
 ): Promise<void> {
-  const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
+  const profile = await createCostProfile(organizationId, {
+    storeId,
+    amountGross: '48.00',
+    seedVersion: false,
+  });
   const product = await prisma.product.create({
     data: {
       organizationId,
@@ -224,16 +228,20 @@ async function seedTimelyCostedVariant(
 
 // Seed a variant whose cost was entered AFTER `orderDate`'s business day ended:
 // the link is attached, and the profile's first version becomes effective, one
-// minute after the day end. buildCalcCheckLines sees an amount so the order is
-// calculable NOW, but the cost missed the window, so a past-day graduation must
-// still be excluded with COST_DEADLINE_MISSED.
+// minute after the day end. buildCalcCheckLines judges the link at that day end, so
+// it sees no cost, and the cost missed the window: a past-day graduation must be
+// excluded with COST_DEADLINE_MISSED.
 async function seedLateCostedVariant(
   organizationId: string,
   storeId: string,
   barcode: string,
   orderDate: Date,
 ): Promise<void> {
-  const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
+  const profile = await createCostProfile(organizationId, {
+    storeId,
+    amountGross: '48.00',
+    seedVersion: false,
+  });
   const product = await prisma.product.create({
     data: {
       organizationId,
@@ -354,29 +362,91 @@ async function seedCategoryVariant(
   return variant.id;
 }
 
-// Attach a 48.00 cost profile with a version effective long before the order, so the
-// loader reads a cost for the order's day.
+// Attach a 48.00 cost profile with a version effective long before the order (the
+// factory's version 1), so the loader reads a cost for the order's day.
 async function attachVersionedCost(
   organizationId: string,
   storeId: string,
   variantId: string,
 ): Promise<void> {
   const profile = await createCostProfile(organizationId, { storeId, amountGross: '48.00' });
-  await prisma.costProfileVersion.create({
-    data: {
-      profileId: profile.id,
-      organizationId,
-      version: 1,
-      name: profile.name,
-      type: profile.type,
-      amountGross: profile.amountGross,
-      vatRate: profile.vatRate,
-      changedFields: [],
-      effectiveFrom: new Date('2024-01-01T00:00:00Z'),
-    },
-  });
   await prisma.productVariantCostProfile.create({
     data: { organizationId, productVariantId: variantId, profileId: profile.id },
+  });
+}
+
+// Far-past instant for a cost that has been in place long before any test order.
+const LONG_AGO = new Date('2000-01-01T00:00:00Z');
+
+// Seed a variant (with its default desi) linked to one 48.00 profile whose version 1
+// dates from LONG_AGO. `attachedAt` stamps the link (default LONG_AGO). With
+// `archivedAt` the profile is archived the way the cost-profile service does it: the
+// profile row is stamped and an archive version 2 (archivedAt = effectiveFrom = the
+// archive instant) is appended.
+async function seedVersionedCostVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+  options: { archivedAt?: Date; attachedAt?: Date } = {},
+): Promise<void> {
+  const profile = await createCostProfile(organizationId, {
+    storeId,
+    amountGross: '48.00',
+    seedVersion: false,
+  });
+  const versionBase = {
+    profileId: profile.id,
+    organizationId,
+    name: profile.name,
+    type: profile.type,
+    amountGross: profile.amountGross,
+    vatRate: profile.vatRate,
+  };
+  await prisma.costProfileVersion.create({
+    data: { ...versionBase, version: 1, changedFields: [], effectiveFrom: LONG_AGO },
+  });
+  if (options.archivedAt !== undefined) {
+    await prisma.costProfileVersion.create({
+      data: {
+        ...versionBase,
+        version: 2,
+        archivedAt: options.archivedAt,
+        changedFields: ['archivedAt'],
+        effectiveFrom: options.archivedAt,
+      },
+    });
+    await prisma.costProfile.update({
+      where: { id: profile.id },
+      data: { archivedAt: options.archivedAt },
+    });
+  }
+  const product = await prisma.product.create({
+    data: {
+      organizationId,
+      storeId,
+      platformContentId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      productMainId: `pm-${barcode}`,
+      title: 'Promote Test Product',
+    },
+  });
+  await prisma.productVariant.create({
+    data: {
+      organizationId,
+      storeId,
+      productId: product.id,
+      platformVariantId: BigInt(Math.floor(Math.random() * 1_000_000)),
+      barcode,
+      stockCode: `sk-${barcode}`,
+      salePrice: '100',
+      listPrice: '120',
+      costProfileLinks: {
+        create: {
+          organizationId,
+          profileId: profile.id,
+          attachedAt: options.attachedAt ?? LONG_AGO,
+        },
+      },
+    },
   });
 }
 
@@ -690,6 +760,57 @@ describe('processBufferPromote', () => {
     const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
     expect(after.status).toBe('PENDING');
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('a same-day PROMOTING entry whose only profile was archived is demoted to PENDING', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVersionedCostVariant(org.id, store.id, 'EAN13-PROMOTE-ARCHIVED', {
+      archivedAt: new Date(Date.now() - 60 * 60_000),
+    });
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-demote-archived',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-demote-archived',
+        barcode: 'EAN13-PROMOTE-ARCHIVED',
+      }),
+    });
+
+    await processBufferPromote();
+
+    const after = await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('PENDING');
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it('a same-day PROMOTING entry whose link was attached after the tick started is still promoted', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // The link is stamped a few seconds after the tick's own clock reading (a flip
+    // committing while the tick runs, or a clock skew between hosts). The decision
+    // time is the order's business-day end, never the tick's clock, so the link
+    // counts. Capped at today's day end so a run just before midnight stays valid.
+    const attachedAt = new Date(
+      Math.min(Date.now() + 5_000, getBusinessDayRange(new Date()).end.getTime()),
+    );
+    await seedVersionedCostVariant(org.id, store.id, 'EAN13-PROMOTE-FRESH-LINK', { attachedAt });
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-fresh-link',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'pkg-fresh-link',
+        barcode: 'EAN13-PROMOTE-FRESH-LINK',
+      }),
+    });
+
+    await processBufferPromote();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('pkg-fresh-link');
   });
 
   it('graduates a past-day PROMOTING entry with a timely cost but no desi as DESI_DEADLINE_MISSED', async () => {

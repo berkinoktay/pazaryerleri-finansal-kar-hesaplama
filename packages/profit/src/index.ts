@@ -100,6 +100,13 @@ export {
   type ItemCostInput,
   type ItemCostProfileInput,
 } from './core/seller-costs/build-seller-cost-lines';
+export {
+  chooseOrderCostVersion,
+  costDecisionTime,
+  isCostLinkInForce,
+  type CostVersionState,
+  type LinkedCostProfile,
+} from './core/seller-costs/cost-profile-in-force';
 export { buildCostReturnLines } from './core/seller-costs/build-cost-return-lines';
 export {
   itemsForAllocation,

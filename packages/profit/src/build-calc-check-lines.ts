@@ -1,5 +1,6 @@
 import type { Prisma } from '@pazarsync/db';
 
+import { isCostLinkInForce } from './core/seller-costs/cost-profile-in-force';
 import type { OrderLineForCalcCheck } from './resolve-order-calculability';
 
 interface InputLine {
@@ -8,12 +9,23 @@ interface InputLine {
 
 /**
  * Resolve order-line variants by barcode within a store and attach each
- * variant's most-recent cost-profile-link amount, its effective desi and its
- * digital flag, all from the ONE variant query below (no N+1). Returns the shape
- * the calculability gate (`resolveOrderCalculability`) consumes.
+ * variant's cost presence, its effective desi and its digital flag, all from the
+ * ONE variant query below (no N+1: the links and their profiles' versions are
+ * nested selects of that query). Returns the shape the calculability gate
+ * (`resolveOrderCalculability`) consumes.
+ *
+ * Cost rule (plan PR-3b, Berkin 2026-11-23): a variant has a cost when one of its
+ * cost-profile links is in force at `at` (`isCostLinkInForce`): attached on or
+ * before `at`, with a profile version in force at `at` that is not an archive
+ * version. An archived or detached profile, a link attached after `at` and a profile
+ * without any version row never count. Callers pass `costDecisionTime(orderDate)`,
+ * the end of the order's business day, never the app clock. `unitCostSnapshotNet` is
+ * the profile's current `amountGross` of the newest link in force, used only as a
+ * presence signal.
  *
  * Tenant scope: the variant query filters on BOTH `organizationId` and `storeId`
- * (SECURITY.md), so a store id or barcode of another organization never resolves.
+ * (SECURITY.md), so a store id or barcode of another organization never resolves;
+ * the nested links and their profiles are filtered on `organizationId` too.
  *
  * Effective desi (plan PR-2c): the seller's override, else the Trendyol desi;
  * null when neither exists. `??` (never `||`) so a desi of 0, a real desi, is kept.
@@ -34,7 +46,7 @@ interface InputLine {
  */
 export async function buildCalcCheckLines(
   db: Prisma.TransactionClient,
-  args: { organizationId: string; storeId: string; lines: InputLine[] },
+  args: { organizationId: string; storeId: string; lines: InputLine[]; at: Date },
 ): Promise<OrderLineForCalcCheck[]> {
   const barcodes = args.lines.map((line) => line.barcode);
   const variants = await db.productVariant.findMany({
@@ -54,9 +66,20 @@ export async function buildCalcCheckLines(
       dimensionalWeightOverride: true,
       syncedDimensionalWeight: true,
       costProfileLinks: {
+        where: {
+          organizationId: args.organizationId,
+          profile: { organizationId: args.organizationId },
+        },
         orderBy: { attachedAt: 'desc' },
-        take: 1,
-        select: { profile: { select: { amountGross: true } } },
+        select: {
+          attachedAt: true,
+          profile: {
+            select: {
+              amountGross: true,
+              versions: { select: { effectiveFrom: true, version: true, archivedAt: true } },
+            },
+          },
+        },
       },
     },
   });
@@ -72,7 +95,19 @@ export async function buildCalcCheckLines(
         isDigital: false,
       };
     }
-    const costLink = variant.costProfileLinks[0];
+    const costLink = variant.costProfileLinks.find((link) =>
+      isCostLinkInForce(
+        {
+          attachedAt: link.attachedAt,
+          versions: link.profile.versions.map((version) => ({
+            effectiveFrom: version.effectiveFrom,
+            versionNumber: version.version,
+            archivedAt: version.archivedAt,
+          })),
+        },
+        args.at,
+      ),
+    );
     const effectiveDesi = variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight;
     return {
       barcode: inputLine.barcode,

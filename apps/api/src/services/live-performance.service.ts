@@ -4,6 +4,7 @@ import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
   buildCalcCheckLines,
+  costDecisionTime,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
@@ -1112,8 +1113,9 @@ export interface BufferDetailLine extends VariantDesiFields {
   lineSaleGross: string;
   /**
    * The line's gap in the calculability gate that holds the order in the buffer
-   * (buildCalcCheckLines): no cost profile linked, or the barcode resolves to no
-   * variant. Deliberately the gate's own check, not the products page's
+   * (buildCalcCheckLines): no cost profile link in force at the order's business-day
+   * end (none linked, or every linked profile archived), or the barcode resolves to
+   * no variant. Deliberately the gate's own check, not the products page's
    * active-profile rule, so it names exactly what keeps this order waiting.
    */
   isCostMissing: boolean;
@@ -1170,12 +1172,15 @@ export async function getBufferDetail(args: {
   const variantById = new Map(variants.map((v) => [v.id, v]));
 
   // The calculability gate's own lines for this order, scoped by organizationId +
-  // storeId. buildCalcCheckLines returns one line per input line in input order, so
-  // index i is mapped.lines[i].
+  // storeId and judged at the order's cost decision time (its business-day end), as
+  // the gate that holds the order judges them. buildCalcCheckLines returns one line
+  // per input line in input order, so index i is mapped.lines[i]. The JSONB
+  // round-trip leaves orderDate an ISO string, hence the Date conversion.
   const calcLines = await buildCalcCheckLines(prisma, {
     organizationId: args.orgId,
     storeId: args.storeId,
     lines: mapped.lines.map((l) => ({ barcode: l.barcode })),
+    at: costDecisionTime(new Date(mapped.orderDate)),
   });
 
   const lines: BufferDetailLine[] = mapped.lines.map((line, index) => {

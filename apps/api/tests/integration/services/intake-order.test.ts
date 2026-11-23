@@ -167,7 +167,11 @@ async function seedVariantWithTimelyCost(
   await seedVariant(orgId, storeId, barcode, false);
   const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
   const inTime = new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 1000);
-  const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
+  const profile = await createCostProfile(orgId, {
+    storeId,
+    amountGross: '40.00',
+    seedVersion: false,
+  });
   await prisma.productVariantCostProfile.create({
     data: {
       organizationId: orgId,
@@ -187,6 +191,61 @@ async function seedVariantWithTimelyCost(
       vatRate: profile.vatRate,
       changedFields: [],
       effectiveFrom: inTime,
+    },
+  });
+}
+
+// Far-past instant for a cost that has been in place long before any test order.
+const LONG_AGO = new Date('2000-01-01T00:00:00Z');
+
+// Attach to an already-seeded (cost-missing) variant a profile whose version 1 and
+// link date from LONG_AGO. With `archivedAt` the profile is archived the way the
+// cost-profile service does it: the profile row is stamped and an archive version 2
+// (archivedAt = effectiveFrom = the archive instant) is appended.
+async function attachVersionedCost(
+  orgId: string,
+  storeId: string,
+  barcode: string,
+  options: { archivedAt?: Date } = {},
+): Promise<void> {
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const profile = await createCostProfile(orgId, {
+    storeId,
+    amountGross: '40.00',
+    seedVersion: false,
+  });
+  const versionBase = {
+    profileId: profile.id,
+    organizationId: orgId,
+    name: profile.name,
+    type: profile.type,
+    amountGross: profile.amountGross,
+    vatRate: profile.vatRate,
+  };
+  await prisma.costProfileVersion.create({
+    data: { ...versionBase, version: 1, changedFields: [], effectiveFrom: LONG_AGO },
+  });
+  if (options.archivedAt !== undefined) {
+    await prisma.costProfileVersion.create({
+      data: {
+        ...versionBase,
+        version: 2,
+        archivedAt: options.archivedAt,
+        changedFields: ['archivedAt'],
+        effectiveFrom: options.archivedAt,
+      },
+    });
+    await prisma.costProfile.update({
+      where: { id: profile.id },
+      data: { archivedAt: options.archivedAt },
+    });
+  }
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId: orgId,
+      productVariantId: variant.id,
+      profileId: profile.id,
+      attachedAt: LONG_AGO,
     },
   });
 }
@@ -279,6 +338,42 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.status).toBe('PENDING');
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it("today's order whose variant's only cost profile is archived waits in the buffer", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await attachVersionedCost(org.id, store.id, BARCODE, {
+      archivedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'archived-1', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it("today's order with the same profile, not archived, is persisted as calculable", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await attachVersionedCost(org.id, store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'active-1', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 
   it('cost-missing + today, duplicate → buffered_deduped (single entry)', async () => {
