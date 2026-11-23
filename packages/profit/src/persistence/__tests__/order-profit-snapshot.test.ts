@@ -5,9 +5,10 @@
  * a known value is never overwritten with a live one. The desi is never filled: a
  * captured desi (0 included) is known, and an item captured without one stays empty
  * (plan PR-2c decision 9). The
- * events that change a filled value are the order's own cargo name changing, an
- * item's variant changing, and the cost-window rule: the cost list follows the cost
- * links until the order's business day ends.
+ * events that change a filled value are the order's own cargo name changing and an
+ * item's variant changing. A filled cost list is frozen at capture (plan PR-3b, Berkin
+ * 2026-11-23), even while the order's business day is still open: a same-day attach,
+ * detach, archive or restore never reaches it.
  *
  * The suite never truncates: shared reference tables (carriers, commission rules) are
  * touched only through this suite's own TEST_-prefixed carriers and its own category
@@ -28,14 +29,17 @@ import {
   ShippingTariffSource,
   SnapshotDesiSource,
 } from '@pazarsync/db/enums';
+import { getBusinessDayRange } from '@pazarsync/utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { costDecisionTime } from '../../core/seller-costs/cost-profile-in-force';
 import {
   captureOrderProfitSnapshot,
   type OrderProfitSnapshotOutcome,
 } from '../order-profit-snapshot';
 import {
   attachCostProfile,
+  COST_FIXTURE_EPOCH,
   ensureDbReachable,
   MELONTIK,
   type MelontikParcel,
@@ -205,22 +209,49 @@ const BEFORE_ORDER_DATE = new Date('2026-10-01T00:00:00Z');
 /** A cost version start after the melontik order date: not yet in force at it. */
 const AFTER_ORDER_DATE = new Date('2026-11-10T00:00:00Z');
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/** The end of the melontik order's business day: the decision time of the cost rule. */
+const ORDER_DAY_END = costDecisionTime(MELONTIK.orderDate);
+
+/** An instant after the melontik order's business day ended. */
+const AFTER_ORDER_DAY_END = new Date(ORDER_DAY_END.getTime() + HOUR_MS);
+
+/** An instant `hours` after the melontik order, still on its business day (it ends 12 h later). */
+function laterOnOrderDay(hours: number): Date {
+  return new Date(MELONTIK.orderDate.getTime() + hours * HOUR_MS);
+}
+
+/**
+ * Instants on today's business day, `hours` after its start, from one anchor taken
+ * once: a test that places today's order and stamps its later cost edits with it can
+ * never straddle midnight.
+ */
+function todaysBusinessDay(): (hours: number) => Date {
+  const { start } = getBusinessDayRange(new Date());
+  return (hours) => new Date(start.getTime() + hours * HOUR_MS);
+}
+
 /** One version of a test cost profile; `archived` marks the profile archived from this version on. */
 interface TestCostVersionSpec {
   readonly id: string;
   readonly effectiveFrom: Date;
   readonly archived: boolean;
+  /** Per-unit gross amount; omitted = '30.00'. */
+  readonly amountGross?: string;
 }
 
 /**
  * Links a new packaging profile to the variant with the given versions, numbered
  * 1, 2, ... in the given order. The caller picks the version ids so it can assert
- * on them and steer their sort order.
+ * on them and steer their sort order. The link's `attachedAt` defaults to
+ * COST_FIXTURE_EPOCH (linked before any order date).
  */
 async function attachCostProfileVersions(
   parcel: MelontikParcel,
   productVariantId: string,
   versions: readonly TestCostVersionSpec[],
+  opts: { readonly attachedAt?: Date } = {},
 ): Promise<void> {
   const profile = await prisma.costProfile.create({
     data: {
@@ -241,7 +272,7 @@ async function attachCostProfileVersions(
         version: index + 1,
         name: profile.name,
         type: CostProfileType.PACKAGING,
-        amountGross: '30.00',
+        amountGross: spec.amountGross ?? '30.00',
         vatRate: '20',
         changedFields: [],
         effectiveFrom: spec.effectiveFrom,
@@ -250,7 +281,46 @@ async function attachCostProfileVersions(
     });
   }
   await prisma.productVariantCostProfile.create({
-    data: { organizationId: parcel.organizationId, productVariantId, profileId: profile.id },
+    data: {
+      organizationId: parcel.organizationId,
+      productVariantId,
+      profileId: profile.id,
+      attachedAt: opts.attachedAt ?? COST_FIXTURE_EPOCH,
+    },
+  });
+}
+
+/**
+ * Archives a cost profile at `at` as the archive action does: the profile row is
+ * marked archived and the next version, a copy of the latest one, starts at `at` as
+ * the archive version.
+ */
+async function archiveCostProfileAt(
+  organizationId: string,
+  profileId: string,
+  at: Date,
+): Promise<void> {
+  const latest = await prisma.costProfileVersion.findFirstOrThrow({
+    where: { organizationId, profileId },
+    orderBy: { version: 'desc' },
+  });
+  await prisma.costProfile.update({
+    where: { id: profileId, organizationId },
+    data: { archivedAt: at },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId,
+      organizationId,
+      version: latest.version + 1,
+      name: latest.name,
+      type: latest.type,
+      amountGross: latest.amountGross,
+      vatRate: latest.vatRate,
+      changedFields: ['archivedAt'],
+      effectiveFrom: at,
+      archivedAt: at,
+    },
   });
 }
 
@@ -564,7 +634,7 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemB)).toEqual(matched);
   });
 
-  it('fills an empty cost list from a cost linked later, but not a filled one', async () => {
+  it('fills an empty cost list from a cost linked later the same day, but not a filled one', async () => {
     const parcel = await seedSnapshotParcel();
     // Item A's variant has no cost at intake; item B's has one.
     await prisma.productVariantCostProfile.deleteMany({
@@ -576,7 +646,7 @@ describe('captureOrderProfitSnapshot', () => {
     expect(itemABefore.snapshotCostProfileVersionIds).toEqual([]);
     expect(itemBBefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // A cost in force at the order date is linked to both variants later.
+    // A cost in force at the order date is linked to both variants later the same day.
     for (const productVariantId of [parcel.variantA, parcel.variantB]) {
       await attachCostProfile({
         organizationId: parcel.organizationId,
@@ -584,15 +654,19 @@ describe('captureOrderProfitSnapshot', () => {
         productVariantId,
         amountGross: '12.00',
         vatRate: '20',
+        attachedAt: laterOnOrderDay(1),
       });
     }
-    // Item A also gets a cost whose only version starts after the order date: the
-    // first-version rule (chooseCostVersion) still pins that version, as the engine
-    // would price it.
+    // Item A also gets a cost whose only version starts after the order instant but
+    // before the day ended: no version existed at the order time, so the version in
+    // force at the day end is pinned, as the engine would price it.
     const startsAfterOrderId = randomUUID();
-    await attachCostProfileVersions(parcel, parcel.variantA, [
-      { id: startsAfterOrderId, effectiveFrom: AFTER_ORDER_DATE, archived: false },
-    ]);
+    await attachCostProfileVersions(
+      parcel,
+      parcel.variantA,
+      [{ id: startsAfterOrderId, effectiveFrom: laterOnOrderDay(1), archived: false }],
+      { attachedAt: laterOnOrderDay(1) },
+    );
 
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
     const itemAAfter = await readItemSnapshot(parcel.itemA);
@@ -657,11 +731,12 @@ describe('captureOrderProfitSnapshot', () => {
     expect(order.profitExclusionReason).toBe(ProfitExclusionReason.COST_DEADLINE_MISSED);
   });
 
-  it("follows cost links added or replaced during the order's business day", async () => {
+  it("a same-day replacement of every cost link leaves today's captured order unchanged", async () => {
     const parcel = await seedSnapshotParcel();
-    // An order placed now: its business day is still open, so the seller may still
-    // enter or change its cost (cost-window rule).
-    await setOrderDate(parcel, new Date());
+    // An order placed today: its business day is still open, yet its cost list is
+    // frozen from the moment it entered profit (Berkin 2026-11-23).
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(1));
     await capture(parcel);
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
@@ -670,27 +745,8 @@ describe('captureOrderProfitSnapshot', () => {
     );
     expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // Added: a second profile is linked to item A's variant.
-    await attachCostProfile({
-      organizationId: parcel.organizationId,
-      storeId: parcel.storeId,
-      productVariantId: parcel.variantA,
-      amountGross: '12.00',
-      vatRate: '20',
-    });
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
-    const added = await readItemSnapshot(parcel.itemA);
-    expect(added.snapshotCostProfileVersionIds).toHaveLength(2);
-    expect(added.snapshotCostProfileVersionIds).toEqual(
-      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
-    );
-    // Only the cost list moves; the item's capture time stays.
-    expect(added).toEqual({
-      ...itemABefore,
-      snapshotCostProfileVersionIds: added.snapshotCostProfileVersionIds,
-    });
-
-    // Replaced: every link of the variant is removed and another profile linked.
+    // Replaced later the same day: every link of the variant is removed and another
+    // profile linked.
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
@@ -700,34 +756,151 @@ describe('captureOrderProfitSnapshot', () => {
       productVariantId: parcel.variantA,
       amountGross: '40.00',
       vatRate: '20',
+      attachedAt: today(2),
     });
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
-    const replaced = await readItemSnapshot(parcel.itemA);
-    expect(replaced.snapshotCostProfileVersionIds).toHaveLength(1);
-    expect(replaced.snapshotCostProfileVersionIds).toEqual(
-      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
-    );
-    expect(replaced.snapshotCostProfileVersionIds).not.toContain(
-      added.snapshotCostProfileVersionIds[0],
-    );
-    expect(replaced.snapshotCostProfileVersionIds).not.toContain(
-      added.snapshotCostProfileVersionIds[1],
-    );
 
-    // Removed: no cost is left, so the list empties.
-    await prisma.productVariantCostProfile.deleteMany({
-      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
-    });
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
-    const removed = await readItemSnapshot(parcel.itemA);
-    expect(removed.snapshotCostProfileVersionIds).toEqual([]);
-    expect(removed.profitSnapshotAt).toEqual(itemABefore.profitSnapshotAt);
-
-    // Nothing changed for item B, so it was never written.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
   });
 
-  it("freezes a filled cost list once the order's business day has ended", async () => {
+  it("a same-day archive plus a new attach does not double count today's captured order", async () => {
+    const parcel = await seedSnapshotParcel();
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(1));
+    // Item A's variant is priced by one profile, A, alone.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    const profileA = await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '30.00',
+      vatRate: '20',
+    });
+    const profileAVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(profileAVersionIds).toHaveLength(1);
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual(profileAVersionIds);
+
+    // Later the same day the seller archives A and links a new profile B in its place.
+    await archiveCostProfileAt(parcel.organizationId, profileA, today(2));
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '40.00',
+      vatRate: '20',
+      effectiveFrom: today(3),
+      attachedAt: today(3),
+    });
+
+    // The order entered profit with A: it keeps A alone, never A and B together.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it("a same-day detach leaves today's captured order unchanged", async () => {
+    const parcel = await seedSnapshotParcel();
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(1));
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
+
+    // Later the same day every cost link of item A's variant is removed.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it('a same-day extra attach does not reach an already captured order', async () => {
+    const parcel = await seedSnapshotParcel();
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(1));
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
+
+    // Later the same day a second, long-standing profile is linked to item A's variant.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+      attachedAt: today(2),
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it('an archived-then-restored profile pinned at capture stays pinned on the next same-day capture', async () => {
+    const parcel = await seedSnapshotParcel();
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(2));
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Archived before the order and restored after it, both today: the version at the
+    // order instant is the archive version, so the restore version prices the order.
+    const restoredId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: today(1), archived: true },
+      { id: restoredId, effectiveFrom: today(3), archived: false },
+    ]);
+
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual(
+      sorted([...cogsVersionIds, restoredId]),
+    );
+
+    // Nothing changed: the next capture the same day keeps the restore version.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it('a version created after the order and pinned at capture is not replaced by the first version on the next same-day capture', async () => {
+    const parcel = await seedSnapshotParcel();
+    const today = todaysBusinessDay();
+    await setOrderDate(parcel, today(1));
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Created after the order instant (100) and edited to 120, both today: no version
+    // existed at the order time, so the version in force at capture prices it.
+    const firstId = randomUUID();
+    const inForceId = randomUUID();
+    await attachCostProfileVersions(
+      parcel,
+      parcel.variantA,
+      [
+        { id: firstId, effectiveFrom: today(2), archived: false, amountGross: '100.00' },
+        { id: inForceId, effectiveFrom: today(3), archived: false, amountGross: '120.00' },
+      ],
+      { attachedAt: today(2) },
+    );
+
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual(
+      sorted([...cogsVersionIds, inForceId]),
+    );
+
+    // Nothing changed: the next capture the same day keeps the pinned version.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    const itemAAfter = await readItemSnapshot(parcel.itemA);
+    expect(itemAAfter).toEqual(itemABefore);
+    expect(itemAAfter.snapshotCostProfileVersionIds).not.toContain(firstId);
+  });
+
+  it("keeps a filled cost list frozen after the order's business day has ended", async () => {
     const parcel = await seedSnapshotParcel();
     // An order from two days ago: its business day has ended.
     await setOrderDate(parcel, new Date(Date.now() - 2 * DAY_MS));
@@ -735,7 +908,7 @@ describe('captureOrderProfitSnapshot', () => {
     const itemABefore = await readItemSnapshot(parcel.itemA);
     expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // Added: a second profile linked after the day end does not reach the order.
+    // Added: a second profile linked later does not reach the order.
     await attachCostProfile({
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
@@ -946,9 +1119,8 @@ describe('captureOrderProfitSnapshot', () => {
 
   it('pins the cost version in force at the order date, not the latest', async () => {
     const parcel = await seedSnapshotParcel();
-    // The melontik COGS profile has a single version. The seed sets only its
-    // changedAt, so its effectiveFrom is the database default (the seed instant),
-    // which is after the order date: chooseCostVersion's first-version rule picks it.
+    // The melontik COGS profile has a single version, effective (and linked) since
+    // COST_FIXTURE_EPOCH: it is the version at the order date.
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
     const cogsVersions = await prisma.costProfileVersion.findMany({
@@ -957,7 +1129,7 @@ describe('captureOrderProfitSnapshot', () => {
     });
     expect(
       cogsVersions.every(
-        (version) => version.effectiveFrom.getTime() > MELONTIK.orderDate.getTime(),
+        (version) => version.effectiveFrom.getTime() <= MELONTIK.orderDate.getTime(),
       ),
     ).toBe(true);
     // Linked after the COGS profile but with the lower id, so a stored list in link
@@ -1005,6 +1177,201 @@ describe('captureOrderProfitSnapshot', () => {
 
     const itemA = await readItemSnapshot(parcel.itemA);
     expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, liveInForceId]));
+  });
+
+  it("a cost linked after the order's business day does not fill an empty cost list", async () => {
+    const parcel = await seedSnapshotParcel();
+    // Item A's variant keeps only a profile archived before the order: no cost in force.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
+    ]);
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual([]);
+
+    // The seller attaches a new profile now, long after the order's day ended: the
+    // order's cost was decided at its day end, so the late link never reaches it.
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+      attachedAt: new Date(),
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+  });
+
+  it('a past-day capture ignores a link attached after the day end', async () => {
+    const parcel = await seedSnapshotParcel();
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Attached exactly at the day end: still counts (the boundary is inclusive).
+    const atDayEndId = randomUUID();
+    await attachCostProfileVersions(
+      parcel,
+      parcel.variantA,
+      [{ id: atDayEndId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false }],
+      { attachedAt: ORDER_DAY_END },
+    );
+    // Attached after the day end: too late for this order.
+    const afterDayEndId = randomUUID();
+    await attachCostProfileVersions(
+      parcel,
+      parcel.variantA,
+      [{ id: afterDayEndId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false }],
+      { attachedAt: AFTER_ORDER_DAY_END },
+    );
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, atDayEndId]));
+  });
+
+  it('a profile archived before the day end is not pinned, archived after it is pinned', async () => {
+    const parcel = await seedSnapshotParcel();
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Live at the order instant, archived later the same day: not in force at the day end.
+    const archivedSameDayLiveId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: archivedSameDayLiveId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: laterOnOrderDay(1), archived: true },
+    ]);
+    // Live at the order instant, archived after the day ended: in force at the day end.
+    const archivedAfterDayLiveId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: archivedAfterDayLiveId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: AFTER_ORDER_DAY_END, archived: true },
+    ]);
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(
+      sorted([...cogsVersionIds, archivedAfterDayLiveId]),
+    );
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(archivedSameDayLiveId);
+  });
+
+  it("today's empty list is filled by a cost attached the same day", async () => {
+    const parcel = await seedSnapshotParcel();
+    // An order placed now, whose variant has no cost yet.
+    const orderDate = new Date();
+    await setOrderDate(parcel, orderDate);
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual([]);
+
+    // The seller enters the cost the same day (stamped at the order instant, so the
+    // test cannot straddle midnight).
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+      attachedAt: orderDate,
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const itemAAfter = await readItemSnapshot(parcel.itemA);
+    expect(itemAAfter.snapshotCostProfileVersionIds).toHaveLength(1);
+    expect(itemAAfter.snapshotCostProfileVersionIds).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(itemAAfter.profitSnapshotAt).toEqual(itemABefore.profitSnapshotAt);
+  });
+
+  it('a profile archived then restored before capture is pinned with a non-archived version', async () => {
+    const parcel = await seedSnapshotParcel();
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Archived before the order, restored later the same day: the version at the order
+    // instant is an archive version, so the restore version prices it.
+    const restoredId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
+      { id: restoredId, effectiveFrom: laterOnOrderDay(1), archived: false },
+    ]);
+    // Archived after the order and restored before the day end: the version at the
+    // order instant was live, so it prices the order.
+    const liveAtOrderId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: liveAtOrderId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: laterOnOrderDay(1), archived: true },
+      { id: randomUUID(), effectiveFrom: laterOnOrderDay(2), archived: false },
+    ]);
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(
+      sorted([...cogsVersionIds, restoredId, liveAtOrderId]),
+    );
+  });
+
+  it('the order-time version is pinned even when the amount was edited before capture', async () => {
+    const parcel = await seedSnapshotParcel();
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    // 100 at the order instant; the seller edits it to 120 later the same day, before
+    // the order enters profit (Berkin 2026-11-23: the amount at the order time).
+    const orderTimeId = randomUUID();
+    const editedId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      {
+        id: orderTimeId,
+        effectiveFrom: COST_FIXTURE_EPOCH,
+        archived: false,
+        amountGross: '100.00',
+      },
+      { id: editedId, effectiveFrom: laterOnOrderDay(1), archived: false, amountGross: '120.00' },
+    ]);
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, orderTimeId]));
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(editedId);
+  });
+
+  it('with no version at the order time the version in force at capture is pinned', async () => {
+    const parcel = await seedSnapshotParcel();
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    // The profile is created after the order instant (100) and edited to 120 before
+    // the day end: no version existed at the order time, so the version in force at
+    // the decision time prices it, not the first one.
+    const firstId = randomUUID();
+    const inForceId = randomUUID();
+    await attachCostProfileVersions(
+      parcel,
+      parcel.variantA,
+      [
+        { id: firstId, effectiveFrom: laterOnOrderDay(1), archived: false, amountGross: '100.00' },
+        {
+          id: inForceId,
+          effectiveFrom: laterOnOrderDay(2),
+          archived: false,
+          amountGross: '120.00',
+        },
+      ],
+      { attachedAt: laterOnOrderDay(1) },
+    );
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, inForceId]));
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(firstId);
   });
 
   it("keeps an item's captured values when its variant is deleted", async () => {

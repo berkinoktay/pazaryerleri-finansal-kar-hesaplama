@@ -10,12 +10,17 @@
 // recompute tick then rewrites its statements as EXCLUDED. The core logic lives in
 // `stampCostWindowExclusions` (packages/order-sync/src/cost-window.ts).
 //
-// WARNING (order profit snapshot, PR-2): orders are now priced from the cost list
-// frozen in their snapshot, but this script still decides whether the cost was
-// entered in time from the live cost links (`attached_at`). An order whose link
-// was changed later but whose snapshot does carry a cost can therefore be wrongly,
-// and irreversibly, excluded from profit. Adapt it to read the snapshot before
-// running it again.
+// WARNING (order profit snapshot, PR-2 / PR-3b): orders are priced from the cost
+// list frozen in their snapshot. The script skips an order whose every line (digital
+// ones too) already carries a non-empty captured cost list, so an order
+// costed in the morning whose only profile was archived or detached later that day
+// is no longer stamped (guarded since PR-3b). Every other order is still judged from
+// the live cost links (`attached_at` and the profile's version history): a detached
+// link is invisible to it (links are hard-deleted) and replacing a variant's cost
+// profiles resets `attached_at`, so an order without a full captured cost list can
+// still be wrongly, and irreversibly, excluded from profit. A list captured before
+// PR-3b could pin a cost linked after the order's day; such an order is skipped
+// too (never stamped), so the backfill can under-stamp it. Review a --dry-run first.
 //
 // Run from inside the package (connects with DATABASE_URL from the workspace-root .env):
 //   cd packages/order-sync && pnpm exec tsx --env-file=../../.env scripts/backfill-cost-window-exclusions.ts --store <id> --dry-run

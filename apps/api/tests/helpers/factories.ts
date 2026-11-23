@@ -315,9 +315,22 @@ export async function createWebhookEvent(
 
 // ─── Cost profile (calculability gate PR-B) ────────────────────────────
 
+/**
+ * Far-past default for a fixture cost's version `effectiveFrom`, so the cost is in
+ * force for any test order unless a test opts into a later instant (plan PR-3b).
+ */
+export const COST_FIXTURE_EPOCH = new Date('2000-01-01T00:00:00Z');
+
 export async function createCostProfile(
   organizationId: string,
-  overrides: { storeId?: string; name?: string; type?: CostProfileType; amountGross?: string } = {},
+  overrides: {
+    storeId?: string;
+    name?: string;
+    type?: CostProfileType;
+    amountGross?: string;
+    /** false = create the profile row only; the test writes its own versions. */
+    seedVersion?: false;
+  } = {},
 ) {
   // GROSS konvansiyon (2026-06-16): amountGross is GROSS (KDV-dahil) + vatRate.
   // A cost snapshot captured from this profile is fully specified (gross + rate),
@@ -327,8 +340,12 @@ export async function createCostProfile(
   // attach a profile to a variant MUST pass the variant's storeId so both share a
   // store (the attach guard rejects a cross-store attach); tests that don't care
   // get a throwaway store auto-created here.
+  //
+  // Like the cost-profile service, the profile is created with its version 1 (same
+  // amount and rate, not archived, effective from COST_FIXTURE_EPOCH): the cost rule
+  // counts a profile only through a version in force (plan PR-3b).
   const storeId = overrides.storeId ?? (await createStore(organizationId)).id;
-  return prisma.costProfile.create({
+  const profile = await prisma.costProfile.create({
     data: {
       organizationId,
       storeId,
@@ -338,6 +355,23 @@ export async function createCostProfile(
       vatRate: 20,
     },
   });
+  if (overrides.seedVersion !== false) {
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId,
+        version: 1,
+        name: profile.name,
+        type: profile.type,
+        amountGross: profile.amountGross,
+        vatRate: profile.vatRate,
+        changedFields: [],
+        changedAt: COST_FIXTURE_EPOCH,
+        effectiveFrom: COST_FIXTURE_EPOCH,
+      },
+    });
+  }
+  return profile;
 }
 
 export async function createBufferEntry(
@@ -416,14 +450,17 @@ export async function createProductVariant(
  * same organization, store and product, every scalar of the source copied (prices, VAT,
  * desi, isDigital, synced commission rate, listing status, ...) except its id, barcode,
  * platformVariantId (random, as `createProductVariant` does) and timestamps; stockCode is
- * the new barcode. Every cost-profile link of the source is copied to the clone. Gives a
+ * the new barcode. Every cost-profile link of the source is copied to the clone, with its
+ * `attachedAt` (the cost rule judges a link by it, plan PR-3b). Gives a
  * campaign item's own barcode a catalog variant priced exactly like an existing fixture
  * variant (campaign reads resolve the variant from the item's barcode).
  */
 export async function cloneVariantWithBarcode(variantId: string, barcode: string) {
   const source = await prisma.productVariant.findUniqueOrThrow({
     where: { id: variantId },
-    include: { costProfileLinks: { select: { organizationId: true, profileId: true } } },
+    include: {
+      costProfileLinks: { select: { organizationId: true, profileId: true, attachedAt: true } },
+    },
   });
   const {
     id: _id,
@@ -448,6 +485,7 @@ export async function cloneVariantWithBarcode(variantId: string, barcode: string
         create: costProfileLinks.map((link) => ({
           organizationId: link.organizationId,
           profileId: link.profileId,
+          attachedAt: link.attachedAt,
         })),
       },
     },

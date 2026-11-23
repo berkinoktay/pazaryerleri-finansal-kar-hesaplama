@@ -10,6 +10,7 @@ import type {
   CreateCostProfileInput,
   UpdateCostProfileInput,
 } from '../validators/cost-profile.validator';
+import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 
 // ─── DTO types ───────────────────────────────────────────────────────────────
 
@@ -119,27 +120,50 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
   return changed;
 }
 
+/** The ids of the variants this profile is attached to, within the organization. */
+async function loadProfileVariantIds(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  profileId: string,
+): Promise<string[]> {
+  const links = await tx.productVariantCostProfile.findMany({
+    where: { profileId, organizationId: orgId },
+    select: { productVariantId: true },
+  });
+  return links.map((link) => link.productVariantId);
+}
+
+/**
+ * Enqueue a profit recompute (COST_CHANGED) for every order carrying one of these
+ * variants. Runs inside the mutation's own transaction. An empty id list enqueues
+ * nothing (it short-circuits without a query).
+ */
+async function enqueueVariantsRecompute(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  variantIds: string[],
+): Promise<void> {
+  await enqueueProfitRecomputeForVariants(tx, {
+    organizationId: orgId,
+    variantIds,
+    reason: ProfitRecomputeReason.COST_CHANGED,
+  });
+}
+
 /**
  * Enqueue a profit recompute for every order carrying a variant this profile is
  * attached to. A cost change (amount/vat, archive, or restore) reshapes those
  * orders' profit, so they must be recomputed. Runs inside the
  * mutation's own transaction. A profile with no attached variants enqueues
- * nothing (the empty id list short-circuits without a query).
+ * nothing.
  */
 async function enqueueProfileVariants(
   tx: Prisma.TransactionClient,
   orgId: string,
   profileId: string,
 ): Promise<void> {
-  const links = await tx.productVariantCostProfile.findMany({
-    where: { profileId, organizationId: orgId },
-    select: { productVariantId: true },
-  });
-  await enqueueProfitRecomputeForVariants(tx, {
-    organizationId: orgId,
-    variantIds: links.map((link) => link.productVariantId),
-    reason: ProfitRecomputeReason.COST_CHANGED,
-  });
+  const variantIds = await loadProfileVariantIds(tx, orgId, profileId);
+  await enqueueVariantsRecompute(tx, orgId, variantIds);
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -415,6 +439,13 @@ export async function archiveCostProfile(
 /**
  * Restore an archived cost profile: clears archivedAt, appends a version with
  * changedFields: ['archivedAt'].
+ *
+ * The restore puts the profile's cost back in force, so it re-checks the Live
+ * Performance buffer of the profile's store in the same transaction: a waiting order
+ * of today whose every line is now calculable is flipped to PROMOTING
+ * (flipBufferForVariants). Archive, detach and version edits need no such call: they
+ * can never make an order calculable, and the promote worker re-runs the gate under
+ * the row lock before it writes an entry to `orders`.
  */
 export async function restoreCostProfile(
   orgId: string,
@@ -460,7 +491,12 @@ export async function restoreCostProfile(
       },
     });
 
-    await enqueueProfileVariants(tx, orgId, profileId);
+    // Lock order: flip the buffer BEFORE enqueueing the recompute, the same order the
+    // attach and replace services use, so a restore takes the buffer rows and then
+    // the recompute queue rows in the same order as a concurrent attach or replace.
+    const variantIds = await loadProfileVariantIds(tx, orgId, profileId);
+    await flipBufferForVariants(tx, { organizationId: orgId, storeId: row.storeId, variantIds });
+    await enqueueVariantsRecompute(tx, orgId, variantIds);
 
     return row;
   });

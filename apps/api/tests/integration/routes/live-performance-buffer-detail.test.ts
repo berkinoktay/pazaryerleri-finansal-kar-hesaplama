@@ -4,6 +4,7 @@ import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, prisma, truncateAll } from '../../helpers/db';
 import {
+  COST_FIXTURE_EPOCH,
   createBufferEntry,
   createCostProfile,
   createMembership,
@@ -172,6 +173,8 @@ describe('GET live-performance/buffer/{bufferId}', () => {
       isDigital: false,
     });
 
+    // The links predate the order's day, so the gate (judging links at that day's
+    // end) counts them.
     const profile = await createCostProfile(org.id, { storeId: store.id });
     for (const productVariantId of [readyId, costOnlyId]) {
       await prisma.productVariantCostProfile.create({
@@ -180,6 +183,7 @@ describe('GET live-performance/buffer/{bufferId}', () => {
           productVariantId,
           profileId: profile.id,
           attachedBy: user.id,
+          attachedAt: COST_FIXTURE_EPOCH,
         },
       });
     }
@@ -226,7 +230,7 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     });
   });
 
-  it('counts a line whose only cost profile is archived as costed, as the gate does', async () => {
+  it('flags a line whose only cost profile is archived as cost-missing, as the gate does', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id, 'OWNER');
@@ -244,11 +248,29 @@ describe('GET live-performance/buffer/{bufferId}', () => {
         productVariantId: variantId,
         profileId: profile.id,
         attachedBy: user.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+    // Archived before the order's day, the way the cost-profile service does it: the
+    // profile row is stamped and an archive version is appended.
+    const archivedAt = new Date('2026-06-01T09:00:00.000Z');
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: profile.id,
+        organizationId: org.id,
+        version: 2,
+        name: profile.name,
+        type: profile.type,
+        amountGross: profile.amountGross,
+        vatRate: profile.vatRate,
+        archivedAt,
+        changedFields: ['archivedAt'],
+        effectiveFrom: archivedAt,
       },
     });
     await prisma.costProfile.update({
       where: { id: profile.id },
-      data: { archivedAt: new Date() },
+      data: { archivedAt },
     });
     const bufferEntry = await createBufferEntry(org.id, store.id, {
       mappedOrder: {
@@ -265,9 +287,9 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    // The gate (buildCalcCheckLines) reads the latest linked profile whether or not it
-    // is archived, so this line does not hold the order; the flag names the gate's gap.
-    expect(body.lines[0]).toMatchObject({ variantId, isCostMissing: false });
+    // The gate (buildCalcCheckLines) ignores an archived profile (plan PR-3b), so this
+    // line holds the order and the flag names it.
+    expect(body.lines[0]).toMatchObject({ variantId, isCostMissing: true });
   });
 
   it('describes one variant per line when two variants share the barcode', async () => {
@@ -380,6 +402,53 @@ describe('GET live-performance/buffer/{bufferId}', () => {
       barcode: 'BC-DIGITAL',
       dimensionalWeight: null,
       isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('returns the lines of a buffer row whose mapped order has no orderDate', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id);
+    const variantId = await seedVariant(org.id, store.id, {
+      title: 'Dateless Line',
+      barcode: 'BC-DATELESS',
+      seq: 40,
+      syncedDimensionalWeight: '1.00',
+    });
+    const profile = await createCostProfile(org.id, { storeId: store.id });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: org.id,
+        productVariantId: variantId,
+        profileId: profile.id,
+        attachedBy: user.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+    // The row's own order_date column (the business-day anchor) is the decision time.
+    const rowOrderDate = new Date('2026-06-05T00:00:00.000Z');
+    const bufferEntry = await createBufferEntry(org.id, store.id, {
+      orderDate: rowOrderDate,
+      mappedOrder: {
+        status: 'PENDING',
+        saleGross: '100.00',
+        lines: [{ barcode: 'BC-DATELESS', quantity: 1, lineSaleGross: '100.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/buffer/${bufferEntry.id}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.orderDate).toBe(rowOrderDate.toISOString());
+    expect(body.lines).toHaveLength(1);
+    expect(body.lines[0]).toMatchObject({
+      barcode: 'BC-DATELESS',
+      variantId,
+      isCostMissing: false,
     });
   });
 

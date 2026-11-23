@@ -43,6 +43,7 @@ import {
 } from '../../src/handlers/orders';
 
 import {
+  COST_FIXTURE_EPOCH,
   createCostProfile,
   createMembership,
   createOrganization,
@@ -214,7 +215,8 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
   });
 
   // PR-B calculability gate: a seeded variant must carry a cost profile or the
-  // handler hard-skips its order. One profile per store, linked to each variant.
+  // handler hard-skips its order. One profile per store, linked to each variant since
+  // COST_FIXTURE_EPOCH, so the cost is in force for any order date (plan PR-3b).
   const costProfile = barcodes.length > 0 ? await createCostProfile(org.id) : null;
   for (const barcode of barcodes) {
     const product = await prisma.product.create({
@@ -237,7 +239,15 @@ async function setupStoreAndSyncLog(barcodes: string[] = [], opts: { storeCreate
         salePrice: '100',
         listPrice: '120',
         ...(costProfile !== null
-          ? { costProfileLinks: { create: { organizationId: org.id, profileId: costProfile.id } } }
+          ? {
+              costProfileLinks: {
+                create: {
+                  organizationId: org.id,
+                  profileId: costProfile.id,
+                  attachedAt: COST_FIXTURE_EPOCH,
+                },
+              },
+            }
           : {}),
       },
     });
@@ -1454,9 +1464,9 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
 
   it('enqueues on create and drains a fully-costed order to an ESTIMATED statement', async () => {
     const { org, store } = await setupStoreAndSyncLog(['EAN13-EST']);
-    // Full computability for the loader: the factory cost profile carries no version
-    // row, so add one; plus a seeded shipping carrier and the variant's desi so the
-    // shipping estimate resolves. Without all three the status would be NOT_COMPUTABLE.
+    // Full computability for the loader: the factory cost profile carries its version
+    // 1; plus a seeded shipping carrier and the variant's desi so the shipping estimate
+    // resolves. Without all three the status would be NOT_COMPUTABLE.
     const carrier = await prisma.shippingCarrier.findFirstOrThrow({
       where: { platform: 'TRENDYOL', code: 'SENDEOMP' },
     });
@@ -1470,22 +1480,6 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
     await prisma.productVariant.update({
       where: { id: variant.id },
       data: { syncedDimensionalWeight: '1' },
-    });
-    const profile = await prisma.costProfile.findFirstOrThrow({
-      where: { organizationId: org.id },
-    });
-    await prisma.costProfileVersion.create({
-      data: {
-        profileId: profile.id,
-        organizationId: org.id,
-        version: 1,
-        name: profile.name,
-        type: profile.type,
-        amountGross: profile.amountGross,
-        vatRate: profile.vatRate,
-        changedFields: [],
-        changedAt: new Date('2024-01-01T00:00:00Z'),
-      },
     });
 
     await upsertOrderWithSnapshot(store.id, org.id, {
@@ -1792,22 +1786,7 @@ describe('upsertOrderWithSnapshot: a ship date arriving later decides the Barem 
       where: { id: variant.id },
       data: { syncedDimensionalWeight: '1' },
     });
-    const profile = await prisma.costProfile.findFirstOrThrow({
-      where: { organizationId: org.id },
-    });
-    await prisma.costProfileVersion.create({
-      data: {
-        profileId: profile.id,
-        organizationId: org.id,
-        version: 1,
-        name: profile.name,
-        type: profile.type,
-        amountGross: profile.amountGross,
-        vatRate: profile.vatRate,
-        changedFields: [],
-        changedAt: new Date(Date.now() - 365 * MS_PER_DAY),
-      },
-    });
+    // The store's cost profile carries its version 1 from the factory.
 
     const orderDay = getBusinessDayRange(new Date(Date.now() - 3 * MS_PER_DAY));
     const orderDate = new Date(orderDay.start.getTime() + 12 * MS_HOUR);

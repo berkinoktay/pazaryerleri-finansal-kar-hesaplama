@@ -6,6 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  COST_FIXTURE_EPOCH,
   createCostProfile,
   createOrder,
   createOrderItem,
@@ -14,10 +15,11 @@ import {
 } from '../../helpers/factories';
 
 // The cost-window helper (Berkin 2026-11-03): true iff every non-cancelled item
-// had a cost entered before the order's business day ended. The day end is the
-// order day's closing midnight; the query uses `lte`, so that boundary instant
-// itself counts (plan decision 1: the day end is inclusive) -- a cost attached one
-// minute earlier counts and one minute later does not. See packages/order-sync/src/cost-window.ts.
+// had a cost in force when the order's business day ended (plan PR-3b: attached by
+// then, and the version in force then is not an archive version). The day end is the
+// order day's closing midnight and the rule is inclusive, so that boundary instant
+// itself counts (plan decision 1) -- a cost attached one minute earlier counts and
+// one minute later does not. See packages/order-sync/src/cost-window.ts.
 
 // A past business day, far enough back that the test never straddles midnight.
 const ORDER_DATE = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
@@ -58,10 +60,11 @@ async function attachCost(params: {
   variantId: string;
   attachedAt: Date;
   versionEffectiveFrom: Date;
-}): Promise<void> {
+}): Promise<string> {
   const profile = await createCostProfile(params.orgId, {
     storeId: params.storeId,
     amountGross: '40.00',
+    seedVersion: false,
   });
   await prisma.productVariantCostProfile.create({
     data: {
@@ -82,6 +85,38 @@ async function attachCost(params: {
       vatRate: profile.vatRate,
       changedFields: [],
       effectiveFrom: params.versionEffectiveFrom,
+    },
+  });
+  return profile.id;
+}
+
+// Append an archive (archived: true) or restore (archived: false) version to a
+// profile the way the cost-profile service does: the next version number, with
+// `archivedAt` and `effectiveFrom` both set to the archive instant (null archivedAt
+// for a restore), and the profile row stamped to match.
+async function appendArchiveVersion(params: {
+  orgId: string;
+  profileId: string;
+  version: number;
+  at: Date;
+  archived: boolean;
+}): Promise<void> {
+  const profile = await prisma.costProfile.update({
+    where: { id: params.profileId },
+    data: { archivedAt: params.archived ? params.at : null },
+  });
+  await prisma.costProfileVersion.create({
+    data: {
+      profileId: params.profileId,
+      organizationId: params.orgId,
+      version: params.version,
+      name: profile.name,
+      type: profile.type,
+      amountGross: profile.amountGross,
+      vatRate: profile.vatRate,
+      archivedAt: params.archived ? params.at : null,
+      changedFields: ['archivedAt'],
+      effectiveFrom: params.at,
     },
   });
 }
@@ -121,7 +156,7 @@ describe('hadCostWithinOrderDay', () => {
     const store = await createStore(org.id);
     const variantId = await createVariant(org.id, store.id, 'EAN13-CW-EXACT');
     // Both the link attach and the version effective-from land EXACTLY on the day
-    // end. The query uses `lte`, so the boundary instant itself still counts (plan
+    // end. The rule is inclusive, so the boundary instant itself still counts (plan
     // decision 1: the day end is inclusive).
     await attachCost({
       orgId: org.id,
@@ -244,8 +279,8 @@ describe('hadCostWithinOrderDay', () => {
     const store = await createStore(org.id);
     const variantId = await createVariant(org.id, store.id, 'EAN13-CW-TWO');
     // The first profile was attached (and made effective) too late; a second,
-    // distinct profile was attached in time. One timely link is enough -- the
-    // query takes the earliest-qualifying link, so the late one does not spoil it.
+    // distinct profile was attached in time. One link in force is enough -- a
+    // variant is covered when any of its links passes, so the late one does not spoil it.
     await attachCost({
       orgId: org.id,
       storeId: store.id,
@@ -285,6 +320,7 @@ describe('hadCostWithinOrderDay', () => {
     const otherProfile = await createCostProfile(otherOrg.id, {
       storeId: otherStore.id,
       amountGross: '40.00',
+      seedVersion: false,
     });
     await prisma.productVariantCostProfile.create({
       data: {
@@ -315,6 +351,190 @@ describe('hadCostWithinOrderDay', () => {
       items: [{ productVariantId: variantId, isCancelled: false }],
     });
     expect(result).toBe(false);
+  });
+
+  // Plan PR-3b (Berkin 2026-11-23): an archived profile is ignored by every later
+  // order. The link counts only when, at the order's day end, the version in force
+  // is not an archive version.
+  it('ignores a link whose profile was archived before the order day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-ARCH-IN');
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: new Date(DAY_END.getTime() - ONE_MINUTE_MS),
+      archived: true,
+    });
+
+    const result = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    });
+    expect(result).toBe(false);
+  });
+
+  it('counts a link whose profile was archived after the order day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-ARCH-OUT');
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: new Date(DAY_END.getTime() + ONE_MINUTE_MS),
+      archived: true,
+    });
+
+    const result = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    });
+    expect(result).toBe(true);
+  });
+
+  it('counts a profile archived and restored before the day end', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-RESTORED');
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS),
+      archived: true,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 3,
+      at: new Date(DAY_END.getTime() - ONE_MINUTE_MS),
+      archived: false,
+    });
+
+    const result = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    });
+    expect(result).toBe(true);
+  });
+
+  it("another organization's link for the same variant id never counts", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-FOREIGN');
+
+    // Three foreign rows that are fully in force (attached and effective long before
+    // the order, never archived) and point at THIS order's variant id, built directly
+    // (the attach service would reject them): a link of another organization, a link
+    // stamped with this organization but pointing at the other organization's profile,
+    // and a link stamped with the other organization whose profile is this
+    // organization's. The tenant filters (link and profile organization) are the only
+    // reason none may count; the last one is dropped by the link filter alone.
+    const otherOrg = await createOrganization();
+    const otherStore = await createStore(otherOrg.id);
+    const otherProfile = await createCostProfile(otherOrg.id, {
+      storeId: otherStore.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: otherOrg.id,
+        productVariantId: variantId,
+        profileId: otherProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+    const otherOrgSecondProfile = await createCostProfile(otherOrg.id, {
+      storeId: otherStore.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: org.id,
+        productVariantId: variantId,
+        profileId: otherOrgSecondProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+    const ownProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: otherOrg.id,
+        productVariantId: variantId,
+        profileId: ownProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+
+    const result = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    });
+    expect(result).toBe(false);
+
+    // A variant row in THIS store stamped with the other organization (the database
+    // allows it), carrying a link and a profile of this organization: only the
+    // variant's organization filter drops it. Its own single-item call, because the
+    // check needs every item covered and a second item would mask the result.
+    const foreignStampedVariantId = await createVariant(
+      otherOrg.id,
+      store.id,
+      'EAN13-CW-FOREIGN-STAMP',
+    );
+    const stampedProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: org.id,
+        productVariantId: foreignStampedVariantId,
+        profileId: stampedProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+
+    const stampedResult = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: foreignStampedVariantId, isCancelled: false }],
+    });
+    expect(stampedResult).toBe(false);
   });
 });
 
@@ -400,6 +620,133 @@ describe('stampCostWindowExclusions', () => {
     expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
     const queued = await prisma.profitRecomputeRequest.findUnique({ where: { orderId } });
     expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
+  });
+
+  // Plan PR-3b (A1, Berkin 2026-11-23: a cost list is frozen the moment the order
+  // enters profit): a captured cost proves the window was not missed. The live links
+  // alone read a same-day archive after the capture as "no cost at the day end".
+  it('the backfill never stamps an order whose captured cost list is non-empty, even if its only profile was archived before the day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-CAPTURED');
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    const pinned = await prisma.costProfileVersion.findFirstOrThrow({
+      where: { profileId, organizationId: org.id, version: 1 },
+      select: { id: true },
+    });
+    const beforeArchive = new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS);
+
+    // Captured in time with the profile's cost, then the only profile is archived
+    // later the same day.
+    const capturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: capturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [pinned.id], snapshotIsDigital: false },
+    });
+    // Twin: the same order shape with an empty captured list is still judged from the
+    // live links, so the guard cannot pass by skipping every order.
+    const uncapturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: IN_TIME,
+      archived: true,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const captured = await prisma.order.findUniqueOrThrow({ where: { id: capturedId } });
+    expect(captured.profitExcludedAt).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: capturedId } }),
+    ).toBeNull();
+    const uncaptured = await prisma.order.findUniqueOrThrow({ where: { id: uncapturedId } });
+    expect(uncaptured.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  // A digital line ships no cargo (no desi needed) but still needs a cost, so its
+  // captured cost list proves the window the same way a physical line's does.
+  it('the backfill never stamps an all-digital order whose captured cost list is non-empty, even if its only profile was archived before the day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-DIGITAL');
+    await prisma.productVariant.updateMany({
+      where: { id: variantId, organizationId: org.id },
+      data: { isDigital: true },
+    });
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    const pinned = await prisma.costProfileVersion.findFirstOrThrow({
+      where: { profileId, organizationId: org.id, version: 1 },
+      select: { id: true },
+    });
+    const beforeArchive = new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS);
+
+    // Captured in time with the profile's cost, then the only profile is archived
+    // later the same day.
+    const capturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: capturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [pinned.id], snapshotIsDigital: true },
+    });
+    // Control: a digital line with an empty captured list is not exempt from cost, so
+    // it is still judged from the live links and stamped.
+    const uncapturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: uncapturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [], snapshotIsDigital: true },
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: IN_TIME,
+      archived: true,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const captured = await prisma.order.findUniqueOrThrow({ where: { id: capturedId } });
+    expect(captured.profitExcludedAt).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: capturedId } }),
+    ).toBeNull();
+    const uncaptured = await prisma.order.findUniqueOrThrow({ where: { id: uncapturedId } });
+    expect(uncaptured.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
   });
 
   it('stamps a late arrival as LATE_UNCOSTED_ARRIVAL', async () => {

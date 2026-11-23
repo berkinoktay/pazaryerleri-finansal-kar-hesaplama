@@ -9,6 +9,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import { hadCostWithinOrderDay, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import {
   buildCalcCheckLines,
+  costDecisionTime,
   hasMissingDesi,
   type OrderLineForCalcCheck,
   resolveOrderCalculability,
@@ -154,15 +155,18 @@ async function promoteOne(id: string, now: Date): Promise<void> {
 
         // Calculability re-check under the lock: a PROMOTING/FAILED stamp does not
         // prove the cost and the desi are STILL in place -- a flush-failed PENDING entry
-        // falls onto this path through FAILED, the profile may have been archived after
-        // the flip, and a product desi may have been emptied. So calculability (cost +
-        // desi, plan PR-2c) is re-resolved here and routed: a SAME-DAY entry whose cost
-        // or desi is still missing is demoted to PENDING so the day's window can still
-        // catch it; every other entry graduates into orders below.
+        // falls onto this path through FAILED, the profile may have been archived or
+        // detached after the flip, and a product desi may have been emptied. So
+        // calculability (cost + desi, plan PR-2c) is re-resolved here and routed: a
+        // SAME-DAY entry whose cost or desi is still missing is demoted to PENDING so the
+        // day's window can still catch it; every other entry graduates into orders below.
+        // The cost links are judged at the entry's business-day end (plan PR-3b), never
+        // at this tick's clock, so a link stamped while the tick runs still counts.
         const calcLines = await buildCalcCheckLines(tx, {
           organizationId: entry.organizationId,
           storeId: entry.storeId,
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+          at: costDecisionTime(entry.orderDate),
         });
         const isCalculable = resolveOrderCalculability(calcLines).kind === 'calculable';
         const windowClosed = entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime();
@@ -407,6 +411,7 @@ async function flushOne(id: string, now: Date): Promise<string | null> {
         organizationId: entry.organizationId,
         storeId: entry.storeId,
         lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+        at: costDecisionTime(entry.orderDate),
       });
       const profitExclusion = await resolvePastDayGraduationExclusion(
         tx,

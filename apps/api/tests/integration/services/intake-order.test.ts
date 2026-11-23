@@ -167,7 +167,11 @@ async function seedVariantWithTimelyCost(
   await seedVariant(orgId, storeId, barcode, false);
   const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
   const inTime = new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 1000);
-  const profile = await createCostProfile(orgId, { storeId, amountGross: '40.00' });
+  const profile = await createCostProfile(orgId, {
+    storeId,
+    amountGross: '40.00',
+    seedVersion: false,
+  });
   await prisma.productVariantCostProfile.create({
     data: {
       organizationId: orgId,
@@ -187,6 +191,61 @@ async function seedVariantWithTimelyCost(
       vatRate: profile.vatRate,
       changedFields: [],
       effectiveFrom: inTime,
+    },
+  });
+}
+
+// Far-past instant for a cost that has been in place long before any test order.
+const LONG_AGO = new Date('2000-01-01T00:00:00Z');
+
+// Attach to an already-seeded (cost-missing) variant a profile whose version 1 and
+// link date from LONG_AGO. With `archivedAt` the profile is archived the way the
+// cost-profile service does it: the profile row is stamped and an archive version 2
+// (archivedAt = effectiveFrom = the archive instant) is appended.
+async function attachVersionedCost(
+  orgId: string,
+  storeId: string,
+  barcode: string,
+  options: { archivedAt?: Date } = {},
+): Promise<void> {
+  const variant = await prisma.productVariant.findFirstOrThrow({ where: { storeId, barcode } });
+  const profile = await createCostProfile(orgId, {
+    storeId,
+    amountGross: '40.00',
+    seedVersion: false,
+  });
+  const versionBase = {
+    profileId: profile.id,
+    organizationId: orgId,
+    name: profile.name,
+    type: profile.type,
+    amountGross: profile.amountGross,
+    vatRate: profile.vatRate,
+  };
+  await prisma.costProfileVersion.create({
+    data: { ...versionBase, version: 1, changedFields: [], effectiveFrom: LONG_AGO },
+  });
+  if (options.archivedAt !== undefined) {
+    await prisma.costProfileVersion.create({
+      data: {
+        ...versionBase,
+        version: 2,
+        archivedAt: options.archivedAt,
+        changedFields: ['archivedAt'],
+        effectiveFrom: options.archivedAt,
+      },
+    });
+    await prisma.costProfile.update({
+      where: { id: profile.id },
+      data: { archivedAt: options.archivedAt },
+    });
+  }
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId: orgId,
+      productVariantId: variant.id,
+      profileId: profile.id,
+      attachedAt: LONG_AGO,
     },
   });
 }
@@ -279,6 +338,42 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]!.status).toBe('PENDING');
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it("today's order whose variant's only cost profile is archived waits in the buffer", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await attachVersionedCost(org.id, store.id, BARCODE, {
+      archivedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'archived-1', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  it("today's order with the same profile, not archived, is persisted as calculable", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    await attachVersionedCost(org.id, store.id, BARCODE);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({ platformOrderId: 'active-1', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'calculable' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 
   it('cost-missing + today, duplicate → buffered_deduped (single entry)', async () => {
@@ -1319,6 +1414,130 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
       (await prisma.product.findFirstOrThrow({ where: { id: afterDemat.productId } })).totalStock,
     ).toBe(40);
     expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+  });
+
+  // --- Tenant scope of the order-line barcode resolvers (plan PR-3b, Task 6) ---
+  // A caller pair that does not match (this organization's id with another
+  // organization's store id) must never reach that organization's variants or buffer
+  // rows: every resolver filters on organizationId as well as storeId.
+
+  it("a buffered intake never moves another organization's variant stock, even given its store id", async () => {
+    const orgA = await createOrganization();
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedVariant(orgB.id, storeB.id, BARCODE, false);
+    await setStock(storeB.id, BARCODE, 10);
+
+    const outcome = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgA.id,
+      mapped: buildMapped({ platformOrderId: 'mismatch-buffered', orderDate: new Date() }),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered' });
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: orgB.id, storeId: storeB.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(10);
+  });
+
+  it("a late arrival never links another organization's variant", async () => {
+    const orgA = await createOrganization();
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedVariant(orgB.id, storeB.id, BARCODE, true);
+
+    const outcome = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgA.id,
+      mapped: buildMapped({
+        platformOrderId: 'mismatch-late',
+        orderDate: new Date(Date.now() - PAST_DAY_MS),
+      }),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    const item = await prisma.orderItem.findFirstOrThrow({
+      where: { organizationId: orgA.id, order: { platformOrderId: 'mismatch-late' } },
+    });
+    expect(item.productVariantId).toBeNull();
+    expect(item.barcode).toBe(BARCODE);
+  });
+
+  it("a dematerialized buffered ghost never restocks another organization's variant", async () => {
+    const orgA = await createOrganization();
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedVariant(orgB.id, storeB.id, BARCODE, false);
+    await setStock(storeB.id, BARCODE, 10);
+    // A buffered ghost under the mismatched pair, written directly so no intake
+    // decrement runs: only the dematerialize restock is under test.
+    await createBufferEntry(orgA.id, storeB.id, {
+      platformOrderId: 'mismatch-ghost',
+      mappedOrder: { lines: [{ barcode: BARCODE, quantity: 1 }] },
+    });
+
+    const outcome = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgA.id,
+      mapped: buildMapped({
+        platformOrderId: 'mismatch-ghost',
+        orderDate: new Date(),
+        status: 'CANCELLED',
+        dematerialized: true,
+      }),
+    });
+
+    expect(outcome).toEqual({
+      kind: 'dematerialized',
+      deletedOrder: false,
+      deletedBufferEntries: 1,
+    });
+    const variant = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: orgB.id, storeId: storeB.id, barcode: BARCODE },
+    });
+    expect(variant.quantity).toBe(10);
+  });
+
+  it("a re-delivery under another organization's id never rewrites that organization's buffer snapshot", async () => {
+    const orgA = await createOrganization();
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    await seedVariant(orgB.id, storeB.id, BARCODE, false); // cost-missing -> buffer
+    const today = new Date();
+    const older = new Date(today.getTime() - 60_000);
+
+    const first = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgB.id,
+      mapped: buildMapped({
+        platformOrderId: 'mismatch-refresh',
+        orderDate: today,
+        lastModifiedDate: older,
+      }),
+    });
+    expect(first).toEqual({ kind: 'buffered' });
+
+    // The same package under the mismatched pair hits the buffer's (storeId,
+    // platformOrderId) unique and reaches the snapshot refresh with a newer event.
+    const second = await intakeOrder({
+      storeId: storeB.id,
+      organizationId: orgA.id,
+      mapped: buildMapped({
+        platformOrderId: 'mismatch-refresh',
+        orderDate: today,
+        lastModifiedDate: today,
+        status: 'SHIPPED',
+      }),
+    });
+
+    expect(second).toEqual({ kind: 'buffered_deduped' });
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { organizationId: orgB.id, storeId: storeB.id, platformOrderId: 'mismatch-refresh' },
+    });
+    const snapshot = readBufferJson(entry.mappedOrder);
+    expect(snapshot['lastModifiedDate']).toBe(older.toISOString());
+    expect(snapshot['status']).toBe('PROCESSING');
   });
 
   // --- Buffer graduation on persist (Faz 4A, Gorev 8) ---

@@ -6,13 +6,19 @@
 // which gives a rate. The desi is not filled: a captured desi (0 included) is known,
 // and an item captured without one stays so. A known value is never overwritten with
 // a live one. The events that change a filled value are the order's own cargo name
-// changing (the carrier is recognised again), an item getting a variant that differs
-// from the captured one (the item is captured again), and the cost-window rule:
-// while the order's business day is open the seller may still enter or change its
-// cost, so the cost list follows the variant's cost links until that day ends. A variant that drops to null (deleted from the
-// catalogue) changes nothing. The order's capture time never moves after the first
-// capture; an item's moves only with a fresh capture, never with a gap fill or a
-// cost list update.
+// changing (the carrier is recognised again) and an item getting a variant that
+// differs from the captured one (the item is captured again, its cost list included).
+// A variant that drops to null (deleted from the catalogue) changes nothing. The
+// order's capture time never moves after the first capture; an item's moves only
+// with a fresh capture, never with a gap fill.
+//
+// A captured cost list is frozen at capture (plan PR-3b, Berkin 2026-11-23: "frozen
+// the moment it enters profit"): a filled list never changes afterwards, even while
+// the order's business day is still open, so a same-day attach, detach, archive or
+// restore never reaches it. A capture and the fill of an empty cost list pin versions
+// by the shared cost rule (`chooseOrderCostVersion`): only links in force at the end
+// of the order's business day count, each priced by its version at the order time, so
+// a cost linked (or restored) after that day never fills an empty list.
 //
 // Dated shared values (tariff versions, fee definitions, micro-export tiers) are not
 // copied; the engine keeps reading them by the order date.
@@ -20,10 +26,13 @@
 import type { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
 import { Platform, SnapshotDesiSource } from '@pazarsync/db/enums';
-import { getBusinessDayRange, resolveProfitSettings } from '@pazarsync/utils';
+import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { compareText } from '../core/compare-text';
-import { chooseCostVersion } from '../core/seller-costs/build-seller-cost-lines';
+import {
+  chooseOrderCostVersion,
+  costDecisionTime,
+} from '../core/seller-costs/cost-profile-in-force';
 import {
   trendyolCategoryBrandKey,
   type TrendyolCommissionRules,
@@ -67,8 +76,8 @@ type LiveVariant = NonNullable<SnapshotOrderItem['productVariant']>;
 
 /**
  * Captures the order's product/seller inputs once; afterwards fills only missing
- * parts, and keeps an item's cost list on its current cost links while the order's
- * business day is open. Never overwrites a known value with a live one. Writes
+ * parts (an empty cost list among them). A filled cost list is frozen at capture.
+ * Never overwrites a known value with a live one. Writes
  * nothing and returns `{ orderWritten: false, itemsWritten: 0 }` when the order is
  * not this organization's, or its store is not a Trendyol store. Query count does
  * not depend on the item count; writes are at most one order update and one update
@@ -192,21 +201,13 @@ function isEmptyCostList(ids: readonly string[] | null): boolean {
 }
 
 /**
- * True while the order's business day (Europe/Istanbul, the day of the cost-window
- * rule) has not ended at `now`: the seller may still enter or change the order's
- * cost, so a captured cost list keeps following the variant's cost links.
- */
-function isOrderBusinessDayOpen(orderDate: Date, now: Date): boolean {
-  return now.getTime() < getBusinessDayRange(orderDate).end.getTime();
-}
-
-/**
  * True when a captured item's cost list is computed again from its variant's cost
- * links: on every call while the order's business day is open, afterwards only while
- * the list is empty (a cost linked later fills it; a filled list is frozen).
+ * links: only while it is empty (a cost in force at the order's day end fills it). A
+ * filled list is frozen at capture, whether the order's business day is still open
+ * or not.
  */
-function needsCostListRefresh(item: SnapshotOrderItem, dayOpen: boolean): boolean {
-  return dayOpen || isEmptyCostList(item.snapshotCostProfileVersionIds);
+function needsCostListRefresh(item: SnapshotOrderItem): boolean {
+  return isEmptyCostList(item.snapshotCostProfileVersionIds);
 }
 
 /** True when a rate input gives a rate: Trendyol's null or zero rate means "not sent". */
@@ -249,12 +250,13 @@ async function captureItems(
   },
 ): Promise<number> {
   const { organizationId, orderDate, items, now } = params;
-  const dayOpen = isOrderBusinessDayOpen(orderDate, now);
+  // The cost rule's decision time: the order's business-day end, never the clock.
+  const at = costDecisionTime(orderDate);
   const captureList = items.filter(needsFullCapture);
   // Captured items whose variant is still in the catalogue: the only ones a gap fill
-  // or a cost list update reads live values for.
+  // reads live values for.
   const fillList = items.filter((item) => !needsFullCapture(item) && item.productVariant !== null);
-  const costFillList = fillList.filter((item) => needsCostListRefresh(item, dayOpen));
+  const costFillList = fillList.filter(needsCostListRefresh);
   const commissionFillList = fillList.filter(lacksCommissionRate);
 
   // Platform-global reference data: the category ids are the only scope.
@@ -275,11 +277,11 @@ async function captureItems(
   for (const item of captureList) {
     writes.push({
       id: item.id,
-      data: itemCaptureData(item, { rules, costsByVariant, orderDate, now }),
+      data: itemCaptureData(item, { rules, costsByVariant, orderDate, at, now }),
     });
   }
   for (const item of fillList) {
-    const data = itemFillData(item, { rules, costsByVariant, orderDate, dayOpen });
+    const data = itemFillData(item, { rules, costsByVariant, orderDate, at });
     if (data !== null) {
       writes.push({ id: item.id, data });
     }
@@ -309,7 +311,7 @@ function itemFillData(
     readonly rules: TrendyolCommissionRules;
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
     readonly orderDate: Date;
-    readonly dayOpen: boolean;
+    readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput | null {
   const variant = item.productVariant;
@@ -323,27 +325,28 @@ function itemFillData(
   return Object.keys(data).length === 0 ? null : data;
 }
 
-/** The item's cost list computed again from its variant's links, when it needs it and differs from the stored one. */
+/**
+ * The fill of an empty cost list: the versions the cost rule pins at `at`. Nothing
+ * when the list is filled (frozen at capture) or no link of the variant is in force
+ * at `at`.
+ */
 function costListFillData(
   item: SnapshotOrderItem,
   variantId: string,
   reference: {
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
     readonly orderDate: Date;
-    readonly dayOpen: boolean;
+    readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
-  if (!needsCostListRefresh(item, reference.dayOpen)) {
+  if (!needsCostListRefresh(item)) {
     return {};
   }
-  const stored = item.snapshotCostProfileVersionIds ?? [];
-  const current = pinnedCostVersionIds(
-    reference.costsByVariant.get(variantId),
-    reference.orderDate,
-  );
-  const unchanged =
-    stored.length === current.length && stored.every((id, index) => id === current[index]);
-  return unchanged ? {} : { snapshotCostProfileVersionIds: current };
+  const pinned = pinnedCostVersionIds(reference.costsByVariant.get(variantId), {
+    orderDate: reference.orderDate,
+    at: reference.at,
+  });
+  return pinned.length === 0 ? {} : { snapshotCostProfileVersionIds: pinned };
 }
 
 /**
@@ -428,10 +431,11 @@ function itemCaptureData(
     readonly rules: TrendyolCommissionRules;
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
     readonly orderDate: Date;
+    readonly at: Date;
     readonly now: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
-  const { rules, costsByVariant, orderDate, now } = reference;
+  const { rules, costsByVariant, orderDate, at, now } = reference;
   const variant = item.productVariant;
   if (variant === null) {
     return {
@@ -460,28 +464,30 @@ function itemCaptureData(
     snapshotSyncedCommissionRatePct: variant.syncedCommissionRate,
     snapshotCategoryRatePct: rates.categoryRatePct,
     snapshotCategoryBrandRatePct: rates.categoryBrandRatePct,
-    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), orderDate),
+    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), {
+      orderDate,
+      at,
+    }),
     profitSnapshotAt: now,
   };
 }
 
 /**
- * The ids of the cost profile versions the engine would price the item with: per
- * linked profile, the version `chooseCostVersion` picks at the order date. A profile
- * whose chosen version is archived contributes nothing, as in the engine's cost
- * module; so does a profile without versions (the loader already drops those).
- * Sorted ascending: the link query has no order, and a stored list must not depend
- * on it.
+ * The ids of the cost profile versions the item is priced with, by the shared cost
+ * rule: per linked profile, the version `chooseOrderCostVersion` picks (the version
+ * at the order time, else the one in force at `at`). A profile not in force at `at`
+ * (linked after it, archived by it, or without versions) contributes nothing, as in
+ * the engine's uncaptured-item path. Sorted ascending: the link query has no order,
+ * and a stored list must not depend on it.
  */
 function pinnedCostVersionIds(
   profiles: readonly IdentifiedItemCostProfileInput[] | undefined,
-  orderDate: Date,
+  params: { readonly orderDate: Date; readonly at: Date },
 ): string[] {
   const ids: string[] = [];
   for (const profile of profiles ?? []) {
-    if (profile.versions.length === 0) continue;
-    const version = chooseCostVersion(profile.versions, orderDate);
-    if (version.archivedAt !== null) continue;
+    const version = chooseOrderCostVersion(profile, params);
+    if (version === null) continue;
     ids.push(version.id);
   }
   return ids.sort(compareText);

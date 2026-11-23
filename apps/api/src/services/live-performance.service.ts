@@ -4,6 +4,7 @@ import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
   buildCalcCheckLines,
+  costDecisionTime,
   itemProfitValues,
   loadOrderProfitLines,
   parseStoredIssues,
@@ -628,6 +629,65 @@ interface VariantIdentity {
   desi: VariantDesiFields;
 }
 
+// The catalog fields a today-products row shows for a variant, read both through an
+// order item's variant link and through the barcode lookup, so both give one shape.
+const ROW_VARIANT_SELECT = {
+  id: true,
+  barcode: true,
+  stockCode: true,
+  dimensionalWeightOverride: true,
+  syncedDimensionalWeight: true,
+  isDigital: true,
+  product: {
+    select: {
+      title: true,
+      imageUrls: true,
+    },
+  },
+} as const satisfies Prisma.ProductVariantSelect;
+
+type LookedUpVariant = Prisma.ProductVariantGetPayload<{ select: typeof ROW_VARIANT_SELECT }>;
+
+/** A catalog variant's own row identity. */
+function variantIdentity(variant: LookedUpVariant): VariantIdentity {
+  return {
+    id: variant.id,
+    variantId: variant.id,
+    barcode: variant.barcode,
+    stockCode: variant.stockCode,
+    productName: variant.product.title,
+    thumbUrl: variant.product.imageUrls[0] ?? null,
+    unresolved: false,
+    desi: toVariantDesiFields(variant),
+  };
+}
+
+/**
+ * The row identity of a barcode read without a variant link (a buffer line, or an order
+ * line whose variant was deleted or never linked): the variant the store's barcode lookup
+ * resolved for it, else the barcode fallback (an unresolved row keyed `barcode:<code>`).
+ * Both sources go through this one function, so a buffer line and a variantless order
+ * line of one barcode land on the same row, and a re-created variant merges into the row
+ * of its linked order lines.
+ */
+function identityForBarcode(
+  barcode: string,
+  variantByBarcode: ReadonlyMap<string, LookedUpVariant>,
+): VariantIdentity {
+  const variant = variantByBarcode.get(barcode);
+  if (variant !== undefined) return variantIdentity(variant);
+  return {
+    id: `barcode:${barcode}`,
+    variantId: null,
+    barcode,
+    stockCode: null,
+    productName: null,
+    thumbUrl: null,
+    unresolved: true,
+    desi: UNRESOLVED_DESI_FIELDS,
+  };
+}
+
 /**
  * One row per product variant that sold today, merged over the universe:
  * `orders`(today) ∪ `buffer`(today). Volume (orderCount / unitsSold / revenue) is
@@ -641,7 +701,9 @@ interface VariantIdentity {
  * a null unitCost on every row and the error is logged (owner decision 2026-11-04);
  * volumes and cost status stand. There is NO per-product profit (an order's net profit
  * can't be cleanly attributed to one line). Rows are returned sorted by unitsSold desc
- * for deterministic output; the frontend owns the live re-sort.
+ * for deterministic output; the frontend owns the live re-sort. An order line without a
+ * variant (deleted or never linked) is not dropped: it is shown by its barcode, resolved
+ * like a buffer line (identityForBarcode); a line with neither is skipped.
  */
 export async function getTodayProducts(args: {
   orgId: string;
@@ -651,9 +713,10 @@ export async function getTodayProducts(args: {
   const todayAnchor = getBusinessDateAnchor();
 
   const [orderItems, bufferRows] = await Promise.all([
+    // Every non-cancelled line of today's orders, with or without a variant link: a line
+    // whose variant was deleted (FK SET NULL) or never linked is shown by its barcode.
     prisma.orderItem.findMany({
       where: {
-        productVariantId: { not: null },
         order: {
           organizationId: args.orgId,
           storeId: args.storeId,
@@ -667,6 +730,8 @@ export async function getTodayProducts(args: {
         orderId: true,
         quantity: true,
         lineSaleGross: true,
+        // The line's own barcode names a variantless line's row.
+        barcode: true,
         // The order date orders the candidates; the ESTIMATE statement's status picks
         // the preferred item (ESTIMATED over any), and its issues feed itemProfitValues.
         order: {
@@ -678,22 +743,7 @@ export async function getTodayProducts(args: {
             },
           },
         },
-        productVariant: {
-          select: {
-            id: true,
-            barcode: true,
-            stockCode: true,
-            dimensionalWeightOverride: true,
-            syncedDimensionalWeight: true,
-            isDigital: true,
-            product: {
-              select: {
-                title: true,
-                imageUrls: true,
-              },
-            },
-          },
-        },
+        productVariant: { select: ROW_VARIANT_SELECT },
       },
     }),
     // No status filter (unlike getMissingCost, which is PENDING-only because it's
@@ -728,20 +778,12 @@ export async function getTodayProducts(args: {
     return created;
   };
 
-  // Orders: identity comes straight from the joined variant.
-  for (const item of orderItems) {
-    const variant = item.productVariant;
-    if (variant === null) continue; // defensive — already filtered in the query
-    const acc = ensure({
-      id: variant.id,
-      variantId: variant.id,
-      barcode: variant.barcode,
-      stockCode: variant.stockCode,
-      productName: variant.product.title,
-      thumbUrl: variant.product.imageUrls[0] ?? null,
-      unresolved: false,
-      desi: toVariantDesiFields(variant),
-    });
+  type TodayOrderItem = (typeof orderItems)[number];
+
+  // Adds one of today's order lines to its row: its order, units and revenue, and the
+  // line as a candidate for the row's displayed unit cost. Linked and variantless lines
+  // both go through it, so a merged row follows one rule.
+  const addOrderItem = (acc: ProductAccumulator, item: TodayOrderItem): void => {
     acc.orderIds.add(item.orderId);
     acc.unitsSold += item.quantity;
     // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
@@ -768,10 +810,28 @@ export async function getTodayProducts(args: {
         acc.estimatedItem = candidate;
       }
     }
+  };
+
+  // Orders: a linked line takes its identity from its variant. A variantless line (its
+  // variant was deleted, or it was never linked) is held by its barcode and resolved
+  // below through the same barcode lookup as the buffer lines.
+  const orphanItemsByBarcode = new Map<string, TodayOrderItem[]>();
+  for (const item of orderItems) {
+    if (item.productVariant !== null) {
+      addOrderItem(ensure(variantIdentity(item.productVariant)), item);
+      continue;
+    }
+    // Neither a variant nor a barcode: nothing names the row (the row schema requires a
+    // barcode), so the line is skipped.
+    if (item.barcode === null) continue;
+    const orphanItems = orphanItemsByBarcode.get(item.barcode) ?? [];
+    orphanItems.push(item);
+    orphanItemsByBarcode.set(item.barcode, orphanItems);
   }
 
-  // Buffer: aggregate lines by barcode first (the entry carries no variant id),
-  // then resolve identity for barcodes not already seen in orders.
+  // Buffer: aggregate lines by barcode (the entry carries no variant id). These barcodes
+  // and the variantless order lines' barcodes resolve through the one organization +
+  // store barcode lookup below.
   interface BufferBarcodeAggregate {
     units: number;
     revenue: Decimal;
@@ -794,72 +854,47 @@ export async function getTodayProducts(args: {
     }
   }
 
-  const bufferBarcodes = [...bufferByBarcode.keys()];
-  const bufferVariants =
-    bufferBarcodes.length > 0
+  // One batched barcode lookup for the buffer lines and the variantless order lines,
+  // scoped by organizationId + storeId (no N+1).
+  const lookupBarcodes = [...new Set([...bufferByBarcode.keys(), ...orphanItemsByBarcode.keys()])];
+  const lookedUpVariants =
+    lookupBarcodes.length > 0
       ? await prisma.productVariant.findMany({
           where: {
             storeId: args.storeId,
             organizationId: args.orgId,
-            barcode: { in: bufferBarcodes },
+            barcode: { in: lookupBarcodes },
           },
           // Deterministic first match per barcode (lowest variant id), mirrored by
-          // the calculability gate (buildCalcCheckLines).
+          // the calculability gate (buildCalcCheckLines) and findFirstVariantByBarcode.
           orderBy: { id: 'asc' },
-          select: {
-            id: true,
-            barcode: true,
-            stockCode: true,
-            dimensionalWeightOverride: true,
-            syncedDimensionalWeight: true,
-            isDigital: true,
-            product: {
-              select: {
-                title: true,
-                imageUrls: true,
-              },
-            },
-          },
+          select: ROW_VARIANT_SELECT,
         })
       : [];
   // First match per barcode, as the calculability gate (buildCalcCheckLines) resolves
   // it, so a barcode shared by two variants shows the variant the gate holds the order for.
-  const variantByBarcode = new Map<string, (typeof bufferVariants)[number]>();
-  for (const variant of bufferVariants) {
+  const variantByBarcode = new Map<string, LookedUpVariant>();
+  for (const variant of lookedUpVariants) {
     if (!variantByBarcode.has(variant.barcode)) variantByBarcode.set(variant.barcode, variant);
   }
 
   for (const [barcode, agg] of bufferByBarcode) {
-    const variant = variantByBarcode.get(barcode);
     // Çözülemeyen barkod DÜŞÜRÜLMEZ (görünürlük sözleşmesi, spec 2026-06-12
     // §7): satıcı "1 sipariş var ama ürün listesi boş" tutarsızlığını asla
     // görmez. Eager onarım (PR-2) sayesinde bu satır nadir istisnadır.
-    const acc = ensure(
-      variant !== undefined
-        ? {
-            id: variant.id,
-            variantId: variant.id,
-            barcode: variant.barcode,
-            stockCode: variant.stockCode,
-            productName: variant.product.title,
-            thumbUrl: variant.product.imageUrls[0] ?? null,
-            unresolved: false,
-            desi: toVariantDesiFields(variant),
-          }
-        : {
-            id: `barcode:${barcode}`,
-            variantId: null,
-            barcode,
-            stockCode: null,
-            productName: null,
-            thumbUrl: null,
-            unresolved: true,
-            desi: UNRESOLVED_DESI_FIELDS,
-          },
-    );
+    const acc = ensure(identityForBarcode(barcode, variantByBarcode));
     acc.bufferEntryCount += agg.entryIds.size;
     acc.unitsSold += agg.units;
     acc.revenue = acc.revenue.add(agg.revenue);
+  }
+
+  // Variantless order lines, through the same identity as the buffer lines: a barcode the
+  // lookup resolves merges into that variant's row, an unknown one into the buffer's
+  // unresolved row of that barcode (or its own). An unresolved row's cost status stays
+  // 'missing', as for every unresolved row.
+  for (const [barcode, items] of orphanItemsByBarcode) {
+    const acc = ensure(identityForBarcode(barcode, variantByBarcode));
+    for (const item of items) addOrderItem(acc, item);
   }
 
   // Cost status: a variant is costed iff it has an active (non-archived) cost
@@ -1112,8 +1147,9 @@ export interface BufferDetailLine extends VariantDesiFields {
   lineSaleGross: string;
   /**
    * The line's gap in the calculability gate that holds the order in the buffer
-   * (buildCalcCheckLines): no cost profile linked, or the barcode resolves to no
-   * variant. Deliberately the gate's own check, not the products page's
+   * (buildCalcCheckLines): no cost profile link in force at the order's business-day
+   * end (none linked, or every linked profile archived), or the barcode resolves to
+   * no variant. Deliberately the gate's own check, not the products page's
    * active-profile rule, so it names exactly what keeps this order waiting.
    */
   isCostMissing: boolean;
@@ -1137,6 +1173,7 @@ export async function getBufferDetail(args: {
     select: {
       id: true,
       platformOrderNumber: true,
+      orderDate: true,
       mappedOrder: true,
     },
   });
@@ -1145,6 +1182,10 @@ export async function getBufferDetail(args: {
   }
 
   const mapped = entry.mappedOrder as unknown as MappedOrder;
+  // The mapped order's own instant when it holds a valid date (the JSONB round-trip
+  // leaves it an ISO string); else the row's business-day anchor, so a row with a
+  // missing or broken date still opens.
+  const orderDate = parseMappedOrderDate(mapped.orderDate) ?? entry.orderDate;
 
   const barcodes = [...new Set(mapped.lines.map((l) => l.barcode))];
   const variants =
@@ -1170,12 +1211,16 @@ export async function getBufferDetail(args: {
   const variantById = new Map(variants.map((v) => [v.id, v]));
 
   // The calculability gate's own lines for this order, scoped by organizationId +
-  // storeId. buildCalcCheckLines returns one line per input line in input order, so
+  // storeId and judged at the order's cost decision time (its business-day end), as
+  // the gate that holds the order judges them. The decision time comes from the
+  // row's order_date column, as in the promote and flush workers, never from the
+  // JSONB. buildCalcCheckLines returns one line per input line in input order, so
   // index i is mapped.lines[i].
   const calcLines = await buildCalcCheckLines(prisma, {
     organizationId: args.orgId,
     storeId: args.storeId,
     lines: mapped.lines.map((l) => ({ barcode: l.barcode })),
+    at: costDecisionTime(entry.orderDate),
   });
 
   const lines: BufferDetailLine[] = mapped.lines.map((line, index) => {
@@ -1200,11 +1245,18 @@ export async function getBufferDetail(args: {
 
   return {
     platformOrderNumber: entry.platformOrderNumber,
-    orderDate: new Date(mapped.orderDate).toISOString(),
+    orderDate: orderDate.toISOString(),
     status: mapped.status,
     saleGross: new Decimal(mapped.saleGross).toFixed(2),
     lines,
   };
+}
+
+/** A buffer row's JSONB order date as a Date; null when it is missing or not a valid date string. */
+function parseMappedOrderDate(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**

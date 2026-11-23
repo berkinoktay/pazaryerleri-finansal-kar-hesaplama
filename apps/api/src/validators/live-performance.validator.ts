@@ -285,6 +285,7 @@ const BufferDetailLineSchema = z.object({
   isCostMissing: z.boolean().openapi({
     description:
       "The line's gap in the calculability gate that holds the order: no cost profile linked, " +
+      "or every linked cost profile is archived (not in force at the order's business-day end), " +
       'or the barcode resolves to no variant.',
     example: false,
   }),

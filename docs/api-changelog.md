@@ -48,6 +48,17 @@ section "Versioning" for details.
   attach already does. Only this store's variants that the write updated are checked; ids of
   another store or organization trigger nothing. Clearing the desi (`null`) checks nothing, and
   stored orders keep the desi captured at intake. Request and response shapes unchanged.
+- **Restoring a cost profile moves today's waiting orders into profit**
+  (`POST /v1/organizations/{orgId}/cost-profiles/{id}/restore`). A restore now re-checks, in the
+  same transaction, the orders of today that wait in the Live Performance buffer for the
+  profile's attached variants: an order whose only cost profile was archived moves on into profit
+  once that profile is restored, provided every line has a cost and a desi, like a cost attach
+  already does. Request and response shapes unchanged.
+- **Buffer detail flags a line whose cost profiles are all archived**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/buffer/{bufferId}`,
+  `lines[].isCostMissing`). `isCostMissing` is now also `true` for a line whose linked cost
+  profiles are all archived (none in force at the end of the order's business day), not only for a
+  line with no linked profile or no resolved variant. No response shape change.
 - **Empty desi is missing, a seller's 0 is a real desi** (`GET /v1/organizations/{orgId}/stores/{storeId}/products`,
   `GET .../products/facets`, `PATCH .../products/variants/{variantId}/dimensional-weight`, the
   product pricing routes). A variant Trendyol sends no desi for, or a desi of 0 (Trendyol's value
@@ -2258,6 +2269,9 @@ supplierId, apiKey, apiSecret } }`. Credentials are probed against
 
 ### Fixed
 
+- **Today's products keep an order line without a variant**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`). Such a line is
+  shown by its barcode, resolved like a buffer line, instead of being dropped. Wire shape unchanged.
 - **Products list `brandId` and `categoryId` pattern in the spec**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/products`). The `pattern` of the `brandId` and
   `categoryId` query parameters is `^\d+$`, where it used to read `^d+$`, which their own examples

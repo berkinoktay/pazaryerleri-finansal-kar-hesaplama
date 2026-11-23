@@ -1,16 +1,18 @@
 // Variant-resolution tick (spec 2026-06-11 §4 D3-D5).
 //
-// Sıra: (1) yerel first-match — günlük tam senkronla gelmiş variant'ları sıfır
-// API çağrısıyla bağlar; (2) hâlâ eşleşmeyenler için mağaza-başına TEKİL
-// barkodlarla hedefli vendor sorgusu → mevcut products upsert hattı; (3) tekrar
-// eşle + bağla; (4) kalanlara attempts++ ve üstel backoff. Eşleştirme semantiği
-// intake ile birebir: (storeId, barcode) first-match (build-calc-check-lines).
+// Order: (1) local first-match, which links variants the daily full sync already
+// brought with zero API calls; (2) a targeted vendor query for the remaining DISTINCT
+// barcodes per store, through the existing products upsert pipeline (a barcode the
+// vendor already confirmed missing is not queried: it waits for its
+// CatalogBarcodeMiss deadline); (3) match and link again; (4) attempts++ and a
+// backoff for the rest. Matching mirrors intake exactly: (organizationId, storeId,
+// barcode) first-match (findFirstVariantByBarcode).
 // Tick crash-safe: çağıran (index.ts) catch'ler; burada mağaza-başına izolasyon.
 
 import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecompute } from '@pazarsync/profit';
+import { enqueueProfitRecompute, findFirstVariantByBarcode } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 const MAX_BARCODES_PER_STORE_PER_TICK = 25;
@@ -24,6 +26,22 @@ interface DueItem {
   barcode: string | null;
   variantResolutionAttempts: number;
   order: { id: string; storeId: string; organizationId: string };
+}
+
+/**
+ * The tenant pair every read and write of one resolution group is pinned to. Work is
+ * grouped by the pair, never by the store alone, so a row carrying another
+ * organization's store id never reaches that organization's store, catalog or miss
+ * rows: the store load filters both ids and fails closed on a mismatch.
+ */
+interface ResolutionScope {
+  organizationId: string;
+  storeId: string;
+}
+
+/** Map key of a (organizationId, storeId) pair; both are UUIDs, so ':' never collides. */
+function scopeKey(scope: ResolutionScope): string {
+  return `${scope.organizationId}:${scope.storeId}`;
 }
 
 function nextBackoff(attempts: number): Date {
@@ -62,8 +80,8 @@ async function runResolutionTick(): Promise<void> {
 }
 
 async function resolveDueOrderItems(): Promise<void> {
-  // Vadesi gelmiş, çözülmemiş satırlar — mağaza başına gruplanır. Sıralama
-  // deterministik (vade önce, null=hiç denenmemiş en önde): take-500
+  // Due, unresolved items, grouped per (organizationId, storeId) pair.
+  // Sıralama deterministik (vade önce, null=hiç denenmemiş en önde): take-500
   // penceresi tick'ler arasında kararlı dolaşır, tek mağazanın taşması
   // diğerlerini rastgele aç bırakamaz.
   const due: DueItem[] = await prisma.orderItem.findMany({
@@ -83,16 +101,18 @@ async function resolveDueOrderItems(): Promise<void> {
   });
   if (due.length === 0) return;
 
-  const byStore = new Map<string, DueItem[]>();
+  const byScope = new Map<string, { scope: ResolutionScope; items: DueItem[] }>();
   for (const item of due) {
-    const list = byStore.get(item.order.storeId) ?? [];
-    list.push(item);
-    byStore.set(item.order.storeId, list);
+    const scope = { organizationId: item.order.organizationId, storeId: item.order.storeId };
+    const group = byScope.get(scopeKey(scope)) ?? { scope, items: [] };
+    group.items.push(item);
+    byScope.set(scopeKey(scope), group);
   }
 
-  for (const [storeId, items] of byStore) {
+  for (const { scope, items } of byScope.values()) {
+    const { organizationId, storeId } = scope;
     try {
-      await resolveForStore(storeId, items);
+      await resolveForStore(scope, items);
     } catch (err) {
       // Mağaza-başına izolasyon: bir mağazanın hatası (ör. vendor 5xx, bozuk
       // credential) diğerlerini durdurmaz. Kalıcı hata 60s hot-loop'a ve
@@ -100,11 +120,12 @@ async function resolveDueOrderItems(): Promise<void> {
       // yazılır (best-effort) — transient hata 5 dk gecikme öder, kalıcı
       // hata üstel olarak pencereden çekilir.
       syncLog.error('resolution.store-failed', {
+        organizationId,
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
       // Mağaza-hatası geçicidir (5xx/credential): üstel eğriyle pencereden çek.
-      await applyBackoff(storeId, items, 'retriable').catch((backoffErr: unknown) => {
+      await applyBackoff(scope, items, 'retriable').catch((backoffErr: unknown) => {
         syncLog.error('resolution.store-backoff-failed', {
           storeId,
           errorMessage: backoffErr instanceof Error ? backoffErr.message : String(backoffErr),
@@ -123,35 +144,57 @@ async function resolveDueOrderItems(): Promise<void> {
 // zamanda "Trendyol'da yok" UI rozetini besler.
 
 /**
- * (storeId, barcode) için CatalogBarcodeMiss satırını idempotent upsert eder.
- * `attempts` parametresi tablodaki MEVCUT deneme sayısıdır (default 0); üstel
- * `retriable` vadesi bunun üzerinden hesaplanır, increment'le birlikte yazılır.
+ * Writes the scope's CatalogBarcodeMiss row for `barcode` (attempts++ on an existing
+ * row, attempts 1 on a new one) and returns the nextRetryAt it computed. `attempts`
+ * is the row's CURRENT attempt count (0 for a new row); the exponential `retriable`
+ * deadline is derived from it, the flat `vendorMissing` deadline is not.
+ *
+ * Organization-safe: the table is unique on (storeId, barcode), so a row of this
+ * store stamped with another organization (the database allows it) holds the key.
+ * That row is never modified: the update is guarded by organizationId and the insert
+ * skips the conflict instead of throwing into the per-store catch. The computed
+ * deadline is still returned, so the caller's items back off on it. When the skipped
+ * insert met a row of this organization written concurrently, that row's deadline is
+ * returned instead.
  */
 async function upsertBarcodeMiss(
-  storeId: string,
-  organizationId: string,
+  scope: ResolutionScope,
   barcode: string,
   vendorMissing: boolean,
   attempts: number,
-): Promise<void> {
+): Promise<Date> {
+  const { organizationId, storeId } = scope;
   const nextRetryAt = vendorMissing ? nextVendorMissingRetry() : nextBackoff(attempts);
-  await prisma.catalogBarcodeMiss.upsert({
-    where: { storeId_barcode: { storeId, barcode } },
-    create: {
-      organizationId,
-      storeId,
-      barcode,
-      vendorMissing,
-      attempts: 1,
-      nextRetryAt,
-    },
-    update: {
+  const updated = await prisma.catalogBarcodeMiss.updateMany({
+    where: { organizationId, storeId, barcode },
+    data: {
       vendorMissing,
       attempts: { increment: 1 },
       lastCheckedAt: new Date(),
       nextRetryAt,
     },
   });
+  if (updated.count > 0) return nextRetryAt;
+
+  const created = await prisma.catalogBarcodeMiss.createMany({
+    data: [{ organizationId, storeId, barcode, vendorMissing, attempts: 1, nextRetryAt }],
+    skipDuplicates: true,
+  });
+  if (created.count > 0) return nextRetryAt;
+
+  // The (storeId, barcode) key is held by another row. When it is this
+  // organization's (a concurrent insert), its deadline is the barcode's one clock:
+  // read it back instead of updating again, which would count this tick's attempt
+  // twice.
+  const concurrent = await prisma.catalogBarcodeMiss.findFirst({
+    where: { organizationId, storeId, barcode },
+    select: { nextRetryAt: true },
+  });
+  if (concurrent !== null) return concurrent.nextRetryAt ?? nextRetryAt;
+
+  // Another organization's row in this store holds the key; it is never touched.
+  syncLog.warn('resolution.miss-row-skipped', { organizationId, storeId, barcode });
+  return nextRetryAt;
 }
 
 /**
@@ -161,36 +204,47 @@ async function upsertBarcodeMiss(
  * Item bağlama gerekmez: mezuniyet/promote yazımı variant'ı kendisi bulur.
  */
 async function repairBufferCatalogGaps(): Promise<void> {
-  const bufferGaps = await prisma.$queryRaw<Array<{ store_id: string; barcode: string }>>`
-    SELECT DISTINCT b.store_id, line->>'barcode' AS barcode
+  // A gap is judged within the buffer row's own organization and store, the same
+  // scope the order-line resolvers (findFirstVariantByBarcode) link in: a variant row
+  // of the store stamped with another organization does not close it.
+  const bufferGaps = await prisma.$queryRaw<
+    Array<{ organization_id: string; store_id: string; barcode: string }>
+  >`
+    SELECT DISTINCT b.organization_id, b.store_id, line->>'barcode' AS barcode
     FROM live_performance_buffer b,
          jsonb_array_elements(b.mapped_order->'lines') AS line
     WHERE b.status = 'PENDING'
       AND line->>'barcode' IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM product_variants pv
-        WHERE pv.store_id = b.store_id AND pv.barcode = line->>'barcode'
+        WHERE pv.organization_id = b.organization_id
+          AND pv.store_id = b.store_id
+          AND pv.barcode = line->>'barcode'
       )
     LIMIT 200
   `;
   if (bufferGaps.length === 0) return;
 
-  const gapsByStore = new Map<string, string[]>();
+  const gapsByScope = new Map<string, { scope: ResolutionScope; barcodes: string[] }>();
   for (const row of bufferGaps) {
-    const list = gapsByStore.get(row.store_id) ?? [];
-    list.push(row.barcode);
-    gapsByStore.set(row.store_id, list);
+    const scope = { organizationId: row.organization_id, storeId: row.store_id };
+    const group = gapsByScope.get(scopeKey(scope)) ?? { scope, barcodes: [] };
+    group.barcodes.push(row.barcode);
+    gapsByScope.set(scopeKey(scope), group);
   }
 
   const now = new Date();
-  for (const [storeId, allBarcodes] of gapsByStore) {
+  for (const { scope, barcodes: allBarcodes } of gapsByScope.values()) {
+    const { organizationId, storeId } = scope;
     try {
-      const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+      // A mismatched pair (a buffer row carrying another organization's store id)
+      // throws into the catch below: the vendor is never queried with that store.
+      const store = await prisma.store.findFirstOrThrow({ where: { id: storeId, organizationId } });
       // Vade kontrolü tablodan: satırı OLMAYAN barkod (hiç denenmemiş) ya da
       // nextRetryAt NULL/geçmiş olan vadesi gelmiştir; geleceğe bakan
       // nextRetryAt'li barkod bu tick'te atlanır (vendor sorgusu YOK).
       const existing = await prisma.catalogBarcodeMiss.findMany({
-        where: { storeId, barcode: { in: allBarcodes } },
+        where: { organizationId, storeId, barcode: { in: allBarcodes } },
         select: { barcode: true, attempts: true, nextRetryAt: true },
       });
       const missByBarcode = new Map(existing.map((m) => [m.barcode, m]));
@@ -208,29 +262,18 @@ async function repairBufferCatalogGaps(): Promise<void> {
       });
       if (result.resolved.length > 0) {
         await prisma.catalogBarcodeMiss.deleteMany({
-          where: { storeId, barcode: { in: result.resolved } },
+          where: { organizationId, storeId, barcode: { in: result.resolved } },
         });
       }
       for (const barcode of result.vendorMissing) {
-        await upsertBarcodeMiss(
-          storeId,
-          store.organizationId,
-          barcode,
-          true,
-          missByBarcode.get(barcode)?.attempts ?? 0,
-        );
+        await upsertBarcodeMiss(scope, barcode, true, missByBarcode.get(barcode)?.attempts ?? 0);
       }
       for (const barcode of result.retriable) {
-        await upsertBarcodeMiss(
-          storeId,
-          store.organizationId,
-          barcode,
-          false,
-          missByBarcode.get(barcode)?.attempts ?? 0,
-        );
+        await upsertBarcodeMiss(scope, barcode, false, missByBarcode.get(barcode)?.attempts ?? 0);
       }
     } catch (err) {
       syncLog.error('resolution.buffer-repair-failed', {
+        organizationId,
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
@@ -241,26 +284,54 @@ async function repairBufferCatalogGaps(): Promise<void> {
 type BackoffKind = 'retriable' | 'vendorMissing';
 
 /**
- * attempts++ + vade yazar. Eğri `kind`'a göre ayrışır: `retriable` (geçici
- * hata / mağaza-hatası) MEVCUT üstel eğri; `vendorMissing` (vendor'da gerçekten
- * yok) DÜZ ~24 saat. `nextResolutionAt` order-item'ın KENDİ geçici-retry'sini
- * sahiplenir; tablo yalnız vendorMissing UI rozeti + buffer-gap için yazılır
- * (bu yolda tabloya yazma yok — yanı sıra çağıran üstlenir).
+ * The item's next deadline for `kind`: `retriable` (a transient or store failure)
+ * follows the exponential curve keyed off the item's own attempts; `vendorMissing`
+ * takes its barcode's CatalogBarcodeMiss deadline, so every item of the barcode
+ * shares one clock (flat ~24h when the caller has no deadline for it).
  */
-async function applyBackoff(storeId: string, items: DueItem[], kind: BackoffKind): Promise<void> {
+function nextResolutionFor(
+  item: DueItem,
+  kind: BackoffKind,
+  deadlineByBarcode: ReadonlyMap<string, Date> | undefined,
+): Date {
+  switch (kind) {
+    case 'retriable':
+      return nextBackoff(item.variantResolutionAttempts);
+    case 'vendorMissing': {
+      const deadline = item.barcode === null ? undefined : deadlineByBarcode?.get(item.barcode);
+      return deadline ?? nextVendorMissingRetry();
+    }
+    default: {
+      const _exhaustive: never = kind;
+      throw new Error(`Unhandled backoff kind: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * attempts++ and a new deadline per item (see nextResolutionFor). The table is not
+ * written here: for `vendorMissing` the caller upserts the barcode's miss row FIRST
+ * and passes its deadline in `deadlineByBarcode`.
+ */
+async function applyBackoff(
+  scope: ResolutionScope,
+  items: DueItem[],
+  kind: BackoffKind,
+  deadlineByBarcode?: ReadonlyMap<string, Date>,
+): Promise<void> {
+  const { organizationId, storeId } = scope;
   for (const item of items) {
-    const nextResolutionAt =
-      kind === 'vendorMissing'
-        ? nextVendorMissingRetry()
-        : nextBackoff(item.variantResolutionAttempts);
-    await prisma.orderItem.update({
-      where: { id: item.id },
+    const nextResolutionAt = nextResolutionFor(item, kind, deadlineByBarcode);
+    await prisma.orderItem.updateMany({
+      // Scope through the order: order_items.organization_id is nullable in the schema.
+      where: { id: item.id, order: { organizationId, storeId } },
       data: {
         variantResolutionAttempts: item.variantResolutionAttempts + 1,
         nextResolutionAt,
       },
     });
     syncLog.info('resolution.deferred', {
+      organizationId,
       storeId,
       orderItemId: item.id,
       barcode: item.barcode,
@@ -270,15 +341,64 @@ async function applyBackoff(storeId: string, items: DueItem[], kind: BackoffKind
   }
 }
 
-async function resolveForStore(storeId: string, items: DueItem[]): Promise<void> {
+/**
+ * Gate of the order-item path: a barcode the vendor already confirmed missing, whose
+ * CatalogBarcodeMiss deadline is still ahead, is not queried again. Its items take the
+ * row's nextRetryAt and keep their attempts; the row is not touched. Returns the
+ * items that still go to the vendor.
+ */
+async function deferKnownVendorMissing(
+  scope: ResolutionScope,
+  items: DueItem[],
+): Promise<DueItem[]> {
+  const { organizationId, storeId } = scope;
+  const barcodes = [...new Set(items.flatMap((i) => (i.barcode === null ? [] : [i.barcode])))];
+  if (barcodes.length === 0) return items;
+
+  const rows = await prisma.catalogBarcodeMiss.findMany({
+    where: {
+      organizationId,
+      storeId,
+      barcode: { in: barcodes },
+      vendorMissing: true,
+      nextRetryAt: { gt: new Date() },
+    },
+    select: { barcode: true, nextRetryAt: true },
+  });
+  const deadlineByBarcode = new Map<string, Date>();
+  for (const row of rows) {
+    if (row.nextRetryAt !== null) deadlineByBarcode.set(row.barcode, row.nextRetryAt);
+  }
+  if (deadlineByBarcode.size === 0) return items;
+
+  for (const [barcode, nextResolutionAt] of deadlineByBarcode) {
+    const gated = items.filter((i) => i.barcode === barcode);
+    await prisma.orderItem.updateMany({
+      where: { id: { in: gated.map((i) => i.id) }, order: { organizationId, storeId } },
+      data: { nextResolutionAt },
+    });
+    for (const item of gated) {
+      syncLog.info('resolution.deferred', {
+        organizationId,
+        storeId,
+        orderItemId: item.id,
+        barcode,
+        attempts: item.variantResolutionAttempts,
+        kind: 'vendorMissingKnown',
+      });
+    }
+  }
+  return items.filter((i) => i.barcode === null || !deadlineByBarcode.has(i.barcode));
+}
+
+async function resolveForStore(scope: ResolutionScope, items: DueItem[]): Promise<void> {
+  const { organizationId, storeId } = scope;
   // 1) Yerel first-match (ucuz yol — vendor'a gitmeden bağla).
   let remaining = await linkAgainstLocalCatalog(storeId, items);
-  if (remaining.length === 0) {
-    // İlk geçişte hepsi yerelden bağlandıysa: bunların açık bir
-    // CatalogBarcodeMiss rozeti varsa kapat (gap kapandı).
-    await clearMissForLinked(storeId, items, remaining);
-    return;
-  }
+  // A barcode linked locally always drops its stale CatalogBarcodeMiss row (the gap
+  // closed), whatever stays unresolved: a gated barcode below may end the tick early.
+  await clearMissForLinked(scope, items, remaining);
+  if (remaining.length === 0) return;
 
   // 2) Hedefli vendor sorgusu — ensureBarcodesInCatalog'a delege (spec
   // 2026-06-12 PR-2): tekil barkod fetch + tam katalog hattı + hata yutma
@@ -286,7 +406,19 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   // GERÇEKTEN sorgulanan barkodlara işlesin — cap'e sığmayanlar denenmeden
   // cezalandırılmaz, vadesiz (null) kaldıkları için sıralama gereği sonraki
   // tick'in penceresinde öne geçerler.
-  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+  // A mismatched pair (an order carrying another organization's store id) throws
+  // into the caller's per-store catch, which writes a backoff: the vendor is never
+  // queried with another organization's store or credentials.
+  const store = await prisma.store.findFirstOrThrow({ where: { id: storeId, organizationId } });
+
+  // A barcode the vendor already confirmed missing waits for its CatalogBarcodeMiss
+  // deadline (one clock per barcode). Gated after the local match, so a variant that
+  // reached the catalog meanwhile still links, and before the slice, so a gated
+  // barcode never takes a slot. A mismatched pair already failed closed above and
+  // never reads the miss table.
+  remaining = await deferKnownVendorMissing(scope, remaining);
+  if (remaining.length === 0) return;
+
   const distinctBarcodes = [
     ...new Set(remaining.flatMap((i) => (i.barcode === null ? [] : [i.barcode]))),
   ].slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
@@ -300,7 +432,7 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   remaining = await linkAgainstLocalCatalog(storeId, remaining);
 
   // Bağlanan satırların barkodları için açık CatalogBarcodeMiss rozetini kapat.
-  await clearMissForLinked(storeId, beforeRelink, remaining);
+  await clearMissForLinked(scope, beforeRelink, remaining);
 
   // 4) Sorgulanıp hâlâ çözülemeyenleri eğriye göre ayır:
   //    - vendorMissing → DÜZ 24 saat + tabloya rozet (UI "Trendyol'da yok").
@@ -316,35 +448,35 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   const vendorMissingItems = attempted.filter((i) => vendorMissingBarcodes.has(i.barcode));
   const retriableItems = attempted.filter((i) => !vendorMissingBarcodes.has(i.barcode));
 
-  await applyBackoff(storeId, vendorMissingItems, 'vendorMissing');
   // Upsert the table ONCE per distinct barcode, not once per order line: a
   // barcode that sits on N lines in this tick must not increment attempts N
   // times. An inflated count would push repairBufferCatalogGaps's first
   // transient-failure retry straight to the 24h backoff cap, so a same-day
   // buffered order could miss its catalog repair before its cost window closes.
-  // The per-item backoff above stays per line (each item owns its own attempts).
-  const organizationByBarcode = new Map<string, string>();
-  for (const item of vendorMissingItems) {
-    organizationByBarcode.set(item.barcode, item.order.organizationId);
+  // The row is written first and its deadline is handed to every item of the
+  // barcode (one clock per barcode); the per-item backoff below still bumps each
+  // item's own attempts.
+  const deadlineByBarcode = new Map<string, Date>();
+  for (const barcode of new Set(vendorMissingItems.map((i) => i.barcode))) {
+    deadlineByBarcode.set(barcode, await upsertBarcodeMiss(scope, barcode, true, 0));
   }
-  for (const [barcode, organizationId] of organizationByBarcode) {
-    await upsertBarcodeMiss(storeId, organizationId, barcode, true, 0);
-  }
+  await applyBackoff(scope, vendorMissingItems, 'vendorMissing', deadlineByBarcode);
   // retriable yolu tabloya KASITLI yazmaz → varsa önceki vendorMissing=true
   // satırı OLDUĞU GİBİ kalır (rozet "Trendyol'da yok" durur). İyi-huylu bayatlık:
   // dün gerçekten yok olan barkod bugünkü geçici hataya rağmen muhtemelen hâlâ
   // yok; bir sonraki vendorMissing teyidi ya da resolved silmesi düzeltir. Bunu
   // false'a çekmek tablo<->item iki yazar arasında çatışma doğurur — yapma.
-  await applyBackoff(storeId, retriableItems, 'retriable');
+  await applyBackoff(scope, retriableItems, 'retriable');
 }
 
 /**
  * Bu tick'te bağlanan satırların barkodları için açık CatalogBarcodeMiss
  * rozetini siler (gap kapandı). `before` bağlanmadan önceki listedir, `after`
  * hâlâ çözülemeyenler — ikisinin farkı bu tick'te bağlananlardır.
+ * Tenant-scoped: only the group's own (organizationId, storeId) rows are deleted.
  */
 async function clearMissForLinked(
-  storeId: string,
+  scope: ResolutionScope,
   before: DueItem[],
   after: DueItem[],
 ): Promise<void> {
@@ -356,7 +488,11 @@ async function clearMissForLinked(
   ];
   if (linkedBarcodes.length === 0) return;
   await prisma.catalogBarcodeMiss.deleteMany({
-    where: { storeId, barcode: { in: linkedBarcodes } },
+    where: {
+      organizationId: scope.organizationId,
+      storeId: scope.storeId,
+      barcode: { in: linkedBarcodes },
+    },
   });
 }
 
@@ -385,12 +521,13 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           stillUnresolved.push(item);
           continue;
         }
-        const variant = await tx.productVariant.findFirst({
-          where: { storeId, barcode: item.barcode },
-          // Lowest variant id for a barcode shared by two variants: the same choice
-          // as buildCalcCheckLines, so the gate and the stored order item name one variant.
-          orderBy: { id: 'asc' },
-          select: { id: true },
+        // Lowest variant id for a barcode shared by two variants, inside the order's
+        // own organization and store: the same choice as buildCalcCheckLines, so the
+        // gate and the stored order item name one variant.
+        const variant = await findFirstVariantByBarcode(tx, {
+          organizationId: item.order.organizationId,
+          storeId,
+          barcode: item.barcode,
         });
         if (variant === null) {
           stillUnresolved.push(item);

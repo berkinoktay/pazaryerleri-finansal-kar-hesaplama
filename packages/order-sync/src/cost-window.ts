@@ -1,10 +1,12 @@
 /**
  * Cost-window rule (Berkin 2026-11-03): an order enters net profit only when
- * every non-cancelled item had its cost entered BEFORE the order's business day
- * ended (Europe/Istanbul midnight). Supply prices drift, so a cost entered after
- * that day may not reflect the day's real price -- an order that misses the window
- * is permanently excluded from profit (ciro still counts). This module answers the
- * single question the two exclusion writers ask: did the cost arrive in time?
+ * every non-cancelled item had a cost in force at the order's business-day end
+ * (Europe/Istanbul midnight): a link attached by then whose profile's latest
+ * version by then is not archived (PR-3b; the shared rule is isCostLinkInForce in
+ * @pazarsync/profit). Supply prices drift, so a cost entered after that day may not
+ * reflect the day's real price -- an order that misses the window is permanently
+ * excluded from profit (ciro still counts). This module answers the single
+ * question the two exclusion writers ask: did the cost arrive in time?
  *
  * See docs/plans/2026-11-03-profit-engine-faz-3e-plan.md (decision 1) and the root
  * CLAUDE.md money/tenant rules. Callers: intake-order (past-day route) and the
@@ -19,16 +21,22 @@
 
 import type { Prisma } from '@pazarsync/db';
 import { OrderStatus, ProfitExclusionReason, ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecompute } from '@pazarsync/profit';
+import { costDecisionTime, enqueueProfitRecompute, isCostLinkInForce } from '@pazarsync/profit';
 import { getBusinessDayRange } from '@pazarsync/utils';
 
 /**
- * True iff, for EVERY non-cancelled item, the resolved variant had a cost in time:
+ * True iff, for EVERY non-cancelled item, the resolved variant had a cost in force
+ * when the order's business day ended:
  *   - the item's `productVariantId` is set (an unresolved line can never be costed);
- *   - the variant has at least one `product_variant_cost_profiles` link attached on
- *     or before the order's day end; and
- *   - that link's profile (same organization) has at least one
- *     `cost_profile_versions` row effective on or before the order's day end.
+ *     and
+ *   - the variant has at least one `product_variant_cost_profiles` link that is in
+ *     force at the day end by the shared cost rule (`isCostLinkInForce` in
+ *     `@pazarsync/profit`, plan PR-3b): the link was attached on or before the day
+ *     end, its profile has a version effective on or before it, and the newest such
+ *     version (the highest version number) is not an archive version. A profile archived before the day ended
+ *     (and not restored before it) therefore never counts (Berkin 2026-11-23: an
+ *     archived or detached profile is ignored by every later order); one archived
+ *     after the day ended still does.
  *
  * Cancelled items are skipped (a cancelled line needs no cost). An order with no
  * non-cancelled item has nothing to cost, so it qualifies (returns true).
@@ -39,17 +47,17 @@ import { getBusinessDayRange } from '@pazarsync/utils';
  * cancelled ORDER is handled by the callers' order-status guard before this check.
  * The flag stays for a future marketplace that reports line-level cancels.
  *
- * The day end is the end of the order's business day, taken from the single
- * APP_TIME_ZONE helper (`getBusinessDayRange`) that intake-order uses to split
- * "today" from a past day -- never a hand-rolled timezone calculation.
- * `getBusinessDayRange(orderDate).end` is the first instant of the next business
- * day (the order day's closing midnight). The query filters with `lte`, so that
- * boundary instant itself still counts (plan decision 1: the day end is inclusive);
- * only a cost attached or effective strictly after it is too late.
+ * The day end is `costDecisionTime(orderDate)`, the same decision time the buffer
+ * gate uses: the end of the order's business day from the single APP_TIME_ZONE
+ * helper (`getBusinessDayRange(orderDate).end`, the first instant of the next
+ * business day). Never the app clock, never a hand-rolled timezone calculation. The
+ * rule is inclusive (plan decision 1): a link attached, or a version effective,
+ * exactly at that instant still counts; only one strictly after it is too late.
  *
- * One tenant-scoped query (plus the in-memory coverage check): every filter pins
- * `organization_id` and `store_id`, so the lookup can never read another tenant's
- * cost data. No N+1 -- all variants are resolved in a single `in` query.
+ * One tenant-scoped query (plus the in-memory rule and coverage check): the link,
+ * its variant (with the store) and its profile are all pinned to the caller's
+ * `organization_id`, so the lookup can never read another tenant's cost data. No
+ * N+1 -- all variants are resolved in a single `in` query.
  */
 export async function hadCostWithinOrderDay(
   tx: Prisma.TransactionClient,
@@ -83,31 +91,56 @@ export async function hadCostWithinOrderDay(
     ),
   ];
 
-  // The order day's closing midnight (first instant of the next business day).
-  // Used with `lte` below, so this boundary instant is inclusive -- a cost attached
-  // or effective exactly at it still counts (plan decision 1: the day end is included).
-  const dayEnd = getBusinessDayRange(params.orderDate).end;
+  // The order day's closing midnight (first instant of the next business day); the
+  // cost rule treats it as inclusive.
+  const at = costDecisionTime(params.orderDate);
 
-  // Tenant-scoped: the variants (of THIS organization + store) that carry a cost
-  // profile link attached on or before the day end whose profile (same org) has a
-  // version effective on or before the day end. `distinct` collapses a variant's
-  // multiple links to a single row so coverage is a plain set membership check.
-  const timelyLinks = await tx.productVariantCostProfile.findMany({
+  // Tenant-scoped: every cost profile link of these variants, where the link, the
+  // variant (with its store) and the profile all belong to THIS organization. The
+  // in-force decision needs each profile's version in force at the day end, so it
+  // runs in memory with the shared rule rather than as a SQL filter.
+  const links = await tx.productVariantCostProfile.findMany({
     where: {
       organizationId: params.organizationId,
       productVariantId: { in: variantIds },
-      attachedAt: { lte: dayEnd },
-      productVariant: { storeId: params.storeId },
+      productVariant: { organizationId: params.organizationId, storeId: params.storeId },
+      profile: { organizationId: params.organizationId },
+    },
+    select: {
+      productVariantId: true,
+      attachedAt: true,
       profile: {
-        organizationId: params.organizationId,
-        versions: { some: { effectiveFrom: { lte: dayEnd } } },
+        select: {
+          // Only the version in force at the day end (the highest version number
+          // effective by then): the in-force rule reads nothing else.
+          versions: {
+            where: { effectiveFrom: { lte: at } },
+            orderBy: { version: 'desc' },
+            take: 1,
+            select: { effectiveFrom: true, version: true, archivedAt: true },
+          },
+        },
       },
     },
-    select: { productVariantId: true },
-    distinct: ['productVariantId'],
   });
 
-  const covered = new Set(timelyLinks.map((link) => link.productVariantId));
+  const covered = new Set<string>();
+  for (const link of links) {
+    const inForce = isCostLinkInForce(
+      {
+        attachedAt: link.attachedAt,
+        versions: link.profile.versions.map((version) => ({
+          effectiveFrom: version.effectiveFrom,
+          versionNumber: version.version,
+          archivedAt: version.archivedAt,
+        })),
+      },
+      at,
+    );
+    if (inForce) {
+      covered.add(link.productVariantId);
+    }
+  }
   return variantIds.every((id) => covered.has(id));
 }
 
@@ -128,9 +161,17 @@ const BACKFILL_CHUNK_SIZE = 500;
  *     instant comparison `orderDate < getBusinessDayRange(now).start` so the scan
  *     can prefilter on the indexed `order_date` column.
  *
- * For each candidate every non-cancelled line (order_items carries no per-line
- * cancel flag, so every line counts) is fed to `hadCostWithinOrderDay`. When the
- * window was missed the order is stamped:
+ * A candidate whose every line (digital ones too: every line needs a cost) already
+ * carries a non-empty captured cost list (`hasCapturedCostOnEveryItem`) is skipped:
+ * the list is frozen at capture and, since plan PR-3b, a capture pins only links in
+ * force at the order's day end, so the window was met even if its only profile was
+ * archived or detached later that day.
+ * A capture made before PR-3b could pin a link attached after the day; such an order
+ * is skipped as well (never stamped), the safe direction for an irreversible stamp.
+ *
+ * For every other candidate every non-cancelled line (order_items carries no
+ * per-line cancel flag, so every line counts) is fed to `hadCostWithinOrderDay`. When
+ * the window was missed the order is stamped:
  *   - `LATE_UNCOSTED_ARRIVAL` when our first record of it (`created_at`) is after
  *     the SAME day end the window used (`getBusinessDayRange(orderDate).end`) -- it
  *     arrived after its day had already closed; otherwise
@@ -187,7 +228,12 @@ export async function stampCostWindowExclusions(
         id: true,
         orderDate: true,
         createdAt: true,
-        items: { select: { productVariantId: true } },
+        items: {
+          select: {
+            productVariantId: true,
+            snapshotCostProfileVersionIds: true,
+          },
+        },
       },
     });
 
@@ -199,6 +245,14 @@ export async function stampCostWindowExclusions(
     const lateArrivalIds: string[] = [];
 
     for (const order of candidates) {
+      // A captured cost is taken as proof the window was met: since PR-3b a capture
+      // pins only links in force at the day end and the list is frozen afterwards, so
+      // a later archive or detach that the live links would read as "no cost" must
+      // not stamp it. (A capture made before PR-3b could pin a late link; such an
+      // order is skipped too, the safe direction for an irreversible stamp.)
+      if (hasCapturedCostOnEveryItem(order.items)) {
+        continue;
+      }
       const hadTimelyCost = await hadCostWithinOrderDay(tx, {
         organizationId,
         storeId,
@@ -249,6 +303,31 @@ export async function stampCostWindowExclusions(
   }
 
   return { costDeadlineMissed, lateUncostedArrival };
+}
+
+/**
+ * True iff the order has at least one item and every item already carries a
+ * non-empty captured cost list (`snapshot_cost_profile_version_ids`). Every line
+ * needs a cost, digital ones included (a digital line is exempt from desi only; see
+ * `resolveOrderCalculability` in `@pazarsync/profit`), and order_items carry no
+ * cancel flag while the scan already drops CANCELLED orders, so every listed item
+ * counts. The column is nullable in the database although Prisma reads it as a
+ * list, so a null counts as empty. An order with no item returns false and is left
+ * to the live-link check.
+ */
+function hasCapturedCostOnEveryItem(
+  items: readonly {
+    readonly snapshotCostProfileVersionIds: readonly string[] | null;
+  }[],
+): boolean {
+  return (
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        item.snapshotCostProfileVersionIds !== null &&
+        item.snapshotCostProfileVersionIds.length > 0,
+    )
+  );
 }
 
 /**

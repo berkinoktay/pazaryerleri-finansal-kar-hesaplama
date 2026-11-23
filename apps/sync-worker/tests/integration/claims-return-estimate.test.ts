@@ -93,20 +93,8 @@ async function buildScenario(): Promise<ScenarioCtx> {
       title: 'Return Estimate Product',
     },
   });
+  // The factory seeds the profile's version 1.
   const costProfile = await createCostProfile(org.id, { storeId: store.id, amountGross: '500.00' });
-  await prisma.costProfileVersion.create({
-    data: {
-      profileId: costProfile.id,
-      organizationId: org.id,
-      version: 1,
-      name: costProfile.name,
-      type: costProfile.type,
-      amountGross: costProfile.amountGross,
-      vatRate: costProfile.vatRate,
-      changedFields: [],
-      changedAt: new Date('2024-01-01T00:00:00Z'),
-    },
-  });
   const variant = await prisma.productVariant.create({
     data: {
       organizationId: org.id,

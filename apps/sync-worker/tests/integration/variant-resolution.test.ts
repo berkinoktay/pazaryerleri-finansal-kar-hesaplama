@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { Decimal } from 'decimal.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
@@ -18,7 +19,7 @@ import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { encryptCredentials } from '@pazarsync/sync-core';
+import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 
 import { processVariantResolution } from '../../src/handlers/variant-resolution';
 
@@ -797,4 +798,502 @@ describe('processVariantResolution', () => {
     expect(items.every((i) => i.productVariantId !== null)).toBe(true);
     expect(items.every((i) => i.variantResolutionAttempts === 0)).toBe(true);
   });
+
+  // --- Tenant scope (plan PR-3b, Task 6) ---
+  // Items are grouped by (organizationId, storeId) and every catalog, store and miss
+  // table read or delete filters on the organization too. A mismatched pair (this
+  // organization's order carrying another organization's store id) fails closed, and a
+  // row whose store is this store's but whose organization is another one (the
+  // database allows it) never stands in for this organization's row.
+
+  it("never links an order item to another organization's variant", async () => {
+    const own = await buildStore();
+    const other = await buildStore();
+    const { orderId, itemIds } = await buildUnresolvedOrder(
+      { organizationId: own.organizationId, storeId: other.storeId },
+      ['BC-FOREIGN-1'],
+    );
+    await seedCatalogVariant(other.organizationId, other.storeId, 'BC-FOREIGN-1', true);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called for a mismatched organization/store pair');
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
+    expect(item.productVariantId).toBeNull();
+    expect(await prisma.profitRecomputeRequest.count({ where: { orderId } })).toBe(0);
+  });
+
+  it("never queries the vendor with another organization's store for an order item", async () => {
+    const own = await buildStore();
+    const other = await buildStore();
+    const { itemIds } = await buildUnresolvedOrder(
+      { organizationId: own.organizationId, storeId: other.storeId },
+      ['BC-FOREIGN-2'],
+    );
+
+    // Must never be called; a 401 (fail-fast, no retry sleep) keeps a regression from
+    // timing out the tick instead of failing the assertion below.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(new Response('bad credentials', { status: 401 })));
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // The store load fails closed into the per-store catch, which writes a backoff.
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemIds[0]! } });
+    expect(item.productVariantId).toBeNull();
+    expect(item.variantResolutionAttempts).toBe(1);
+  });
+
+  it("clearing a linked barcode's miss row never deletes another organization's row in the same store", async () => {
+    const ctx = await buildUnresolvedScenario('BC-CLEAR-FOREIGN');
+    const other = await buildStore();
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-CLEAR-FOREIGN', true);
+    // The miss table is unique on (store, barcode), so the row that tells the filters
+    // apart carries this store's id and the other organization's id.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: other.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-CLEAR-FOREIGN',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called when the local catalog already matches');
+    });
+
+    await processVariantResolution();
+
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).not.toBeNull();
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: {
+          organizationId: other.organizationId,
+          storeId: ctx.storeId,
+          barcode: 'BC-CLEAR-FOREIGN',
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('buffer-gap: a variant row of another organization in the same store does not hide the gap', async () => {
+    const ctx = await buildStore();
+    const other = await buildStore();
+    await seedBufferGap(ctx, 'buf-foreign-1', 'BC-BUF-FOREIGN-1');
+    await seedCatalogVariant(other.organizationId, ctx.storeId, 'BC-BUF-FOREIGN-1', false);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-FOREIGN-1')) {
+        // Empty batch -> vendorMissing, so no catalog write runs against the foreign row.
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-FOREIGN-1', 0)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-BUF-FOREIGN-1' } },
+    });
+    expect(miss.organizationId).toBe(ctx.organizationId);
+    expect(miss.vendorMissing).toBe(true);
+  });
+
+  it("buffer-gap repair never queries the vendor with another organization's store", async () => {
+    const own = await buildStore();
+    const other = await buildStore();
+    await seedBufferGap(
+      { organizationId: own.organizationId, storeId: other.storeId },
+      'buf-foreign-2',
+      'BC-BUF-FOREIGN-2',
+    );
+
+    // Must never be called; a 401 (fail-fast, no retry sleep) keeps a regression from
+    // timing out the tick instead of failing the assertion below.
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(new Response('bad credentials', { status: 401 })));
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await prisma.catalogBarcodeMiss.count()).toBe(0);
+  });
+
+  it("buffer-gap: another organization's miss row in the same store neither gates nor is cleared by the repair", async () => {
+    const ctx = await buildStore();
+    const other = await buildStore();
+    await seedBufferGap(ctx, 'buf-foreign-3', 'BC-BUF-FOREIGN-3');
+    // Due in the future: it would gate the barcode if it were read as this
+    // organization's row.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: other.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-BUF-FOREIGN-3',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-BUF-FOREIGN-3')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-BUF-FOREIGN-3', 1)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(
+      await prisma.productVariant.count({
+        where: {
+          organizationId: ctx.organizationId,
+          storeId: ctx.storeId,
+          barcode: 'BC-BUF-FOREIGN-3',
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: {
+          organizationId: other.organizationId,
+          storeId: ctx.storeId,
+          barcode: 'BC-BUF-FOREIGN-3',
+        },
+      }),
+    ).toBe(1);
+  });
+
+  // --- Known vendor-missing deadline on the order-item path (plan PR-3b, Task 7) ---
+  // A barcode the vendor confirmed missing has ONE clock: its CatalogBarcodeMiss row.
+  // An order item of that barcode waits for the row's deadline instead of re-querying
+  // Trendyol on its own schedule, and every item of the barcode shares that deadline.
+
+  it('order-item path honours a future vendor-missing deadline: no vendor call, row untouched, item aligned to the row', async () => {
+    const ctx = await buildUnresolvedScenario('BC-KNOWN-GONE');
+    const seeded = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-KNOWN-GONE',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+
+    // The vendor would confirm the barcode missing again; it must not be asked.
+    const fetchSpy = spyVendorMissing('BC-KNOWN-GONE');
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({ where: { id: seeded.id } });
+    expect(miss.attempts).toBe(1);
+    expect(miss.nextRetryAt).toEqual(seeded.nextRetryAt);
+    expect(miss.lastCheckedAt).toEqual(seeded.lastCheckedAt);
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).toBeNull();
+    expect(item.variantResolutionAttempts).toBe(0);
+    expect(item.nextResolutionAt).toEqual(seeded.nextRetryAt);
+  });
+
+  it('a new order between two ticks does not re-query a confirmed vendor-missing barcode', async () => {
+    const ctx = await buildStore();
+    const first = await buildUnresolvedOrder(ctx, ['BC-VM-TWICE']);
+    const fetchSpy = spyVendorMissing('BC-VM-TWICE');
+
+    await processVariantResolution();
+    const second = await buildUnresolvedOrder(ctx, ['BC-VM-TWICE']);
+    await processVariantResolution();
+
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-VM-TWICE' } },
+    });
+    expect(miss.attempts).toBe(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const firstItem = await prisma.orderItem.findUniqueOrThrow({
+      where: { id: first.itemIds[0]! },
+    });
+    const secondItem = await prisma.orderItem.findUniqueOrThrow({
+      where: { id: second.itemIds[0]! },
+    });
+    expect(firstItem.variantResolutionAttempts).toBe(1);
+    expect(secondItem.variantResolutionAttempts).toBe(0);
+    expect(firstItem.nextResolutionAt).toEqual(miss.nextRetryAt);
+    expect(secondItem.nextResolutionAt).toEqual(miss.nextRetryAt);
+  });
+
+  it('a due vendor-missing barcode is re-queried once and all its items share the new deadline', async () => {
+    const ctx = await buildStore();
+    const first = await buildUnresolvedOrder(ctx, ['BC-VM-DUE']);
+    const second = await buildUnresolvedOrder(ctx, ['BC-VM-DUE']);
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-VM-DUE',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() - 1000),
+      },
+    });
+    const fetchSpy = spyVendorMissing('BC-VM-DUE');
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: ctx.storeId, barcode: 'BC-VM-DUE' } },
+    });
+    expect(miss.attempts).toBe(2);
+    const delay = miss.nextRetryAt!.getTime() - beforeTick;
+    expect(delay).toBeGreaterThanOrEqual(23 * 60 * 60_000);
+    expect(delay).toBeLessThanOrEqual(25 * 60 * 60_000);
+    const items = await prisma.orderItem.findMany({
+      where: { id: { in: [first.itemIds[0]!, second.itemIds[0]!] } },
+    });
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.variantResolutionAttempts).toBe(1);
+      expect(item.nextResolutionAt).toEqual(miss.nextRetryAt);
+    }
+  });
+
+  it('a local catalog match still links a gated barcode without a vendor call', async () => {
+    const ctx = await buildUnresolvedScenario('BC-GATED-LOCAL');
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-GATED-LOCAL',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-GATED-LOCAL', true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called when the local catalog already matches');
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).not.toBeNull();
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-GATED-LOCAL' },
+      }),
+    ).toBe(0);
+  });
+
+  it('a barcode linked locally drops its miss row even when another barcode stays gated', async () => {
+    const ctx = await buildStore();
+    await buildUnresolvedOrder(ctx, ['BC-LOCAL-A', 'BC-GATED-B']);
+    // A has a stale miss row but reached the catalog meanwhile; B is a confirmed
+    // vendor-missing barcode whose deadline is still ahead.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-LOCAL-A',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    const gatedRow = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-GATED-B',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-LOCAL-A', true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called: A links locally and B is gated');
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-LOCAL-A' },
+      }),
+    ).toBe(0);
+    const gatedAfter = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { id: gatedRow.id },
+    });
+    expect(gatedAfter.attempts).toBe(1);
+    expect(gatedAfter.nextRetryAt).toEqual(gatedRow.nextRetryAt);
+  });
+
+  it('a miss row of this organization inserted concurrently gives the items its deadline, without the cross-organization warning', async () => {
+    const ctx = await buildUnresolvedScenario('BC-MISS-RACE');
+    // The row a concurrent writer of this organization inserted between this tick's
+    // update and insert: the first update is made to find nothing, the insert then
+    // skips on the (storeId, barcode) key.
+    const concurrent = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-MISS-RACE',
+        vendorMissing: false,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 3 * 60 * 60_000),
+      },
+    });
+    vi.spyOn(prisma.catalogBarcodeMiss, 'updateMany').mockResolvedValueOnce({ count: 0 });
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    const fetchSpy = spyVendorMissing('BC-MISS-RACE');
+
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalledWith('resolution.miss-row-skipped', expect.anything());
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.variantResolutionAttempts).toBe(1);
+    expect(item.nextResolutionAt).toEqual(concurrent.nextRetryAt);
+  });
+
+  it("a vendor-missing row of another organization's store does not gate this store", async () => {
+    const ctx = await buildUnresolvedScenario('BC-GATE-FOREIGN');
+    const other = await buildStore();
+    // Both shapes, each due in the future: a row in the other organization's own
+    // store, and a row carrying this store's id stamped with the other organization
+    // (the miss table is unique on store + barcode, so they can coexist).
+    for (const storeId of [other.storeId, ctx.storeId]) {
+      await prisma.catalogBarcodeMiss.create({
+        data: {
+          organizationId: other.organizationId,
+          storeId,
+          barcode: 'BC-GATE-FOREIGN',
+          vendorMissing: true,
+          attempts: 1,
+          nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+        },
+      });
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, 'BC-GATE-FOREIGN')) {
+        return Promise.resolve(jsonResponse(approvedProductsResponse('BC-GATE-FOREIGN', 1)));
+      }
+      throw new Error(`unexpected fetch in test: ${url}`);
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.productVariantId).not.toBeNull();
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { organizationId: other.organizationId, barcode: 'BC-GATE-FOREIGN' },
+      }),
+    ).toBe(2);
+  });
+
+  it("a miss row in this store stamped with another organization is never updated by this organization's tick", async () => {
+    const ctx = await buildUnresolvedScenario('BC-MISS-FOREIGN');
+    const other = await buildStore();
+    const foreign = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: other.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-MISS-FOREIGN',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    const fetchSpy = spyVendorMissing('BC-MISS-FOREIGN');
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const after = await prisma.catalogBarcodeMiss.findUniqueOrThrow({ where: { id: foreign.id } });
+    expect(after.organizationId).toBe(other.organizationId);
+    expect(after.attempts).toBe(1);
+    expect(after.nextRetryAt).toEqual(foreign.nextRetryAt);
+    expect(after.lastCheckedAt).toEqual(foreign.lastCheckedAt);
+    // The item still backs off on the flat vendor-missing curve.
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.variantResolutionAttempts).toBe(1);
+    const delay = item.nextResolutionAt!.getTime() - beforeTick;
+    expect(delay).toBeGreaterThanOrEqual(23 * 60 * 60_000);
+    expect(delay).toBeLessThanOrEqual(25 * 60 * 60_000);
+  });
+
+  it("the same store id under two organizations in one tick does not back off the legitimate organization's items", async () => {
+    const own = await buildStore();
+    const other = await buildStore();
+    const legit = await buildUnresolvedOrder(own, ['BC-TWO-ORGS']);
+    // Mismatched pair: the other organization's order carrying this store's id.
+    const mismatched = await buildUnresolvedOrder(
+      { organizationId: other.organizationId, storeId: own.storeId },
+      ['BC-TWO-ORGS'],
+    );
+    const fetchSpy = spyVendorMissing('BC-TWO-ORGS');
+
+    const beforeTick = Date.now();
+    await processVariantResolution();
+
+    // Only the legitimate pair reaches the vendor.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const miss = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { storeId_barcode: { storeId: own.storeId, barcode: 'BC-TWO-ORGS' } },
+    });
+    expect(miss.organizationId).toBe(own.organizationId);
+    expect(miss.attempts).toBe(1);
+    const legitItem = await prisma.orderItem.findUniqueOrThrow({
+      where: { id: legit.itemIds[0]! },
+    });
+    expect(legitItem.variantResolutionAttempts).toBe(1);
+    expect(legitItem.nextResolutionAt).toEqual(miss.nextRetryAt);
+    // The mismatched pair fails closed into the per-store catch: the transient curve,
+    // not the legitimate organization's vendor-missing deadline.
+    const mismatchedItem = await prisma.orderItem.findUniqueOrThrow({
+      where: { id: mismatched.itemIds[0]! },
+    });
+    expect(mismatchedItem.productVariantId).toBeNull();
+    expect(mismatchedItem.variantResolutionAttempts).toBe(1);
+    const mismatchedDelay = mismatchedItem.nextResolutionAt!.getTime() - beforeTick;
+    expect(mismatchedDelay).toBeLessThanOrEqual(5.5 * 60_000);
+  });
 });
+
+/** Fetch spy: the vendor answers an empty approved batch for `barcode`; any other call throws. */
+function spyVendorMissing(barcode: string): MockInstance<typeof fetch> {
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    const url = String(input);
+    if (url.startsWith(SANDBOX_BASE) && queriesBarcode(url, barcode)) {
+      return Promise.resolve(jsonResponse(approvedProductsResponse(barcode, 0)));
+    }
+    throw new Error(`unexpected fetch in test: ${url}`);
+  });
+}
