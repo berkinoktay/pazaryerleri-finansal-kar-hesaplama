@@ -2,9 +2,12 @@
  * Integration tests for the engine reading the order profit snapshot (plan PR-2,
  * Gorev 3): `recomputeParcelProfit` captures the order's product and seller inputs
  * before it computes, and a captured order is priced with those inputs, not the live
- * ones. A later desi correction, synced rate, category rule, cost link, amount or
- * profile type, digital flag, product category or brand, store shipping setting or
- * carrier mapping edit therefore leaves its stored profit as it is.
+ * ones. On a final order (seller-input marker set) a later desi correction, synced
+ * rate, category rule, cost link, amount or profile type, digital flag, product
+ * category or brand, store shipping setting or carrier mapping edit therefore leaves
+ * its stored profit as it is. While the marker is NULL the seller inputs (cost list
+ * and desi) follow the order's business day (same-day edit window plan PR-1, P1-09):
+ * a same-day cost or desi change reaches the order on its next recompute.
  *
  * Every live value the suite changes is one the melontik parcel would otherwise
  * price with: the order rates are cleared (so item A resolves its commission from
@@ -42,9 +45,13 @@ import { profitContentHash } from '../content-hash';
 import { recomputeParcelProfit, type RecomputeParcelResult } from '../recompute-parcel-profit';
 import {
   attachCostProfile,
+  backdateSellerInputHistory,
   ensureDbReachable,
+  insertFinanceRecord,
   MELONTIK,
   type MelontikParcel,
+  melontikSaleCycleRecordInputs,
+  type SeedMelontikOptions,
   seedMelontikParcel,
   upsertCarrierWithTariffs,
 } from './helpers/melontik-parcel';
@@ -78,6 +85,12 @@ const CATEGORY_BRAND_RATE = '16.50';
 
 /** A cost version start before the melontik order date (2026-10-28): in force at it. */
 const BEFORE_ORDER_DATE = new Date('2026-10-01T00:00:00Z');
+
+/** An instant on the melontik order's business day, an hour after the order. */
+const ON_ORDER_DAY = new Date(MELONTIK.orderDate.getTime() + 60 * 60 * 1000);
+
+/** A set seller-input marker: the day-close pass has made the order's seller inputs final. */
+const FINAL: SeedMelontikOptions = { sellerInputsFinalAt: new Date() };
 
 const createdOrganizationIds: string[] = [];
 
@@ -137,11 +150,12 @@ function upsertSnapshotCarrier(orderCargoNames: readonly string[]): Promise<stri
 /**
  * The melontik parcel priced only by values this suite can change: the order uses
  * this suite's carrier, both order rates are cleared, item A's variant carries a
- * synced rate (15) and item B falls to this suite's category rule.
+ * synced rate (15) and item B falls to this suite's category rule. `opts` reach the
+ * melontik seed (the seller-input marker among them).
  */
-async function seedSnapshotParcel(): Promise<MelontikParcel> {
+async function seedSnapshotParcel(opts: SeedMelontikOptions = {}): Promise<MelontikParcel> {
   await upsertSnapshotCarrier([SNAPSHOT_CARRIER.orderCargoName]);
-  const parcel = await seedMelontikParcel();
+  const parcel = await seedMelontikParcel(opts);
   createdOrganizationIds.push(parcel.organizationId);
   await prisma.order.update({
     where: { id: parcel.orderId },
@@ -180,6 +194,34 @@ function readStatements(orderId: string) {
     where: { orderId },
     orderBy: { view: 'asc' },
     select: { view: true, status: true, netProfit: true, contentHash: true },
+  });
+}
+
+/** Both stored statement views' product cost, as text, in view order. */
+async function readCostGross(
+  orderId: string,
+): Promise<{ readonly view: ProfitStatementView; readonly costGross: string }[]> {
+  const rows = await prisma.orderProfitStatement.findMany({
+    where: { orderId },
+    orderBy: { view: 'asc' },
+    select: { view: true, costGross: true },
+  });
+  return rows.map((row) => ({ view: row.view, costGross: row.costGross.toString() }));
+}
+
+/** The stored item-level line of the given type, if any. */
+function readStoredItemLine(parcel: MelontikParcel, type: ProfitLineType, orderItemId: string) {
+  return prisma.profitLine.findFirst({
+    where: { orderId: parcel.orderId, organizationId: parcel.organizationId, type, orderItemId },
+    select: { amountGross: true },
+  });
+}
+
+/** Moves the parcel's order to another order date (time-relative tests pass "now"-based dates). */
+async function setOrderDate(parcel: MelontikParcel, orderDate: Date): Promise<void> {
+  await prisma.order.update({
+    where: { id: parcel.orderId, organizationId: parcel.organizationId },
+    data: { orderDate },
   });
 }
 
@@ -317,11 +359,16 @@ type LiveInputChange = (parcel: MelontikParcel) => Promise<void>;
  */
 const LIVE_INPUT_CHANGES = {
   // Product card: the seller corrects item A's desi 1 -> 3 (parcel desi 2 -> 4).
+  // Owner rule (Berkin 2026-11-23): an order's desi is the one in force at the end of
+  // its Istanbul business day, for an uncaptured order too. A correction made now is
+  // after the melontik order's day end and would not move any order of that day, so
+  // its history row is placed on the order's day: it is the desi that day ended with.
   desiCorrection: async (parcel) => {
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '3.00' },
     });
+    await backdateSellerInputHistory(parcel.organizationId, ON_ORDER_DAY);
   },
   // Product sync: item A's synced commission rate 15 -> 25.
   syncedRate: async (parcel) => {
@@ -479,8 +526,8 @@ describe('recomputeParcelProfit with the order profit snapshot', () => {
     await prisma.organization.deleteMany({ where: { id: { in: createdOrganizationIds } } });
   });
 
-  it('a stored order keeps its profit when product and seller inputs change after intake', async () => {
-    const parcel = await seedSnapshotParcel();
+  it('a final stored order keeps its profit when product and seller inputs change after intake', async () => {
+    const parcel = await seedSnapshotParcel(FINAL);
 
     const first = await recompute(parcel);
     expect(first.changed).toBe(true);
@@ -501,12 +548,12 @@ describe('recomputeParcelProfit with the order profit snapshot', () => {
   });
 
   // The control for the test above, one change at a time, each on a fresh parcel: the
-  // change moves an uncaptured order priced live, while the captured order keeps its
-  // stored profit.
+  // change moves an uncaptured order priced live (its seller inputs at its day end),
+  // while the captured final order keeps its stored profit.
   it.each(LIVE_INPUT_CHANGE_LIST)(
-    'the %s change moves an uncaptured order but not a captured one',
+    'the %s change moves an uncaptured order but not a captured final one',
     async (_name, change) => {
-      const parcel = await seedSnapshotParcel();
+      const parcel = await seedSnapshotParcel(FINAL);
       const twinOrderId = await seedUncapturedTwin(parcel);
       await recompute(parcel);
       const capturedBefore = await readStatements(parcel.orderId);
@@ -700,5 +747,136 @@ describe('recomputeParcelProfit with the order profit snapshot', () => {
     expect(twin.bestKnown.issues.map((issue) => issue.code)).toContain(
       ProfitIssueCode.CARRIER_NOT_RECOGNIZED,
     );
+  });
+
+  // Same-day edit window (plan PR-1): the engine's uncaptured-item path reads the desi
+  // in force at the order's day end, like its cost.
+  it('an uncaptured order prices the desi in force at its day end', async () => {
+    const parcel = await seedSnapshotParcel();
+    const before = await computeReadOnly(parcel.organizationId, parcel.orderId);
+    expect(findLine(before, ProfitLineType.SHIPPING)?.inputs).toMatchObject({ desi: '2' });
+
+    // Corrected now, after the order's day end: not the desi that day ended with.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '3.00' },
+    });
+    const afterDayEnd = await computeReadOnly(parcel.organizationId, parcel.orderId);
+    expect(findLine(afterDayEnd, ProfitLineType.SHIPPING)?.inputs).toMatchObject({ desi: '2' });
+
+    // Positive control: the same correction placed on the order's day moves it.
+    await backdateSellerInputHistory(parcel.organizationId, ON_ORDER_DAY);
+    const onOrderDay = await computeReadOnly(parcel.organizationId, parcel.orderId);
+    expect(findLine(onOrderDay, ProfitLineType.SHIPPING)?.inputs).toMatchObject({ desi: '4' });
+    // The read-only path captured nothing.
+    const order = await prisma.order.findFirstOrThrow({
+      where: { id: parcel.orderId, organizationId: parcel.organizationId },
+      select: { profitSnapshotAt: true },
+    });
+    expect(order.profitSnapshotAt).toBeNull();
+  });
+
+  it("today's order shows the new amount in both statement views after an amount edit and one recompute", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date());
+    await recompute(parcel);
+    expect(await readCostGross(parcel.orderId)).toEqual([
+      { view: ProfitStatementView.ESTIMATE, costGross: '398' },
+      { view: ProfitStatementView.BEST_KNOWN, costGross: '398' },
+    ]);
+
+    // The seller edits item B's cost 165 -> 199 now: a new version starts at the
+    // database's transaction instant (the column default), on the order's day.
+    const linkB = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantB },
+      select: { profileId: true },
+    });
+    await prisma.costProfile.update({
+      where: { id: linkB.profileId, organizationId: parcel.organizationId },
+      data: { amountGross: '199.00' },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: linkB.profileId,
+        organizationId: parcel.organizationId,
+        version: 2,
+        name: 'COGS bc-b',
+        type: CostProfileType.COGS,
+        amountGross: '199.00',
+        vatRate: MELONTIK.costVatRate,
+        changedFields: ['amountGross'],
+      },
+    });
+
+    const second = await recompute(parcel);
+    expect(second.changed).toBe(true);
+    expect(await readCostGross(parcel.orderId)).toEqual([
+      { view: ProfitStatementView.ESTIMATE, costGross: '432' },
+      { view: ProfitStatementView.BEST_KNOWN, costGross: '432' },
+    ]);
+    const costB = await readStoredItemLine(parcel, ProfitLineType.COST_COGS, parcel.itemB);
+    expect(costB?.amountGross.toString()).toBe('199');
+  });
+
+  it("detach of today's order's only cost makes it MISSING_COST; re-attach makes it computable again", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date());
+    const first = await recompute(parcel);
+    expect(first.bestKnown.status).toBe(ProfitStatus.ESTIMATED);
+    const linkA = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+      select: { profileId: true },
+    });
+
+    // The seller detaches item A's only cost now, on the order's day.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    const detached = await recompute(parcel);
+    expect(detached.bestKnown.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    const computed = await computeReadOnly(parcel.organizationId, parcel.orderId);
+    expect(computed.bestKnown.issues).toContainEqual(
+      expect.objectContaining({ code: ProfitIssueCode.MISSING_COST, orderItemId: parcel.itemA }),
+    );
+    expect(await readStoredItemLine(parcel, ProfitLineType.COST_COGS, parcel.itemA)).toBeNull();
+
+    // Re-attached the same day (the database stamps the link now).
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: parcel.organizationId,
+        productVariantId: parcel.variantA,
+        profileId: linkA.profileId,
+      },
+    });
+    const reattached = await recompute(parcel);
+    expect(reattached.bestKnown.status).toBe(ProfitStatus.ESTIMATED);
+    const costA = await readStoredItemLine(parcel, ProfitLineType.COST_COGS, parcel.itemA);
+    expect(costA?.amountGross.toString()).toBe('233');
+  });
+
+  // Owner decision 4: a final order's seller inputs never move again, while
+  // marketplace data keeps updating it.
+  it('a final order with a later seller change keeps its cost lines while a finance record still changes the settlement line', async () => {
+    const parcel = await seedSnapshotParcel(FINAL);
+    const first = await recompute(parcel);
+    expect(first.bestKnown.status).toBe(ProfitStatus.ESTIMATED);
+    const costBefore = await readCostGross(parcel.orderId);
+    expect(costBefore.map((row) => row.costGross)).toEqual(['398', '398']);
+
+    // Seller change: item B's cost gets a new amount in force at the order's day end.
+    await LIVE_INPUT_CHANGES.costAmount(parcel);
+    // Marketplace data: the sale-cycle settlement records arrive.
+    for (const record of melontikSaleCycleRecordInputs(parcel)) {
+      await insertFinanceRecord(record);
+    }
+
+    const second = await recompute(parcel);
+    // Positive control: the settlement records changed the best-known statement.
+    expect(second.changed).toBe(true);
+    expect(second.bestKnown.status).toBe(ProfitStatus.PARTIALLY_SETTLED);
+    // The final order's cost lines are as captured.
+    expect(await readCostGross(parcel.orderId)).toEqual(costBefore);
+    const costB = await readStoredItemLine(parcel, ProfitLineType.COST_COGS, parcel.itemB);
+    expect(costB?.amountGross.toString()).toBe('165');
   });
 });
