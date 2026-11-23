@@ -10,6 +10,7 @@ import type {
   CreateCostProfileInput,
   UpdateCostProfileInput,
 } from '../validators/cost-profile.validator';
+import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 
 // ─── DTO types ───────────────────────────────────────────────────────────────
 
@@ -125,21 +126,26 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
  * orders' profit, so they must be recomputed. Runs inside the
  * mutation's own transaction. A profile with no attached variants enqueues
  * nothing (the empty id list short-circuits without a query).
+ *
+ * Returns the attached variant ids it loaded, so a caller that must act on the
+ * same variants (the restore's buffer re-check) needs no second query.
  */
 async function enqueueProfileVariants(
   tx: Prisma.TransactionClient,
   orgId: string,
   profileId: string,
-): Promise<void> {
+): Promise<string[]> {
   const links = await tx.productVariantCostProfile.findMany({
     where: { profileId, organizationId: orgId },
     select: { productVariantId: true },
   });
+  const variantIds = links.map((link) => link.productVariantId);
   await enqueueProfitRecomputeForVariants(tx, {
     organizationId: orgId,
-    variantIds: links.map((link) => link.productVariantId),
+    variantIds,
     reason: ProfitRecomputeReason.COST_CHANGED,
   });
+  return variantIds;
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -415,6 +421,13 @@ export async function archiveCostProfile(
 /**
  * Restore an archived cost profile: clears archivedAt, appends a version with
  * changedFields: ['archivedAt'].
+ *
+ * The restore puts the profile's cost back in force, so it re-checks the Live
+ * Performance buffer of the profile's store in the same transaction: a waiting order
+ * of today whose every line is now calculable is flipped to PROMOTING
+ * (flipBufferForVariants). Archive, detach and version edits need no such call: they
+ * can never make an order calculable, and the promote worker re-runs the gate under
+ * the row lock before it writes an entry to `orders`.
  */
 export async function restoreCostProfile(
   orgId: string,
@@ -460,7 +473,8 @@ export async function restoreCostProfile(
       },
     });
 
-    await enqueueProfileVariants(tx, orgId, profileId);
+    const variantIds = await enqueueProfileVariants(tx, orgId, profileId);
+    await flipBufferForVariants(tx, { organizationId: orgId, storeId: row.storeId, variantIds });
 
     return row;
   });

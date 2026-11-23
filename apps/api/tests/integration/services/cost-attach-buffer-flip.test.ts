@@ -9,8 +9,10 @@ import {
   attachCostProfiles,
   replaceCostProfilesForVariants,
 } from '../../../src/services/cost-profile-attachment.service';
+import { archiveCostProfile, restoreCostProfile } from '../../../src/services/cost-profile.service';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  COST_FIXTURE_EPOCH,
   createBufferEntry,
   createCostProfile,
   createOrganization,
@@ -324,5 +326,149 @@ describe('cost attach — Live Performance buffer flip (full-calculability)', ()
       (await prisma.livePerformanceBuffer.findFirstOrThrow({ where: { storeId: store.id } }))
         .status,
     ).toBe('PENDING');
+  });
+});
+
+/**
+ * A variant with a desi whose only cost profile was archived through the service:
+ * version 1 and the link date from COST_FIXTURE_EPOCH, then archiveCostProfile
+ * appends the archive version, so the buffer gate reads the variant as cost-missing.
+ */
+async function seedArchivedCostVariant(
+  organizationId: string,
+  storeId: string,
+  barcode: string,
+): Promise<{ variantId: string; profileId: string }> {
+  const variant = await seedVariant(organizationId, storeId, barcode, '1.50');
+  const profile = await createCostProfile(organizationId, { storeId, amountGross: '45.00' });
+  await prisma.productVariantCostProfile.create({
+    data: {
+      organizationId,
+      profileId: profile.id,
+      productVariantId: variant.id,
+      attachedAt: COST_FIXTURE_EPOCH,
+    },
+  });
+  await archiveCostProfile(organizationId, profile.id, randomUUID());
+  return { variantId: variant.id, profileId: profile.id };
+}
+
+async function bufferStatus(entryId: string): Promise<string> {
+  return (await prisma.livePerformanceBuffer.findUniqueOrThrow({ where: { id: entryId } })).status;
+}
+
+describe('cost profile restore - Live Performance buffer flip', () => {
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("restoring an archived profile flips today's waiting buffer entry to PROMOTING", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const { profileId } = await seedArchivedCostVariant(org.id, store.id, 'BC-RESTORE');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-restore',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-RESTORE']),
+    });
+
+    await restoreCostProfile(org.id, profileId, randomUUID());
+
+    expect(await bufferStatus(entry.id)).toBe('PROMOTING');
+  });
+
+  it('a past-day waiting entry stays PENDING on restore', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const { profileId } = await seedArchivedCostVariant(org.id, store.id, 'BC-RESTORE-DAY');
+    // Positive control: today's entry of the same barcode is flipped by the same restore.
+    const today = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-restore-today',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-RESTORE-DAY']),
+    });
+    const pastDay = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-restore-pastday',
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-RESTORE-DAY']),
+    });
+
+    await restoreCostProfile(org.id, profileId, randomUUID());
+
+    expect(await bufferStatus(today.id)).toBe('PROMOTING');
+    expect(await bufferStatus(pastDay.id)).toBe('PENDING');
+  });
+
+  it("a restore in organization A never flips organization B's buffer entry with the same barcode", async () => {
+    const orgA = await createOrganization();
+    const storeA = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+    const { profileId } = await seedArchivedCostVariant(orgA.id, storeA.id, 'BC-SHARED');
+
+    // Organization B: the same barcode with a desi and its own active cost, so its
+    // waiting entry is calculable and only the tenant scope keeps it PENDING.
+    const variantB = await seedVariant(orgB.id, storeB.id, 'BC-SHARED', '1.50');
+    const profileB = await createCostProfile(orgB.id, { storeId: storeB.id, amountGross: '30.00' });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: orgB.id,
+        profileId: profileB.id,
+        productVariantId: variantB.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+
+    const entryA = await createBufferEntry(orgA.id, storeA.id, {
+      platformOrderId: 'pkg-shared-a',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-SHARED']),
+    });
+    const entryB = await createBufferEntry(orgB.id, storeB.id, {
+      platformOrderId: 'pkg-shared-b',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-SHARED']),
+    });
+
+    await restoreCostProfile(orgA.id, profileId, randomUUID());
+
+    expect(await bufferStatus(entryA.id)).toBe('PROMOTING');
+    expect(await bufferStatus(entryB.id)).toBe('PENDING');
+  });
+
+  it('a multi-line entry with another line still uncosted stays PENDING', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const { profileId } = await seedArchivedCostVariant(org.id, store.id, 'BC-ML-A');
+    // Has a desi but no cost profile at all.
+    await seedVariant(org.id, store.id, 'BC-ML-B', '1.50');
+
+    const multi = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-ml-both',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-ML-A', 'BC-ML-B']),
+    });
+    // Positive control: a single-line entry of the restored barcode is flipped.
+    const single = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'pkg-ml-single',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder(['BC-ML-A']),
+    });
+
+    await restoreCostProfile(org.id, profileId, randomUUID());
+
+    expect(await bufferStatus(single.id)).toBe('PROMOTING');
+    expect(await bufferStatus(multi.id)).toBe('PENDING');
   });
 });
