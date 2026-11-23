@@ -21,6 +21,7 @@ import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedProduct, MappedProductVariant } from '@pazarsync/marketplace';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import { refreshProductAggregates } from './refresh-product-aggregates';
 
@@ -96,6 +97,11 @@ export async function upsertCatalogBatch(
   // in the page. The aggregate count of failures becomes a follow-up
   // observability concern; for now `[product-sync] content-upsert
   // failed` shows up in the ops logs with the contentId.
+  //
+  // A content transaction can stamp seller-input history (a synced desi change row,
+  // written by the variant trigger), so it runs with SELLER_INPUT_TX_OPTIONS: its short
+  // timeout keeps a write stamped before a business-day end from committing after that
+  // day is settled (same-day edit window, D6).
   for (const mapped of batch) {
     try {
       await prisma.$transaction(async (tx) => {
@@ -237,7 +243,7 @@ export async function upsertCatalogBatch(
             reason: ProfitRecomputeReason.DESI_CHANGED,
           });
         }
-      });
+      }, SELLER_INPUT_TX_OPTIONS);
     } catch (err) {
       syncLog.error('content.upsert.failed', {
         ...(syncLogId !== null && { syncLogId }),

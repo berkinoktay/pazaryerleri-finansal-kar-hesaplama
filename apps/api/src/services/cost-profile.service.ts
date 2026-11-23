@@ -4,6 +4,7 @@ import { prisma } from '@pazarsync/db';
 import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
 import type {
@@ -240,6 +241,9 @@ export async function createCostProfile(
   actorId: string,
 ): Promise<CostProfile> {
   try {
+    // Every transaction in this file stamps seller-input history (a cost version), so
+    // each runs with SELLER_INPUT_TX_OPTIONS: its short timeout keeps a write stamped
+    // before a business-day end from committing after that day is settled (D6).
     const profile = await prisma.$transaction(async (tx) => {
       const amountGross = new Decimal(input.amountGross);
       const vatRate = input.vatRate ?? 0;
@@ -275,7 +279,7 @@ export async function createCostProfile(
       });
 
       return row;
-    });
+    }, SELLER_INPUT_TX_OPTIONS);
 
     return toWireProfile(profile);
   } catch (err) {
@@ -371,7 +375,7 @@ export async function updateCostProfile(
       await enqueueProfileVariants(tx, orgId, profileId);
 
       return row;
-    });
+    }, SELLER_INPUT_TX_OPTIONS);
 
     return toWireProfile(updated);
   } catch (err) {
@@ -432,7 +436,7 @@ export async function archiveCostProfile(
     await enqueueProfileVariants(tx, orgId, profileId);
 
     return row;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return toWireProfile(archived);
 }
@@ -500,7 +504,7 @@ export async function restoreCostProfile(
     await enqueueVariantsRecompute(tx, orgId, variantIds);
 
     return row;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return toWireProfile(restored);
 }

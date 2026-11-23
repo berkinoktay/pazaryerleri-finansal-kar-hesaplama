@@ -2,6 +2,7 @@ import { prisma } from '@pazarsync/db';
 import type { ProductVariant } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import { NotFoundError } from '../lib/errors';
 import { flipBufferForVariants } from './live-performance-buffer-flip.service';
@@ -35,6 +36,10 @@ import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 // (DESI_CHANGED); the recompute re-derives their desi at their day end. Lock
 // order: the product_variants row (and the desi log row its trigger writes),
 // then the buffer rows, then the queue rows; no order_items row is written.
+//
+// Bounded transaction (D6): the desi write stamps seller-input history (the trigger's
+// desi change row), so it runs with SELLER_INPUT_TX_OPTIONS; the short timeout keeps a
+// write stamped before a business-day end from committing after that day is settled.
 
 export async function setDimensionalWeight(opts: {
   organizationId: string;
@@ -81,7 +86,7 @@ export async function setDimensionalWeight(opts: {
         isDigital: true,
       },
     });
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 }
 
 // ─── bulkSetDimensionalWeight ──────────────────────────────────────────
@@ -103,7 +108,8 @@ export async function setDimensionalWeight(opts: {
 //
 // Profit recompute: the setDimensionalWeight enqueue (every write, a clear
 // included), for the same touched ids only, so a filtered-out id never queues
-// another store's or org's order. Same lock order as setDimensionalWeight.
+// another store's or org's order. Same lock order and the same bounded transaction
+// (SELLER_INPUT_TX_OPTIONS) as setDimensionalWeight.
 
 export async function bulkSetDimensionalWeight(opts: {
   organizationId: string;
@@ -138,5 +144,5 @@ export async function bulkSetDimensionalWeight(opts: {
     });
 
     return { updated: written.length };
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 }

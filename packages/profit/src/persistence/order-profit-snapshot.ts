@@ -340,6 +340,26 @@ async function captureItems(
   // Item rows are updated in ascending id order: one fixed global order, so another
   // writer of these order_items rows that takes them in id order too can never lock
   // them in the opposite order (no deadlock between the two transactions).
+  //
+  // Lock order (same-day edit window, notes D11). No writer of seller inputs ever locks
+  // or writes order_items; its enqueue only reads them (a plain EXISTS):
+  //   - cost PATCH / archive / restore: cost_profiles row -> version insert -> buffer
+  //     rows (restore only) -> queue rows;
+  //   - attach / detach / replace: link rows (+ removal log insert) -> buffer rows ->
+  //     queue rows;
+  //   - desi write: product_variants row (+ desi change log insert) -> buffer rows ->
+  //     queue rows;
+  //   - catalog sync: product -> variants (+ desi change log insert) -> queue rows.
+  // The order side:
+  //   - recompute and day-close finaliser: order advisory lock -> orders row ->
+  //     order_items in ascending id (here) -> statements -> queue row;
+  //   - order intake update: orders row -> order_items -> product_variants (stock) ->
+  //     queue row;
+  //   - buffer graduation: buffer row -> orders insert -> order_items -> queue row.
+  // Global order: orders / order_items before product_variants before buffer rows
+  // before queue rows. Nobody takes a variant, link or profile lock and then an orders
+  // or order_items lock, and the set-based enqueue takes queue rows in order id order.
+  // Guarded by apps/api/tests/integration/services/seller-input-lock-order.test.ts.
   writes.sort((a, b) => compareText(a.id, b.id));
   for (const write of writes) {
     await tx.orderItem.update({ where: { id: write.id, organizationId }, data: write.data });

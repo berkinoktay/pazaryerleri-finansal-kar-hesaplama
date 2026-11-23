@@ -240,6 +240,15 @@ export {
   type SellerDesiAt,
   type SellerInputsAt,
 } from './persistence/seller-inputs-at';
+// The settled cutoff: database clock plus no open pre-midnight transaction (same-day edit window, PR-1)
+export {
+  findTransactionsOpenSince,
+  readDbNow,
+  resetSettledCutoffMemo,
+  resolveSettledCutoff,
+  type OpenWriter,
+  type SettledCutoff,
+} from './persistence/db-clock';
 // Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md
 export {
   loadTrendyolScenarioBases,
