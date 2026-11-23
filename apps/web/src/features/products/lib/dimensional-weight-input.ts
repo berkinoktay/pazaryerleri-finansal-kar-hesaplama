@@ -1,16 +1,19 @@
 import Decimal from 'decimal.js';
 
+import { SELLER_DESI_MAX_INCLUSIVE, SELLER_DESI_MIN_INCLUSIVE } from '@pazarsync/utils';
+
 import { parseTrDecimal } from '@/lib/parse-tr-decimal';
 
 import type { DimensionalWeightErrorCode } from './dimensional-weight-errors';
 
 // Client-side twin of the backend desi validation, so a typo is caught inline
-// before any request. The bounds mirror DIMENSIONAL_WEIGHT_MIN_INCLUSIVE /
-// DIMENSIONAL_WEIGHT_MAX_INCLUSIVE and the 2-fraction-digit regex in
-// apps/api/src/validators/product.validator.ts; the backend stays the
-// authority and answers with the same codes.
-const DESI_MIN_INCLUSIVE = new Decimal(0);
-const DESI_MAX_INCLUSIVE = new Decimal('999.99');
+// before any request. The bounds are the shared seller-desi bounds from
+// @pazarsync/utils (a seller desi is at least 1, Berkin 2026-11-23), the same
+// ones apps/api/src/validators/product.validator.ts reads next to its
+// 2-fraction-digit regex; the backend stays the authority and answers with the
+// same codes.
+const DESI_MIN_INCLUSIVE = new Decimal(SELLER_DESI_MIN_INCLUSIVE);
+const DESI_MAX_INCLUSIVE = new Decimal(SELLER_DESI_MAX_INCLUSIVE);
 const DESI_MAX_FRACTION_DIGITS = 2;
 
 export type DesiInputResult =
@@ -43,7 +46,9 @@ export function parseDesiInput(raw: string): DesiInputResult {
   if (raw.trim() === '') return { kind: 'empty' };
 
   const value = parseTrDecimal(raw, { grouping: false });
-  if (value === null || typedFractionDigits(raw) > DESI_MAX_FRACTION_DIGITS) {
+  // A minus sign is a format error, as the backend's digits-only pattern
+  // answers, not a range error.
+  if (value === null || value.isNegative() || typedFractionDigits(raw) > DESI_MAX_FRACTION_DIGITS) {
     return { kind: 'invalid', code: 'INVALID_DIMENSIONAL_WEIGHT_FORMAT' };
   }
   if (value.lt(DESI_MIN_INCLUSIVE)) {
@@ -52,6 +57,6 @@ export function parseDesiInput(raw: string): DesiInputResult {
   if (value.gt(DESI_MAX_INCLUSIVE)) {
     return { kind: 'invalid', code: 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE' };
   }
-  // toFixed() prints plain notation; a typed "-0" prints as "0".
+  // Plain notation, never an exponent.
   return { kind: 'valid', value, payload: value.toFixed() };
 }

@@ -137,7 +137,13 @@ export async function upsertCatalogBatch(
               size: variant.size,
               attributes: variant.attributes as never,
               syncedCommissionRate: variant.syncedCommissionRate,
-              syncedDimensionalWeight: variant.syncedDimensionalWeight,
+              // Owner rule (Berkin 2026-11-23): sync never erases a known
+              // Trendyol desi. A null mapped desi (Trendyol sent 0 or nothing)
+              // leaves the stored value as it is; a real value replaces it. The
+              // create clause above still writes null for a new variant.
+              ...(variant.syncedDimensionalWeight !== null && {
+                syncedDimensionalWeight: variant.syncedDimensionalWeight,
+              }),
               status: variant.status,
               statusReason: variant.statusReason,
               lastSyncedAt: new Date(),

@@ -28,8 +28,9 @@ export interface ShippingEstimate {
 }
 
 // NO_DESI: the variant has no effective desi (no seller override and no desi
-// from the marketplace), so there is no tariff row to price from. A desi of 0 is
-// a real desi and is priced. The products list's SQL mirror
+// from the marketplace), so there is no tariff row to price from. Any stored desi
+// is priced, a stored 0 included (a seller desi is at least 1). The products
+// list's SQL mirror
 // (`SHIPPING_ESTIMATE_CTE_SQL`) emits the same status in the same precedence:
 // NO_CARRIER (TRENDYOL_CONTRACT only) > NO_DESI > OWN_CONTRACT_EMPTY / DESI_OVERFLOW.
 export type EstimateUnavailableReason =
@@ -56,8 +57,8 @@ export interface ResolveTariffInput {
     readonly version: ShippingTariffVersionRows | null;
   } | null;
   /**
-   * Effective desi (>= 0, 0 is a real desi), looked up as `ceil(desi)`; null when
-   * the variant has none (NO_DESI).
+   * Effective desi (>= 0; a stored 0 is priced, a seller desi is at least 1),
+   * looked up as `ceil(desi)`; null when the variant has none (NO_DESI).
    */
   desi: Decimal | null;
   /** Barem aralığı için brüt tutar = effectiveSale (liste − satıcı indirimi); Trendyol indirimi hariç. */

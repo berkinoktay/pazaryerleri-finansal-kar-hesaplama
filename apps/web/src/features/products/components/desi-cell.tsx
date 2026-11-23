@@ -52,11 +52,12 @@ export interface DesiCellProps {
  *     lives in the backend only; this cell reads the flag and never
  *     re-derives it from the values.
  *   - A desi, no user override: the number in Turkish format ("1,5") with
- *       `tabular-nums`. A stored desi of 0 is a real value and renders "0".
+ *       `tabular-nums`. A stored desi of 0 is still a value and renders "0".
  *   - A desi, user override: the number tinted in `text-primary` with a
  *       small trailing dot. The override is the load-bearing UX signal, so
- *       it gets a semantic color, not an alpha shortcut. An override of 0 is
- *       a real value and renders "0" here, not the call to action.
+ *       it gets a semantic color, not an alpha shortcut. A seller desi is at
+ *       least 1, but a stored override of 0 still renders "0" here, not the
+ *       call to action.
  *
  * The 32px height (`h-7`) matches the cost cell to keep dense-table rhythm.
  */

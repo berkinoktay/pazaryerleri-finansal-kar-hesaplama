@@ -133,7 +133,10 @@ describe('BulkDesiDialog', () => {
     ['', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
     ['abc', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
     ['2,555', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
-    ['-1', 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL'],
+    // A minus sign is a format error, as the backend answers.
+    ['-1', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
+    // A seller desi is at least 1 (Berkin 2026-11-23).
+    ['0', 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL'],
     ['1000', 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE'],
   ] as const)('shows the error for %j and sends no request', async (raw, code) => {
     const bodies = captureBulkPatches();

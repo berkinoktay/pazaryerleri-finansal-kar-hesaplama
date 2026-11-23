@@ -404,7 +404,8 @@ function ruleRates(
 /**
  * The item's desi and where it came from, as in the engine: the seller's correction
  * wins over the synced value. With neither (Trendyol sent no desi and the seller
- * entered none) both columns stay empty. A desi of 0 is a real desi.
+ * entered none) both columns stay empty. Any stored value counts, a stored 0
+ * included (a seller desi is at least 1).
  */
 function desiCaptureData(
   variant: LiveVariant,

@@ -143,7 +143,8 @@ ALTER TABLE orders ADD CONSTRAINT orders_profit_exclusion_pair_check
 -- No desi may go below 0 (a negative desi is impossible). Both columns are
 -- nullable and NULL passes the check: a NULL synced_dimensional_weight means the
 -- marketplace sent no desi, a NULL dimensional_weight_override means no seller
--- override, and both NULL means the variant has no desi; 0 is a real desi. The
+-- override, and both NULL means the variant has no desi. A seller desi is at
+-- least 1 (Berkin 2026-11-23, enforced by the API validators, not here). The
 -- synced column keeps its default 0 (migration nullable_synced_desi). The
 -- constraint was renamed together with the column; the legacy name is dropped
 -- too, because Postgres

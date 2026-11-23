@@ -35,8 +35,9 @@ export function totalStock(variants: VariantSummary[]): number {
 
 // Aggregate for the parent row's desi column when a product has multiple
 // variants. Variants with no desi (null on the wire; the backend flags them
-// `isDimensionalWeightMissing`) are skipped; a desi of 0 is a real desi and
-// counts. Returns null when no variant has a known desi. min/max are display
+// `isDimensionalWeightMissing`) are skipped; any stored desi counts, a stored 0
+// included (a seller desi is at least 1). Returns null when no variant has a
+// known desi. min/max are display
 // strings in Turkish format ("1,5"); the comparison runs on Decimal values.
 export interface DesiRange {
   min: string;

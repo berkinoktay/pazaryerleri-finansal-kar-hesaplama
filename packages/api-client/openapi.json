@@ -2274,7 +2274,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. \"0\" is a real desi.",
+                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. A seller override is at least 1.",
                   "example": "1.5"
                 },
                 "syncedDimensionalWeight": {
@@ -2282,7 +2282,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "The marketplace desi (decimal string). Null when the marketplace sent none, and on a row whose barcode resolves to no variant.",
+                  "description": "The last known marketplace desi (decimal string); a sync without a desi keeps it. Null when the marketplace never sent one, and on a row whose barcode resolves to no variant.",
                   "example": "1.2"
                 },
                 "isDimensionalWeightOverridden": {
@@ -2292,7 +2292,7 @@
                 },
                 "isDimensionalWeightMissing": {
                   "type": "boolean",
-                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
+                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). Any stored desi is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
                   "example": false
                 }
               },
@@ -2532,7 +2532,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. \"0\" is a real desi.",
+                  "description": "Effective desi (decimal string): the seller override, else the marketplace desi. Null when the variant has neither, and on a row whose barcode resolves to no variant. A seller override is at least 1.",
                   "example": "1.5"
                 },
                 "syncedDimensionalWeight": {
@@ -2540,7 +2540,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "The marketplace desi (decimal string). Null when the marketplace sent none, and on a row whose barcode resolves to no variant.",
+                  "description": "The last known marketplace desi (decimal string); a sync without a desi keeps it. Null when the marketplace never sent one, and on a row whose barcode resolves to no variant.",
                   "example": "1.2"
                 },
                 "isDimensionalWeightOverridden": {
@@ -2550,7 +2550,7 @@
                 },
                 "isDimensionalWeightMissing": {
                   "type": "boolean",
-                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
+                  "description": "True when a non-digital variant has no seller desi and no marketplace desi (same rule as VariantSummary.isDimensionalWeightMissing). Any stored desi is not missing; a digital variant needs none. False on a row whose barcode resolves to no variant.",
                   "example": false
                 }
               },
@@ -3135,7 +3135,7 @@
               "string",
               "null"
             ],
-            "description": "Effective dimensional weight (TR: \"desi\"). Decimal string. The user override takes precedence; falls back to the marketplace-synced value when no override is set. Null when the variant has no desi: the marketplace sent none and the user entered none. \"0\" is a real desi.",
+            "description": "Effective dimensional weight (TR: \"desi\"). Decimal string. The user override takes precedence; falls back to the marketplace-synced value when no override is set. Null when the variant has no desi: the marketplace sent none and the user entered none. A user override is at least 1.",
             "example": "1.50"
           },
           "syncedDimensionalWeight": {
@@ -3143,7 +3143,7 @@
               "string",
               "null"
             ],
-            "description": "The marketplace's latest dimensional weight for this variant. Refreshed every sync. Independent of any user override. Used by the UI to show the seller what the marketplace currently reports. Null when the marketplace sent no desi; a Trendyol desi of 0 (its value for a desi that was never entered) is stored as null too.",
+            "description": "The marketplace's last known dimensional weight for this variant. Every sync that brings a desi refreshes it; a sync that brings none keeps the last known value. Independent of any user override. Used by the UI to show the seller what the marketplace reports. Null when the marketplace never sent a desi; a Trendyol desi of 0 (its value for a desi that was never entered) counts as no desi.",
             "example": "1.20"
           },
           "isDimensionalWeightOverridden": {
@@ -3152,7 +3152,7 @@
           },
           "isDimensionalWeightMissing": {
             "type": "boolean",
-            "description": "True when the variant misses desi: a non-digital variant with no user override and no synced (marketplace) dimensional weight. The same rule as the overrideMissing=desi filter and the facets overrideCounts.missingDesi count. A desi of 0 (synced or override) is a real desi and is not missing; a digital variant needs no desi. The shipping estimate of a missing-desi variant is NO_DESI.",
+            "description": "True when the variant misses desi: a non-digital variant with no user override and no synced (marketplace) dimensional weight. The same rule as the overrideMissing=desi filter and the facets overrideCounts.missingDesi count. Any stored desi (synced or override) is not missing (a user override is at least 1); a digital variant needs no desi. The shipping estimate of a missing-desi variant is NO_DESI.",
             "example": false
           },
           "quantity": {
@@ -3264,7 +3264,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = the variant has no desi (no seller override and no desi from the marketplace), so there is no tariff row to price from; a desi of 0 is a real desi and is priced. OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
+            "description": "Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = the variant has no desi (no seller override and no desi from the marketplace), so there is no tariff row to price from; any stored desi is priced (a seller desi is at least 1). OWN_CONTRACT_EMPTY = OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.",
             "example": "OK"
           }
         },
@@ -3414,7 +3414,7 @@
           },
           "isDimensionalWeightMissing": {
             "type": "boolean",
-            "description": "Missing-desi state after the update: a non-digital variant with no user override and no synced desi (same rule as VariantSummary.isDimensionalWeightMissing). Clearing the override of a variant the marketplace sent no desi for makes it true again; a seller desi of 0 is a real desi and keeps it false (a Trendyol 0 is stored as no desi).",
+            "description": "Missing-desi state after the update: a non-digital variant with no user override and no synced desi (same rule as VariantSummary.isDimensionalWeightMissing). Clearing the override of a variant the marketplace sent no desi for makes it true again; a seller desi (at least 1) keeps it false (a Trendyol 0 is stored as no desi).",
             "example": false
           }
         },
@@ -3435,7 +3435,7 @@
               "null"
             ],
             "pattern": "^\\d+(\\.\\d{1,2})?$",
-            "description": "Decimal string with up to 2 fractional digits, in the (closed) range [0, 999.99], or null. Null clears the user override and reverts the read path to the marketplace's last synced value.",
+            "description": "Decimal string with up to 2 fractional digits, in the (closed) range [1, 999.99] (a seller desi is at least 1), or null. Null clears the user override and reverts the read path to the marketplace's last synced value.",
             "example": "1.50"
           }
         },
@@ -3479,7 +3479,7 @@
               "null"
             ],
             "pattern": "^\\d+(\\.\\d{1,2})?$",
-            "description": "Same shape as the single-variant endpoint. Applied uniformly to every listed variant. Null clears the override on all of them.",
+            "description": "Same shape and range as the single-variant endpoint (a seller desi is at least 1). Applied uniformly to every listed variant. Null clears the override on all of them.",
             "example": "1.50"
           }
         },
@@ -3614,7 +3614,7 @@
               "OWN_CONTRACT_EMPTY",
               "DESI_OVERFLOW"
             ],
-            "description": "Shipping availability from the engine shipping estimate at the variant own sale price (the Barem / carrier tariff band is chosen at that price). A digital variant has no shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = the variant has no desi (no seller desi and none from Trendyol), so no shipping can be priced; a desi of 0 is a real desi and is priced. OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
+            "description": "Shipping availability from the engine shipping estimate at the variant own sale price (the Barem / carrier tariff band is chosen at that price). A digital variant has no shipping and reads OK. OK = estimate computed. NO_CARRIER = no carrier configured on this store. NO_DESI = the variant has no desi (no seller desi and none from Trendyol), so no shipping can be priced; any stored desi is priced (a seller desi is at least 1). OWN_CONTRACT_EMPTY = own-contract store with no tariff row for this desi. DESI_OVERFLOW = variant desi exceeds carrier tariff coverage.",
             "example": "OK"
           },
           "commissionStatus": {
@@ -12750,11 +12750,11 @@
                 "cost",
                 "desi"
               ],
-              "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. A desi of 0 is a real desi and is not missing; a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+              "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. Any stored desi is not missing (a seller desi is at least 1; a Trendyol 0 is stored as no desi); a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
               "example": "cost"
             },
             "required": false,
-            "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. A desi of 0 is a real desi and is not missing; a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
+            "description": "Variant-level filter: \"cost\" matches variants with no active (non-archived) cost profile attached; \"desi\" matches non-digital variants with no desi at all: no seller desi override and no synced (Trendyol) desi. Any stored desi is not missing (a seller desi is at least 1; a Trendyol 0 is stored as no desi); a digital variant needs no desi. Either value composes via AND with the status filter, or with the default listing scope when status is omitted. Parent included if at least one variant matches; response variants[] is filtered to matching variants (consistent with status semantics).",
             "name": "overrideMissing",
             "in": "query"
           },

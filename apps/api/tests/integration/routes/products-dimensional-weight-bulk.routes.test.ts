@@ -204,11 +204,11 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     expect(body.errors.some((e) => e.code === 'INVALID_VARIANT_IDS_TOO_MANY')).toBe(true);
   });
 
-  it('rejects out-of-range dimensionalWeight with 422 (above the cap); 0 is the valid floor', async () => {
+  it('rejects out-of-range dimensionalWeight with 422 (below 1 or above the cap); 1 is the valid floor', async () => {
     const ctx = await setupCtx();
     const v = await seedVariant(ctx);
 
-    // Above the cap → TOO_LARGE.
+    // Above the cap: TOO_LARGE.
     const tooLarge = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '1500.00' });
     expect(tooLarge.status).toBe(422);
     const tooLargeBody = (await tooLarge.json()) as { errors: { code: string }[] };
@@ -216,9 +216,28 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
       true,
     );
 
-    // 0 is the floor — accepted.
-    const zero = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '0' });
-    expect(zero.status).toBe(200);
+    // Owner rule (Berkin 2026-11-23): a seller desi is at least 1, replacing the
+    // 2026-11-22 rule that a seller 0 is a real desi. 0 and 0.99 are TOO_SMALL.
+    for (const below of ['0', '0.99']) {
+      const tooSmall = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: below });
+      expect(tooSmall.status).toBe(422);
+      const tooSmallBody = (await tooSmall.json()) as { errors: { code: string }[] };
+      expect(
+        tooSmallBody.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL'),
+      ).toBe(true);
+    }
+    const untouched = await prisma.productVariant.findFirstOrThrow({
+      where: { id: v, organizationId: ctx.orgId },
+    });
+    expect(untouched.dimensionalWeightOverride).toBeNull();
+
+    // 1 is the floor: accepted.
+    const floor = await bulkPatch(ctx, { variantIds: [v], dimensionalWeight: '1' });
+    expect(floor.status).toBe(200);
+    const row = await prisma.productVariant.findFirstOrThrow({
+      where: { id: v, organizationId: ctx.orgId },
+    });
+    expect(row.dimensionalWeightOverride?.toString()).toBe('1');
   });
 });
 

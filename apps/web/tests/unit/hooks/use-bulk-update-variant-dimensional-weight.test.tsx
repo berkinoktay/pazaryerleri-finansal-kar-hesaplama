@@ -184,7 +184,7 @@ describe('useBulkUpdateVariantDimensionalWeight', () => {
     const { result } = renderHook(() => useBulkUpdateVariantDimensionalWeight(), {
       wrapper: wrap(makeClient()),
     });
-    // 1000 is above the inclusive 999.99 ceiling (0 is a valid desi).
+    // 1000 is above the inclusive 999.99 ceiling (a seller desi is 1 to 999.99).
     result.current.mutate({
       orgId: ORG_ID,
       storeId: STORE_ID,

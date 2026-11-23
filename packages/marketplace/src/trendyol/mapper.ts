@@ -46,8 +46,8 @@ function nullableDecimalString(value: number | null | undefined): string | null 
 // Maps the wire desi to a 2-decimal string, or null when Trendyol sent no usable
 // desi: absent, null, not a finite number, 0 or negative. Trendyol sends 0 for a
 // product whose desi was never entered (seen on the live store: a 50-pack of flags
-// at desi 0), so a wire 0 means "no desi" (Berkin 2026-11-22). A product that
-// really is desi 0 gets it from the seller's override, where 0 is a real value.
+// at desi 0), so a wire 0 means "no desi" (Berkin 2026-11-22). A seller desi
+// entered in PazarSync (the override) is at least 1 (Berkin 2026-11-23).
 // A positive desi that rounds to 0 at 2 decimals (below 0.005) is a 0 too, so a
 // Trendyol 0 is never written. Desi is a measure, not money; toFixed(2) matches
 // the Decimal(6,2) column like priceToDecimalString.
@@ -160,10 +160,11 @@ function mapVariant(variant: TrendyolVariant): MappedProductVariant {
     size: extractVariantLabel(variantAttrs),
     attributes: variantAttrs,
     // Desi: Trendyol omits this field on some products and sends 0 on others whose
-    // desi was never entered; both are stored as null. With no seller override the
-    // variant then has no desi at all (the shipping estimate gives no price and an
-    // order holding it waits for the seller's desi). A seller-entered 0 is a real
-    // desi and a VALID tariff tier (the table covers desi 0 onward).
+    // desi was never entered; both map to null. A new variant is created with null;
+    // an existing variant keeps its last known synced desi (upsertCatalogBatch,
+    // Berkin 2026-11-23). With no synced desi and no seller override the variant
+    // has no desi at all (the shipping estimate gives no price and an order holding
+    // it waits for the seller's desi). A seller-entered desi is at least 1.
     syncedDimensionalWeight: desiDecimalString(variant.dimensionalWeight),
     syncedCommissionRate: nullableDecimalString(variant.commission),
     status,

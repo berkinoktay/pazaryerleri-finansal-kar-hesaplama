@@ -3114,14 +3114,14 @@
       "popover": {
         "title": "Dimensional weight",
         "placeholder": "1.5",
-        "syncedHint": "Trendyol value: {value}",
+        "syncedHint": "Last known Trendyol value: {value}",
         "syncedMissing": "Trendyol has no desi for this product.",
         "reset": "Reset to Trendyol value",
         "save": "Save",
         "cancel": "Cancel",
         "errors": {
           "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
-          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi cannot be below 0.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be at least 1.",
           "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi can be at most 999.99."
         }
       }
@@ -3187,7 +3187,7 @@
       },
       "errors": {
         "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Enter a valid number (e.g. 1.5).",
-        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi cannot be below 0.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi must be at least 1.",
         "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi can be at most 999.99."
       }
     },
