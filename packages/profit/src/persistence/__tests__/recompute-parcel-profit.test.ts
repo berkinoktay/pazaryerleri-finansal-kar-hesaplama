@@ -35,6 +35,7 @@ import {
 import { deferred, delay } from './helpers/concurrency';
 import {
   attachCostProfile,
+  clearSellerInputHistory,
   ensureDbReachable,
   insertFinanceRecord,
   MELONTIK,
@@ -696,6 +697,8 @@ describe('recomputeParcelProfit', () => {
       where: { id: { in: [parcel.variantA, parcel.variantB] } },
       data: { syncedDimensionalWeight: '5' },
     });
+    // Fixture setup, not history: both variants weighed 5 desi on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     for (const record of melontikSaleCycleRecordInputs(parcel)) {
       await insertFinanceRecord(record);
     }
@@ -803,6 +806,8 @@ describe('recomputeParcelProfit', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId },
     });
+    // Fixture setup, not history: no variant had a link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     await prisma.order.update({
       where: { id: parcel.orderId },
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -862,6 +867,8 @@ describe('recomputeParcelProfit', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId },
     });
+    // Fixture setup, not history: no variant had a link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
 
     const result = await recompute(parcel.organizationId, parcel.orderId);
     expect(result.changed).toBe(true);

@@ -12,6 +12,7 @@ import { compareText } from '../core/compare-text';
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
 import {
+  type CostProfileVersionInput,
   type ItemCostInput,
   type ItemCostProfileInput,
 } from '../core/seller-costs/build-seller-cost-lines';
@@ -36,11 +37,11 @@ import {
 } from '../marketplaces/trendyol/trendyol-inputs';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
 import { normalizeCargoProviderName } from './normalize-cargo-provider-name';
+import { loadSellerInputsAt } from './seller-inputs-at';
 import {
   dec,
   decOrNull,
   loadCommissionRulesForCategories,
-  loadCostProfilesByVariant,
   loadOrderFeeParams,
   loadPinnedCostProfilesByVersionId,
   loadShippingTariff,
@@ -556,12 +557,13 @@ async function loadCommissionRules(
 
 /**
  * The seller cost inputs of the uncaptured items, by the same cost rule the order
- * snapshot pins with (plan PR-3b): per cost profile linked to the item's variant
- * (org-filtered), the version `chooseOrderCostVersion` picks at the end of the order's
- * business day, as a one-version profile (the shape `loadCapturedItemCosts` produces).
- * A profile not in force then (linked later, or archived) contributes nothing; an
- * item without a variant or without such a profile is omitted, and the cost module
- * raises MISSING_COST itself.
+ * snapshot pins with (plan PR-3b): per cost profile linked to the item's variant at
+ * the end of the order's business day (`loadSellerInputsAt`, org-filtered: the live
+ * links plus the removed ones still attached then, same-day edit window plan PR-1),
+ * the version `chooseOrderCostVersion` picks at that day end, as a one-version
+ * profile (the shape `loadCapturedItemCosts` produces). A profile not in force then
+ * (linked later, or archived) contributes nothing; an item without a variant or
+ * without such a profile is omitted, and the cost module raises MISSING_COST itself.
  */
 async function loadItemCosts(
   tx: Prisma.TransactionClient,
@@ -579,22 +581,36 @@ async function loadItemCosts(
   const variantIds = orderItems
     .map((item) => item.productVariantId)
     .filter((variantId): variantId is string => variantId !== null);
-  const profilesByVariant = await loadCostProfilesByVariant(tx, { organizationId, variantIds });
+  const inputsByVariant = await loadSellerInputsAt(tx, { organizationId, variantIds, at });
 
   const costs: ItemCostInput[] = [];
   for (const item of orderItems) {
     if (item.productVariantId === null) continue;
     const profiles: ItemCostProfileInput[] = [];
-    for (const profile of profilesByVariant.get(item.productVariantId) ?? []) {
+    for (const profile of inputsByVariant.get(item.productVariantId)?.costProfiles ?? []) {
       const version = chooseOrderCostVersion(profile, { at });
       if (version === null) continue;
       // The same linked profile (id, type, link instant), priced by the chosen version only.
-      profiles.push({ ...profile, versions: [version] });
+      profiles.push({ ...profile, versions: [engineCostVersion(version)] });
     }
     if (profiles.length === 0) continue;
     costs.push({ orderItemId: item.id, profiles });
   }
   return costs;
+}
+
+/**
+ * A cost version as the engine reads it, without the row id the day-end loader
+ * carries: the same shape the other cost loaders hand to the engine.
+ */
+function engineCostVersion(version: CostProfileVersionInput): CostProfileVersionInput {
+  return {
+    effectiveFrom: version.effectiveFrom,
+    versionNumber: version.versionNumber,
+    amountGross: version.amountGross,
+    vatRatePct: version.vatRatePct,
+    archivedAt: version.archivedAt,
+  };
 }
 
 /**

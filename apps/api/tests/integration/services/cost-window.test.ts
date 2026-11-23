@@ -13,6 +13,7 @@ import {
   createOrganization,
   createStore,
 } from '../../helpers/factories';
+import { backdateSellerInputHistory } from '../../helpers/seller-input-history';
 
 // The cost-window helper (Berkin 2026-11-03): true iff every non-cancelled item
 // had a cost in force when the order's business day ended (plan PR-3b: attached by
@@ -445,6 +446,38 @@ describe('hadCostWithinOrderDay', () => {
       items: [{ productVariantId: variantId, isCancelled: false }],
     });
     expect(result).toBe(true);
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): the window reads the links in force at
+  // the day end, rebuilt from the removal log, so a detach stamped after the day end
+  // does not take back a cost the order's day had.
+  it('hadCostWithinOrderDay is true for a link detached after T', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-CW-DETACHED');
+    await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: new Date(DAY_END.getTime() - ONE_MINUTE_MS),
+      versionEffectiveFrom: new Date(DAY_END.getTime() - ONE_MINUTE_MS),
+    });
+    // Detached now: the removal is stamped after the order's day end.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: org.id, productVariantId: variantId },
+    });
+
+    const params = {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: variantId, isCancelled: false }],
+    };
+    expect(await hadCostWithinOrderDay(prisma, params)).toBe(true);
+
+    // Control: the same removal stamped before the day end leaves no cost at it.
+    await backdateSellerInputHistory(org.id, new Date(DAY_END.getTime() - ONE_MINUTE_MS / 2));
+    expect(await hadCostWithinOrderDay(prisma, params)).toBe(false);
   });
 
   it("another organization's link for the same variant id never counts", async () => {

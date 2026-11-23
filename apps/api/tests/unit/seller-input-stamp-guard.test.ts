@@ -146,12 +146,19 @@ describe('seller-input stamps are written by the database only', () => {
   it('no production source passes attachedAt or effectiveFrom on a write', () => {
     const { files, keys, writes } = scanSources();
 
-    // Positive control: the scan reached the cost writers and their readers.
+    // Positive control: the scan reached the cost writers and their readers (the one
+    // day-end loader every seller-input gate reads).
     expect(files).toBeGreaterThan(0);
     const costService = path.join('apps', 'api', 'src', 'services', 'cost-profile.service.ts');
-    const costWindow = path.join('packages', 'order-sync', 'src', 'cost-window.ts');
+    const dayEndLoader = path.join(
+      'packages',
+      'profit',
+      'src',
+      'persistence',
+      'seller-inputs-at.ts',
+    );
     expect(keys.get(costService) ?? 0).toBeGreaterThan(0);
-    expect(keys.get(costWindow) ?? 0).toBeGreaterThan(0);
+    expect(keys.get(dayEndLoader) ?? 0).toBeGreaterThan(0);
 
     expect(writes).toEqual([]);
   });

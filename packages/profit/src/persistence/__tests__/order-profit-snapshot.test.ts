@@ -39,6 +39,7 @@ import {
 } from '../order-profit-snapshot';
 import {
   attachCostProfile,
+  clearSellerInputHistory,
   COST_FIXTURE_EPOCH,
   ensureDbReachable,
   MELONTIK,
@@ -163,6 +164,8 @@ async function seedSnapshotParcel(opts: SeedMelontikOptions = {}): Promise<Melon
     where: { id: parcel.variantA },
     data: { dimensionalWeightOverride: '3.50', syncedCommissionRate: '15.00' },
   });
+  // Fixture setup, not history: item A's variant carried that desi all along.
+  await clearSellerInputHistory(parcel.organizationId);
   return parcel;
 }
 
@@ -640,6 +643,8 @@ describe('captureOrderProfitSnapshot', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    // Fixture setup, not history: item A's variant had no link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     await capture(parcel);
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
@@ -690,6 +695,8 @@ describe('captureOrderProfitSnapshot', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId },
     });
+    // Fixture setup, not history: neither variant had a link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     await prisma.order.update({
       where: { id: parcel.orderId, organizationId: parcel.organizationId },
       data: {
@@ -945,6 +952,8 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: null },
     });
+    // Fixture setup, not history: neither variant had a desi on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
 
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
     for (const itemId of [parcel.itemA, parcel.itemB]) {
@@ -990,6 +999,8 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '0' },
     });
+    // Fixture setup, not history: both variants had that desi on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     await capture(parcel);
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
@@ -1185,6 +1196,8 @@ describe('captureOrderProfitSnapshot', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    // Fixture setup, not history: the removed link was not on the variant that day.
+    await clearSellerInputHistory(parcel.organizationId);
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
@@ -1232,6 +1245,48 @@ describe('captureOrderProfitSnapshot', () => {
 
     const itemA = await readItemSnapshot(parcel.itemA);
     expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, atDayEndId]));
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): a capture reads the seller inputs in
+  // force at the order's day end, rebuilt from the history logs, so a write stamped
+  // after that day end does not reach a first capture of the order.
+  it("a past-day first capture pins a link detached after the order's day end", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date(Date.now() - DAY_MS));
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Detached now, after yesterday's day end.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(cogsVersionIds);
+  });
+
+  it("a past-day first capture takes the desi in force at the order's day end", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date(Date.now() - DAY_MS));
+    // Changed now, after yesterday's day end: item A's override, item B's synced desi.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '7.00' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotUnitDesi?.toString()).toBe('3.5');
+    expect(itemA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const itemB = await readItemSnapshot(parcel.itemB);
+    expect(itemB.snapshotUnitDesi?.toString()).toBe('1');
+    expect(itemB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('a profile archived before the day end is not pinned, archived after it is pinned', async () => {

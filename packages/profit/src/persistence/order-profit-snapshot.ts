@@ -20,12 +20,17 @@
 // of the order's business day count, each priced by its version in force then, so a
 // cost linked (or restored) after that day never fills an empty list.
 //
+// The cost links and the desi a capture reads are the ones in force at that day end,
+// rebuilt by the one day-end loader (`loadSellerInputsAt`, same-day edit window plan
+// PR-1) from the live rows and the seller-input history logs: a link detached or a
+// desi changed after the day end does not reach a capture of the order.
+//
 // Dated shared values (tariff versions, fee definitions, micro-export tiers) are not
 // copied; the engine keeps reading them by the order date.
 
 import type { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
-import { Platform, SnapshotDesiSource } from '@pazarsync/db/enums';
+import { Platform } from '@pazarsync/db/enums';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { compareText } from '../core/compare-text';
@@ -42,10 +47,10 @@ import {
   reportedProviderName,
   resolveOrderCarrier,
 } from './load-trendyol-parcel';
+import { loadSellerInputsAt, resolveDesiAtDayEnd, type SellerInputsAt } from './seller-inputs-at';
 import {
   dec,
   loadCommissionRulesForCategories,
-  loadIdentifiedCostProfilesByVariant,
   type IdentifiedItemCostProfileInput,
 } from './trendyol-reference-loaders';
 
@@ -266,22 +271,25 @@ async function captureItems(
       ...commissionFillList.map(commissionCategoryId),
     ].filter((categoryId): categoryId is bigint => categoryId !== null),
   });
-  const costsByVariant = await loadIdentifiedCostProfilesByVariant(tx, {
+  // The cost links and the desi in force at the order's day end (same-day edit window,
+  // plan PR-1): the one day-end loader every seller-input gate reads.
+  const inputsByVariant = await loadSellerInputsAt(tx, {
     organizationId,
     variantIds: [...captureList, ...costFillList]
       .map((item) => item.productVariantId)
       .filter((variantId): variantId is string => variantId !== null),
+    at,
   });
 
   const writes: { readonly id: string; readonly data: Prisma.OrderItemUncheckedUpdateInput }[] = [];
   for (const item of captureList) {
     writes.push({
       id: item.id,
-      data: itemCaptureData(item, { rules, costsByVariant, at, now }),
+      data: itemCaptureData(item, { rules, inputsByVariant, at, now }),
     });
   }
   for (const item of fillList) {
-    const data = itemFillData(item, { rules, costsByVariant, at });
+    const data = itemFillData(item, { rules, inputsByVariant, at });
     if (data !== null) {
       writes.push({ id: item.id, data });
     }
@@ -298,9 +306,10 @@ async function captureItems(
 }
 
 /**
- * The missing parts of a captured item, filled from its live variant and product, as
- * one update, or null when nothing changes: the cost list (see
- * `needsCostListRefresh`) and commission inputs none of which gives a rate. Its
+ * The missing parts of a captured item, filled from its live variant and product (the
+ * cost list from the variant's links at the order's day end), as one update, or null
+ * when nothing changes: the cost list (see `needsCostListRefresh`) and commission
+ * inputs none of which gives a rate. Its
  * capture time stays. The desi is never filled: a captured desi (0 included) is a
  * known value, and an item captured without one belongs to an order the desi gate
  * keeps out of profit.
@@ -309,7 +318,7 @@ function itemFillData(
   item: SnapshotOrderItem,
   reference: {
     readonly rules: TrendyolCommissionRules;
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
+    readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
     readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput | null {
@@ -325,22 +334,22 @@ function itemFillData(
 }
 
 /**
- * The fill of an empty cost list: the versions the cost rule pins at `at`. Nothing
- * when the list is filled (frozen at capture) or no link of the variant is in force
- * at `at`.
+ * The fill of an empty cost list: the versions the cost rule pins at `at`, from the
+ * variant's links at `at`. Nothing when the list is filled (frozen at capture) or no
+ * link of the variant is in force at `at`.
  */
 function costListFillData(
   item: SnapshotOrderItem,
   variantId: string,
   reference: {
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
+    readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
     readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
   if (!needsCostListRefresh(item)) {
     return {};
   }
-  const pinned = pinnedCostVersionIds(reference.costsByVariant.get(variantId), {
+  const pinned = pinnedCostVersionIds(reference.inputsByVariant.get(variantId)?.costProfiles, {
     at: reference.at,
   });
   return pinned.length === 0 ? {} : { snapshotCostProfileVersionIds: pinned };
@@ -399,40 +408,37 @@ function ruleRates(
 }
 
 /**
- * The item's desi and where it came from, as in the engine: the seller's correction
- * wins over the synced value. With neither (Trendyol sent no desi and the seller
- * entered none) both columns stay empty. Any stored value counts, a stored 0
- * included (a seller desi is at least 1).
+ * The item's desi at the order's day end and where it came from, as in the engine:
+ * the seller's correction wins over the synced value (`resolveDesiAtDayEnd`). With
+ * neither (Trendyol sent no desi and the seller entered none by then) both columns
+ * stay empty. Any value counts, a 0 included (a seller desi is at least 1).
  */
 function desiCaptureData(
-  variant: LiveVariant,
+  inputs: SellerInputsAt | undefined,
 ): Pick<Prisma.OrderItemUncheckedUpdateInput, 'snapshotUnitDesi' | 'snapshotDesiSource'> {
-  const override = variant.dimensionalWeightOverride;
-  if (override !== null) {
-    return { snapshotUnitDesi: override, snapshotDesiSource: SnapshotDesiSource.OVERRIDE };
+  if (inputs === undefined) {
+    return { snapshotUnitDesi: null, snapshotDesiSource: null };
   }
-  const synced = variant.syncedDimensionalWeight;
-  if (synced !== null) {
-    return { snapshotUnitDesi: synced, snapshotDesiSource: SnapshotDesiSource.SYNCED };
-  }
-  return { snapshotUnitDesi: null, snapshotDesiSource: null };
+  const { value, source } = resolveDesiAtDayEnd(inputs.desi);
+  return { snapshotUnitDesi: value, snapshotDesiSource: source };
 }
 
 /**
- * Every item snapshot column, taken from the item's current variant, product,
- * commission rules and cost links. An item without a variant is captured with these
- * inputs empty and an empty cost list.
+ * Every item snapshot column, taken from the item's current variant, product and
+ * commission rules, and from the variant's cost links and desi at the order's day
+ * end. An item without a variant is captured with these inputs empty and an empty
+ * cost list.
  */
 function itemCaptureData(
   item: SnapshotOrderItem,
   reference: {
     readonly rules: TrendyolCommissionRules;
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
+    readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
     readonly at: Date;
     readonly now: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
-  const { rules, costsByVariant, at, now } = reference;
+  const { rules, inputsByVariant, at, now } = reference;
   const variant = item.productVariant;
   if (variant === null) {
     return {
@@ -452,16 +458,17 @@ function itemCaptureData(
 
   const { categoryId, brandId } = variant.product;
   const rates = ruleRates(rules, categoryId, brandId);
+  const inputs = inputsByVariant.get(variant.id);
   return {
     snapshotProductVariantId: item.productVariantId,
-    ...desiCaptureData(variant),
+    ...desiCaptureData(inputs),
     snapshotIsDigital: variant.isDigital,
     snapshotCategoryId: categoryId,
     snapshotBrandId: brandId,
     snapshotSyncedCommissionRatePct: variant.syncedCommissionRate,
     snapshotCategoryRatePct: rates.categoryRatePct,
     snapshotCategoryBrandRatePct: rates.categoryBrandRatePct,
-    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), { at }),
+    snapshotCostProfileVersionIds: pinnedCostVersionIds(inputs?.costProfiles, { at }),
     profitSnapshotAt: now,
   };
 }

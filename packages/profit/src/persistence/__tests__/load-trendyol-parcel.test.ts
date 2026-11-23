@@ -20,6 +20,7 @@ import {
   ProfitStatus,
   ReconciliationStatus,
 } from '@pazarsync/db/enums';
+import { getBusinessDayRange } from '@pazarsync/utils';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { estimateTrendyolParcel } from '../../marketplaces/trendyol/estimate-parcel';
@@ -38,6 +39,8 @@ import { computeParcelProfit } from '../compute-parcel-profit';
 import { ParcelNotFoundError, UnsupportedPlatformError } from '../errors';
 import { loadTrendyolParcel } from '../load-trendyol-parcel';
 import {
+  backdateSellerInputHistory,
+  clearSellerInputHistory,
   COST_FIXTURE_EPOCH,
   createAdditionalStore,
   ensureDbReachable,
@@ -1687,6 +1690,8 @@ describe('loadTrendyolParcel', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    // Fixture setup, not history: the replaced link was never in force for this order.
+    await clearSellerInputHistory(parcel.organizationId);
     const otherOrg = await prisma.organization.create({
       data: { name: 'Other Org', slug: `other-${randomUUID().slice(0, 8)}` },
     });
@@ -1729,6 +1734,43 @@ describe('loadTrendyolParcel', () => {
     });
 
     expect(loaded.estimateInput.costs.map((entry) => entry.orderItemId)).toEqual([parcel.itemB]);
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): an uncaptured item reads the cost links
+  // in force at the order's day end, rebuilt from the removal log, so a detach stamped
+  // after that day end does not take its cost away.
+  it("an uncaptured item keeps a cost whose link was detached after the order's day end", async () => {
+    const parcel = await seedMelontikParcel();
+    const orderDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.order.update({
+      where: { id: parcel.orderId, organizationId: parcel.organizationId },
+      data: { orderDate },
+    });
+    // Detached now, after yesterday's day end.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    const costA = loaded.estimateInput.costs.find((entry) => entry.orderItemId === parcel.itemA);
+    expect(
+      costA?.profiles.map((profile) => profile.versions.map((v) => v.amountGross.toString())),
+    ).toEqual([[new Decimal(MELONTIK.items.a.costGross).toString()]]);
+
+    // Control: the same removal stamped before the day end leaves item A without a cost.
+    await backdateSellerInputHistory(
+      parcel.organizationId,
+      new Date(getBusinessDayRange(orderDate).end.getTime() - 60 * 60 * 1000),
+    );
+    const reloaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+    expect(reloaded.estimateInput.costs.map((entry) => entry.orderItemId)).toEqual([parcel.itemB]);
   });
 
   it("uses the order's own carrier for the shipping estimate", async () => {

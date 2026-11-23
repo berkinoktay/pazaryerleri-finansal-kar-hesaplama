@@ -1,10 +1,10 @@
 /**
- * Integration tests for buildCalcCheckLines (plan PR-2c, Gorev 3; PR-3b cost rule):
- * each order line is resolved by barcode inside its store and carries the cost of a
- * link in force at `at` (attached by then, its profile's version at `at` not an
- * archive version), its effective desi (seller override, else the Trendyol desi;
- * empty when neither exists; 0 is a real desi) and its digital flag, all read in the
- * one variant query.
+ * Integration tests for buildCalcCheckLines (plan PR-2c, Gorev 3; PR-3b cost rule;
+ * PR-1 day-end inputs): each order line is resolved by barcode inside its store and
+ * carries the cost of a link in force at `at` (attached by then, its profile's version
+ * at `at` not an archive version), its effective desi at `at` (seller override, else
+ * the Trendyol desi; empty when neither exists; 0 is a real desi) and its digital
+ * flag, read in the variant query plus one day-end loader call.
  *
  * Requires: `supabase start` + `pnpm db:test-setup` before running.
  */
@@ -465,6 +465,126 @@ describe('buildCalcCheckLines', () => {
       });
 
       expect(line?.unitCostSnapshotNet).toBe('40');
+    });
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): a past-day line is judged by the seller
+  // inputs in force at its day end T, rebuilt from the history logs; a write stamped
+  // after T does not reach it. Each case also reads today's day end, where the same
+  // write does apply (the open day equals the live row).
+  describe('seller inputs at the end of the order day', () => {
+    function yesterdayDecisionTime(): Date {
+      return getBusinessDayRange(new Date(Date.now() - ONE_DAY_MS)).end;
+    }
+
+    it('a past-day line whose only link was detached after T still has a cost', async () => {
+      const organizationId = await createOrg();
+      const storeId = await createAdditionalStore({ organizationId, name: 'Store A' });
+      const variantId = await createVariant({
+        organizationId,
+        storeId,
+        barcode: 'DETACHED',
+        syncedDimensionalWeight: '1',
+      });
+      await attachCostProfile({
+        organizationId,
+        storeId,
+        productVariantId: variantId,
+        amountGross: '40.00',
+        vatRate: '20',
+      });
+      // Taken before the write, so a run across midnight still detaches after it.
+      const pastAt = yesterdayDecisionTime();
+      // Detached now: the removal is stamped after yesterday's day end.
+      await prisma.productVariantCostProfile.deleteMany({
+        where: { organizationId, productVariantId: variantId },
+      });
+
+      const [pastLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DETACHED' }],
+        at: pastAt,
+      });
+      const [todayLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DETACHED' }],
+        at: todayDecisionTime(),
+      });
+
+      expect(pastLine?.variantId).toBe(variantId);
+      expect(pastLine?.unitCostSnapshotNet).toBe('40');
+      expect(todayLine?.unitCostSnapshotNet).toBeNull();
+    });
+
+    it('a past-day line whose desi was cleared after T still has its desi', async () => {
+      const organizationId = await createOrg();
+      const storeId = await createAdditionalStore({ organizationId, name: 'Store A' });
+      const variantId = await createVariant({
+        organizationId,
+        storeId,
+        barcode: 'DESI-CLEARED',
+        syncedDimensionalWeight: '1.5',
+      });
+      // Taken before the write, so a run across midnight still changes after it.
+      const pastAt = yesterdayDecisionTime();
+      // Cleared now: the change is stamped after yesterday's day end.
+      await prisma.productVariant.update({
+        where: { id: variantId },
+        data: { syncedDimensionalWeight: null },
+      });
+
+      const [pastLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DESI-CLEARED' }],
+        at: pastAt,
+      });
+      const [todayLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DESI-CLEARED' }],
+        at: todayDecisionTime(),
+      });
+
+      expect(pastLine?.unitDesi).toBe('1.5');
+      expect(todayLine?.unitDesi).toBeNull();
+    });
+
+    it('a past-day line whose desi was first entered after T has none', async () => {
+      const organizationId = await createOrg();
+      const storeId = await createAdditionalStore({ organizationId, name: 'Store A' });
+      const variantId = await createVariant({
+        organizationId,
+        storeId,
+        barcode: 'DESI-LATE',
+        syncedDimensionalWeight: null,
+      });
+      // Taken before the write, so a run across midnight still changes after it.
+      const pastAt = yesterdayDecisionTime();
+      // Entered now: the change is stamped after yesterday's day end.
+      await prisma.productVariant.update({
+        where: { id: variantId },
+        data: { dimensionalWeightOverride: '2' },
+      });
+
+      const [pastLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DESI-LATE' }],
+        at: pastAt,
+      });
+      const [todayLine] = await buildCalcCheckLines(prisma, {
+        organizationId,
+        storeId,
+        lines: [{ barcode: 'DESI-LATE' }],
+        at: todayDecisionTime(),
+      });
+
+      expect(pastLine?.variantId).toBe(variantId);
+      expect(pastLine?.unitDesi).toBeNull();
+      expect(todayLine?.unitDesi).toBe('2');
     });
   });
 });

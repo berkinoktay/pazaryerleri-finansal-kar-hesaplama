@@ -20,6 +20,7 @@ import {
   createStore,
 } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+import { clearSellerInputHistory } from '../../helpers/seller-input-history';
 
 // Narrow a buffer row's mappedOrder/rawPayload JSONB so tests can read fields
 // without a type assertion (repo rule: no `as`).
@@ -673,6 +674,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -697,6 +700,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, BARCODE, false);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -718,6 +723,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     // seedVariant(..., true) attaches the cost at now(), after the order's day.
     await seedVariant(org.id, store.id, BARCODE, true);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -763,6 +770,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -809,6 +818,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     await markDigital(store.id, BARCODE);
 
     const outcome = await intakeOrder({
@@ -1666,6 +1677,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     // Cost attached in time for the past day, but the product has no desi.
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, pastOrderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     const platformOrderId = 'graduate-past-desiless';
 
     // 1. Same-day intake: costed but desiless -> buffered (PENDING).

@@ -25,6 +25,7 @@ import {
   createStore,
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import { clearSellerInputHistory } from '../../../../apps/api/tests/helpers/seller-input-history';
 
 const BARCODE = 'EAN13-PROMOTE-001';
 
@@ -49,12 +50,15 @@ function buildMappedOrder(over: {
   /** Order status in the snapshot. Defaults to PROCESSING; CANCELLED exercises the
    * cost-window skip (a cancelled order is never excluded at graduation). */
   status?: string;
+  /** ISO string: the order instant in the snapshot. Defaults to now; a past-day case
+   * that asserts the graduated order's captured inputs passes its entry's day. */
+  orderDate?: string;
 }): Prisma.InputJsonValue {
   const exportFlag = { isExportSale: false };
   const value = {
     platformOrderId: over.platformOrderId,
     platformOrderNumber: over.platformOrderNumber ?? `ord-${over.platformOrderId}`,
-    orderDate: new Date().toISOString(),
+    orderDate: over.orderDate ?? new Date().toISOString(),
     ...(over.lastModifiedDate !== undefined && { lastModifiedDate: over.lastModifiedDate }),
     status: over.status ?? 'PROCESSING',
     // GROSS konvansiyon: saleGross (KDV-dahil) = 100; saleVat = 100×18/118 = 15.25.
@@ -819,6 +823,8 @@ describe('processBufferPromote', () => {
     const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
     await seedTimelyCostedVariant(org.id, store.id, 'EAN13-PROMOTE-PAST-NODESI', orderDate);
     await clearVariantDesi(store.id, 'EAN13-PROMOTE-PAST-NODESI');
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-past-desiless',
       orderDate,
@@ -1222,6 +1228,8 @@ describe('processPastDayBufferFlush', () => {
     // order's day ended (plan PR-2c): the day-end flush stamps the desi reason.
     await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-NODESI', orderDate);
     await clearVariantDesi(store.id, 'EAN13-FLUSH-NODESI');
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-desiless',
       orderDate,
@@ -1240,6 +1248,163 @@ describe('processPastDayBufferFlush', () => {
     expect(order.profitExcludedAt).not.toBeNull();
     expect(order.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
     expect(order.promotedFromBufferAt).not.toBeNull();
+  });
+
+  // The day-close desi switch (plan PR-1) governs only the day-close pass: buffer
+  // graduation keeps stamping a desi that is missing at the order's day end.
+  it('buffer graduation still stamps DESI_DEADLINE_MISSED for a desi missing at T', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-GUARD-NODESI', orderDate);
+    await clearVariantDesi(store.id, 'EAN13-FLUSH-GUARD-NODESI');
+    // Positive control: a twin variant with a desi.
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-GUARD-DESI', orderDate);
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: 'EAN13-FLUSH-GUARD-DESI' },
+      data: { syncedDimensionalWeight: '1' },
+    });
+    // The writes above were fixture setup: each variant had that desi all day.
+    await clearSellerInputHistory(org.id);
+    for (const { platformOrderId, barcode } of [
+      { platformOrderId: 'flush-guard-desiless', barcode: 'EAN13-FLUSH-GUARD-NODESI' },
+      { platformOrderId: 'flush-guard-desi', barcode: 'EAN13-FLUSH-GUARD-DESI' },
+    ]) {
+      await createBufferEntry(org.id, store.id, {
+        platformOrderId,
+        orderDate,
+        status: 'PENDING',
+        mappedOrder: buildMappedOrder({
+          platformOrderId,
+          barcode,
+          orderDate: orderDate.toISOString(),
+        }),
+      });
+    }
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const desiless = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'flush-guard-desiless' },
+    });
+    expect(desiless.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
+    const withDesi = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id, platformOrderId: 'flush-guard-desi' },
+    });
+    expect(withDesi.profitExcludedAt).toBeNull();
+    expect(withDesi.profitExclusionReason).toBeNull();
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): graduation judges the seller inputs in
+  // force at the order's day end, rebuilt from the history logs; a write stamped
+  // after that day end does not reach the order. Dated two days back so the
+  // day-close settle point can never interfere.
+  it('an entry whose cost was detached after its day graduates as a normal order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-DETACHED', orderDate);
+    const versionIds = (
+      await prisma.costProfileVersion.findMany({
+        where: { organizationId: org.id },
+        select: { id: true },
+      })
+    ).map((version) => version.id);
+    // Detached now, after the order's day end.
+    await prisma.productVariantCostProfile.deleteMany({ where: { organizationId: org.id } });
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-detached',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-detached',
+        barcode: 'EAN13-FLUSH-DETACHED',
+        orderDate: orderDate.toISOString(),
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id },
+      include: { items: true },
+    });
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+    // The graduated item is captured with the cost in force at the day end.
+    expect(order.items.map((item) => item.snapshotCostProfileVersionIds)).toEqual([versionIds]);
+  });
+
+  it('an entry whose desi was cleared after its day graduates as a normal order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-DESI-CLEARED', orderDate);
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: 'EAN13-FLUSH-DESI-CLEARED' },
+      data: { syncedDimensionalWeight: '2' },
+    });
+    // Fixture setup: the variant had that synced desi all day.
+    await clearSellerInputHistory(org.id);
+    // Cleared now, after the order's day end.
+    await clearVariantDesi(store.id, 'EAN13-FLUSH-DESI-CLEARED');
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-desi-cleared',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-desi-cleared',
+        barcode: 'EAN13-FLUSH-DESI-CLEARED',
+        orderDate: orderDate.toISOString(),
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({
+      where: { storeId: store.id },
+      include: { items: true },
+    });
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+    // The graduated item is captured with the desi in force at the day end.
+    expect(order.items.map((item) => item.snapshotUnitDesi?.toString())).toEqual(['2']);
+    expect(order.items.map((item) => item.snapshotDesiSource)).toEqual(['SYNCED']);
+  });
+
+  it('an entry whose desi was first entered after its day graduates DESI_DEADLINE_MISSED', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-DESI-LATE', orderDate);
+    await clearVariantDesi(store.id, 'EAN13-FLUSH-DESI-LATE');
+    // Fixture setup: the variant never had a desi during the order's day.
+    await clearSellerInputHistory(org.id);
+    // The seller enters a desi now, after the order's day end.
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: 'EAN13-FLUSH-DESI-LATE' },
+      data: { dimensionalWeightOverride: '3' },
+    });
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'flush-desi-late',
+      orderDate,
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'flush-desi-late',
+        barcode: 'EAN13-FLUSH-DESI-LATE',
+        orderDate: orderDate.toISOString(),
+      }),
+    });
+
+    await processPastDayBufferFlush();
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExcludedAt).not.toBeNull();
+    expect(order.profitExclusionReason).toBe('DESI_DEADLINE_MISSED');
   });
 
   it('graduates an uncosted and desiless buffer entry as COST_DEADLINE_MISSED (cost wins)', async () => {
