@@ -38,6 +38,10 @@ const TENANT_TABLES = [
   'profit_recompute_queue',
   'order_items',
   'orders',
+  // Seller-input history logs (same-day edit window): trigger-written,
+  // serial keys (see the sequence note on `truncateAll`).
+  'cost_link_removals',
+  'variant_desi_changes',
   'product_variant_cost_profiles',
   'product_variants',
   'products',
@@ -74,9 +78,11 @@ const TENANT_TABLES = [
  * non-empty set — harmless: they are all in `TENANT_TABLES` anyway, and a child
  * cannot hold rows while its parent is empty, so nothing is left behind.
  *
- * Skipping a table's TRUNCATE never leaves a sequence un-reset, because every
- * PK in these tables is a UUID — the schema has no autoincrement/serial columns
- * for `RESTART IDENTITY` to touch.
+ * Sequences: two tables have serial keys (`cost_link_removals.id` and
+ * `variant_desi_changes.seq`); every other PK is a UUID. A table that is empty
+ * at probe time is skipped, so its sequence is NOT restarted, and a sequence
+ * also advances on a rolled-back insert. Tests must therefore never assert an
+ * absolute serial value, only the relative order of the values they wrote.
  *
  * Does NOT touch `auth.users` OR `user_profiles` (see `TENANT_TABLES`).
  */
