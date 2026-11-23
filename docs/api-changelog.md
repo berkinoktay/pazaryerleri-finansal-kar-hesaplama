@@ -2258,6 +2258,9 @@ supplierId, apiKey, apiSecret } }`. Credentials are probed against
 
 ### Fixed
 
+- **Today's products keep an order line without a variant**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`). Such a line is
+  shown by its barcode, resolved like a buffer line, instead of being dropped. Wire shape unchanged.
 - **Products list `brandId` and `categoryId` pattern in the spec**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/products`). The `pattern` of the `brandId` and
   `categoryId` query parameters is `^\d+$`, where it used to read `^d+$`, which their own examples

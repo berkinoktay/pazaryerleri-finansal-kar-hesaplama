@@ -14,6 +14,7 @@ import {
   createProfitLine,
   createProfitStatement,
   createStore,
+  type CreateOrderOverrides,
 } from '../../../helpers/factories';
 
 /** A real instant `hours` into today's business day (well inside the window). */
@@ -110,6 +111,40 @@ async function sellInOrders(
       },
     });
   }
+}
+
+/**
+ * Create one of today's orders with a single line that carries its own barcode, with or
+ * without a variant link. Returns the order item id.
+ */
+async function sellLine(
+  orgId: string,
+  storeId: string,
+  opts: {
+    productVariantId: string | null;
+    barcode: string | null;
+    quantity: number;
+    // LINE total (already x quantity).
+    lineSaleGross: string;
+    status?: CreateOrderOverrides['status'];
+  },
+): Promise<string> {
+  const order = await createOrder(orgId, storeId, {
+    orderDate: todayAt(10),
+    saleGross: opts.lineSaleGross,
+    status: opts.status,
+  });
+  const item = await prisma.orderItem.create({
+    data: {
+      orderId: order.id,
+      organizationId: orgId,
+      productVariantId: opts.productVariantId,
+      barcode: opts.barcode,
+      quantity: opts.quantity,
+      lineSaleGross: opts.lineSaleGross,
+    },
+  });
+  return item.id;
 }
 
 describe('GET /v1/.../live-performance/today-products', () => {
@@ -916,5 +951,257 @@ describe('GET /v1/.../live-performance/today-products', () => {
     const row = body.data[0];
     expect(row?.variantId).toBe(variantId);
     expect(row?.unitCost).toBe('0.00');
+  });
+
+  it('keeps a today order line whose variant was deleted, as an unresolved barcode row', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Deleted Variant',
+      barcode: 'BC-DELETED',
+      seq: 30,
+    });
+    await sellLine(org.id, store.id, {
+      productVariantId: variantId,
+      barcode: 'BC-DELETED',
+      quantity: 2,
+      lineSaleGross: '80.00',
+    });
+    // The item's variant FK is ON DELETE SET NULL: the line stays, variantless.
+    await prisma.productVariant.delete({ where: { id: variantId } });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: null,
+      barcode: 'BC-DELETED',
+      stockCode: null,
+      productName: null,
+      thumbUrl: null,
+      orderCount: 1,
+      unitsSold: 2,
+      revenue: '80.00',
+      costStatus: 'missing',
+      unitCost: null,
+      unresolved: true,
+      vendorMissing: false,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it('keeps a today order line born without a variant', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    await sellLine(org.id, store.id, {
+      productVariantId: null,
+      barcode: 'BC-BORN-ORPHAN',
+      quantity: 1,
+      lineSaleGross: '35.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: null,
+      barcode: 'BC-BORN-ORPHAN',
+      orderCount: 1,
+      unitsSold: 1,
+      revenue: '35.00',
+      costStatus: 'missing',
+      unresolved: true,
+      vendorMissing: false,
+    });
+  });
+
+  it('resolves a variantless line by barcode to the current catalog variant and merges it with the buffer sale', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    // The catalog variant now carrying the barcode (e.g. re-created after a delete).
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Recreated Variant',
+      barcode: 'BC-RECREATED',
+      seq: 31,
+    });
+    await sellLine(org.id, store.id, {
+      productVariantId: null,
+      barcode: 'BC-RECREATED',
+      quantity: 2,
+      lineSaleGross: '80.00',
+    });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '50.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'BC-RECREATED', quantity: 1, lineSaleGross: '50.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId,
+      barcode: 'BC-RECREATED',
+      stockCode: 'SC-31',
+      productName: 'Recreated Variant',
+      orderCount: 2, // 1 order + 1 buffer entry
+      unitsSold: 3, // 2 + 1
+      revenue: '130.00', // 80 + 50
+      unresolved: false,
+      vendorMissing: false,
+    });
+  });
+
+  it('merges a variantless order line and a buffer line of the same unknown barcode, with vendorMissing from CatalogBarcodeMiss', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    await sellLine(org.id, store.id, {
+      productVariantId: null,
+      barcode: 'GAP-ORPHAN',
+      quantity: 1,
+      lineSaleGross: '40.00',
+    });
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '90.00',
+        orderDate: todayAt(11).toISOString(),
+        lines: [{ barcode: 'GAP-ORPHAN', quantity: 2, lineSaleGross: '90.00' }],
+      },
+    });
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: org.id,
+        storeId: store.id,
+        barcode: 'GAP-ORPHAN',
+        vendorMissing: true,
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: null,
+      barcode: 'GAP-ORPHAN',
+      orderCount: 2, // 1 order + 1 buffer entry
+      unitsSold: 3, // 1 + 2
+      revenue: '130.00', // 40 + 90
+      costStatus: 'missing',
+      unresolved: true,
+      vendorMissing: true,
+    });
+  });
+
+  it("does not resolve an orphan line through another organization's variant with the same barcode", async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    const orgB = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA = await createStore(orgA.id);
+
+    // A variant row in store A stamped with organization B (the schema allows the
+    // pair): only the lookup's organizationId filter keeps it out, not storeId.
+    await createVariant(orgB.id, storeA.id, {
+      title: 'Other Org Variant',
+      barcode: 'BC-CROSS-ORG',
+      seq: 32,
+    });
+    await sellLine(orgA.id, storeA.id, {
+      productVariantId: null,
+      barcode: 'BC-CROSS-ORG',
+      quantity: 1,
+      lineSaleGross: '25.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      variantId: null,
+      barcode: 'BC-CROSS-ORG',
+      stockCode: null,
+      productName: null,
+      thumbUrl: null,
+      unitsSold: 1,
+      unresolved: true,
+    });
+  });
+
+  it("a cancelled order's orphan line is absent", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    await sellLine(org.id, store.id, {
+      productVariantId: null,
+      barcode: 'BC-ORPHAN-CANCEL',
+      quantity: 5,
+      lineSaleGross: '500.00',
+      status: 'CANCELLED',
+    });
+    // A live orphan line of the same barcode, so the assertion is not met by an empty list.
+    await sellLine(org.id, store.id, {
+      productVariantId: null,
+      barcode: 'BC-ORPHAN-CANCEL',
+      quantity: 1,
+      lineSaleGross: '20.00',
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: TodayProductsBody = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0]).toMatchObject({
+      barcode: 'BC-ORPHAN-CANCEL',
+      orderCount: 1,
+      unitsSold: 1,
+      revenue: '20.00',
+    });
   });
 });
