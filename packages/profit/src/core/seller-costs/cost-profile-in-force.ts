@@ -3,19 +3,17 @@ import { getBusinessDayRange } from '@pazarsync/utils';
 import { latestVersionAt } from './cost-version-order';
 
 /**
- * The one cost rule (plan PR-3b): which seller cost links count for an order and
- * which version prices them. Owner rule (Berkin 2026-11-23): an archived or detached
- * cost profile is ignored by every later order; what counts is the state in force
- * when the order's profit is decided.
+ * The one cost rule (plan PR-3b, same-day edit window D2): which seller cost links
+ * count for an order and which version prices them. Owner rule (Berkin 2026-11-23):
+ * an order's cost is the one in force at the end of its Istanbul business day; a
+ * change during the day reaches all of that day's orders.
  *
- * Two instants:
- *   - `at`, the decision time: the end of the order's Istanbul business day
- *     (`costDecisionTime`). While the day is open no link or version can be stamped
- *     after it, so for today's order this is the current state; for a past day it is
- *     that day's end. The app clock is never compared with database stamps.
- *   - `orderDate`, the order instant: the price is the version in force at the order
- *     time (Berkin 2026-11-23: the amount at the order time), unless none was in
- *     force then or it was an archive version; then the version in force at `at`.
+ * One instant, `at`, the decision time: the end of the order's Istanbul business day
+ * (`costDecisionTime`). A link counts when it is in force at `at`, and it is priced
+ * by its version in force at `at`; the order instant plays no part. While the day is
+ * open no link or version can be stamped after it, so for today's order this is the
+ * current state; for a past day it is that day's end. The app clock is never
+ * compared with database stamps.
  *
  * The version in force at an instant is the one with the highest version number
  * among those effective by then (`latestVersionAt`, amendment A11): the number, not
@@ -55,13 +53,10 @@ export function isCostLinkInForce(link: LinkedCostProfile<CostVersionState>, at:
   return current !== null && current.archivedAt === null;
 }
 
-/** null when not in force; else the order-time version when it existed and was not archived, otherwise the version in force at `at`. */
+/** null when the link is not in force at `at`; else its version in force at `at`. */
 export function chooseOrderCostVersion<V extends CostVersionState>(
   link: LinkedCostProfile<V>,
-  params: { readonly orderDate: Date; readonly at: Date },
+  params: { readonly at: Date },
 ): V | null {
-  if (!isCostLinkInForce(link, params.at)) return null;
-  const atOrderTime = latestVersionAt(link.versions, params.orderDate);
-  if (atOrderTime !== null && atOrderTime.archivedAt === null) return atOrderTime;
-  return latestVersionAt(link.versions, params.at);
+  return isCostLinkInForce(link, params.at) ? latestVersionAt(link.versions, params.at) : null;
 }

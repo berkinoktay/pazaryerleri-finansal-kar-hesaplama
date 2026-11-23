@@ -658,8 +658,8 @@ describe('captureOrderProfitSnapshot', () => {
       });
     }
     // Item A also gets a cost whose only version starts after the order instant but
-    // before the day ended: no version existed at the order time, so the version in
-    // force at the day end is pinned, as the engine would price it.
+    // before the day ended: it is the version in force at the day end, so it is
+    // pinned, as the engine would price it.
     const startsAfterOrderId = randomUUID();
     await attachCostProfileVersions(
       parcel,
@@ -847,8 +847,8 @@ describe('captureOrderProfitSnapshot', () => {
     await setOrderDate(parcel, today(2));
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived before the order and restored after it, both today: the version at the
-    // order instant is the archive version, so the restore version prices the order.
+    // Archived before the order and restored after it, both today: the restore version
+    // is the one in force at the day end, so it prices the order.
     const restoredId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
@@ -867,14 +867,14 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
   });
 
-  it('a version created after the order and pinned at capture is not replaced by the first version on the next same-day capture', async () => {
+  it('the day-end version pinned at capture is not replaced by the first version on the next same-day capture', async () => {
     const parcel = await seedSnapshotParcel();
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Created after the order instant (100) and edited to 120, both today: no version
-    // existed at the order time, so the version in force at capture prices it.
+    // Created after the order instant (100) and edited to 120, both today: the 120
+    // version is the one in force at the day end, so it prices the order.
     const firstId = randomUUID();
     const inForceId = randomUUID();
     await attachCostProfileVersions(
@@ -1117,10 +1117,10 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
   });
 
-  it('pins the cost version in force at the order date, not the latest', async () => {
+  it("pins the cost version in force at the order's day end, not the latest", async () => {
     const parcel = await seedSnapshotParcel();
     // The melontik COGS profile has a single version, effective (and linked) since
-    // COST_FIXTURE_EPOCH: it is the version at the order date.
+    // COST_FIXTURE_EPOCH: it is the version at the order's day end.
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
     const cogsVersions = await prisma.costProfileVersion.findMany({
@@ -1295,36 +1295,38 @@ describe('captureOrderProfitSnapshot', () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived before the order, restored later the same day: the version at the order
-    // instant is an archive version, so the restore version prices it.
+    // Archived before the order, restored later the same day: the restore version is
+    // the one in force at the day end, so it prices the order.
     const restoredId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
       { id: restoredId, effectiveFrom: laterOnOrderDay(1), archived: false },
     ]);
-    // Archived after the order and restored before the day end: the version at the
-    // order instant was live, so it prices the order.
+    // Live at the order instant, archived after it and restored before the day end:
+    // the restore version prices the order, not the one live at the order instant.
     const liveAtOrderId = randomUUID();
+    const restoredAfterOrderId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: liveAtOrderId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: laterOnOrderDay(1), archived: true },
-      { id: randomUUID(), effectiveFrom: laterOnOrderDay(2), archived: false },
+      { id: restoredAfterOrderId, effectiveFrom: laterOnOrderDay(2), archived: false },
     ]);
 
     await capture(parcel);
 
     const itemA = await readItemSnapshot(parcel.itemA);
     expect(itemA.snapshotCostProfileVersionIds).toEqual(
-      sorted([...cogsVersionIds, restoredId, liveAtOrderId]),
+      sorted([...cogsVersionIds, restoredId, restoredAfterOrderId]),
     );
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(liveAtOrderId);
   });
 
-  it('the order-time version is pinned even when the amount was edited before capture', async () => {
+  it('the day-end version is pinned when the amount was edited later the same day', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
-    // 100 at the order instant; the seller edits it to 120 later the same day, before
-    // the order enters profit (Berkin 2026-11-23: the amount at the order time).
+    // 100 at the order instant; the seller edits it to 120 later the same day (Berkin
+    // 2026-11-23: the cost in force at the end of the order's business day).
     const orderTimeId = randomUUID();
     const editedId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
@@ -1340,16 +1342,16 @@ describe('captureOrderProfitSnapshot', () => {
     await capture(parcel);
 
     const itemA = await readItemSnapshot(parcel.itemA);
-    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, orderTimeId]));
-    expect(itemA.snapshotCostProfileVersionIds).not.toContain(editedId);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, editedId]));
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(orderTimeId);
   });
 
-  it('with no version at the order time the version in force at capture is pinned', async () => {
+  it('a profile created after the order instant is pinned with its version in force at the day end', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     // The profile is created after the order instant (100) and edited to 120 before
-    // the day end: no version existed at the order time, so the version in force at
-    // the decision time prices it, not the first one.
+    // the day end: the version in force at the decision time prices it, not the first
+    // one.
     const firstId = randomUUID();
     const inForceId = randomUUID();
     await attachCostProfileVersions(

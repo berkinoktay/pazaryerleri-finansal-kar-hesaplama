@@ -52,7 +52,24 @@ const BASE = makeVersion({
 });
 
 function choose(link: LinkedCostProfile<TestVersion>): string | null {
-  return chooseOrderCostVersion(link, { orderDate: ORDER_DATE, at: AT })?.label ?? null;
+  return chooseOrderCostVersion(link, { at: AT })?.label ?? null;
+}
+
+const ONE_HOUR_MS = 60 * ONE_MINUTE_MS;
+
+// Relative cases: the end of today's business day, from one clock read.
+const TODAY_AT = costDecisionTime(new Date());
+
+/** An instant `hours` before TODAY_AT. */
+function hoursBeforeTodayAt(hours: number): Date {
+  return new Date(TODAY_AT.getTime() - hours * ONE_HOUR_MS);
+}
+
+/** A relative-case order placed six hours before its day end: it no longer picks the price. */
+const TODAY_ORDER_DATE = hoursBeforeTodayAt(6);
+
+function chooseToday(link: LinkedCostProfile<TestVersion>): string | null {
+  return chooseOrderCostVersion(link, { at: TODAY_AT })?.label ?? null;
 }
 
 describe('costDecisionTime', () => {
@@ -157,25 +174,33 @@ describe('isCostLinkInForce and chooseOrderCostVersion', () => {
     expect(choose(link)).toBeNull();
   });
 
-  it('archived then restored before `at` is in force: priced at the order time when that version was active, else by the restore', () => {
-    // Archived and restored after the order: the order-time version is the base.
-    const archivedAfterOrder = makeVersion({
+  it('active at the order time, archived after the order, restored before at: priced by the restore version', () => {
+    const active = makeVersion({
+      label: 'active',
+      effectiveFrom: hoursBeforeTodayAt(10).toISOString(),
+      versionNumber: 1,
+    });
+    const archive = makeVersion({
       label: 'archive',
-      effectiveFrom: '2026-11-20T08:00:00Z',
+      effectiveFrom: hoursBeforeTodayAt(4).toISOString(),
       versionNumber: 2,
       archived: true,
     });
-    const restoredAfterOrder = makeVersion({
+    const restore = makeVersion({
       label: 'restore',
-      effectiveFrom: '2026-11-20T09:00:00Z',
+      effectiveFrom: hoursBeforeTodayAt(2).toISOString(),
       versionNumber: 3,
     });
-    const afterOrderLink = makeLink(LONG_AGO, [BASE, archivedAfterOrder, restoredAfterOrder]);
-    expect(isCostLinkInForce(afterOrderLink, AT)).toBe(true);
-    expect(choose(afterOrderLink)).toBe('base');
+    const link = makeLink(LONG_AGO, [active, archive, restore]);
 
-    // Archived the day before and restored after the order: the order-time version is
-    // the archive version, so the restore prices it.
+    // The order falls between the active version and the archive.
+    expect(TODAY_ORDER_DATE.getTime()).toBeGreaterThan(active.effectiveFrom.getTime());
+    expect(TODAY_ORDER_DATE.getTime()).toBeLessThan(archive.effectiveFrom.getTime());
+    expect(isCostLinkInForce(link, TODAY_AT)).toBe(true);
+    expect(chooseToday(link)).toBe('restore');
+  });
+
+  it('archived the day before and restored before `at`: in force, priced by the restore', () => {
     const archivedBefore = makeVersion({
       label: 'archive',
       effectiveFrom: '2026-11-19T10:00:00Z',
@@ -227,21 +252,70 @@ describe('isCostLinkInForce and chooseOrderCostVersion', () => {
     expect(choose(link)).toBe('edit');
   });
 
-  it('a profile that existed at the order time with 100 and was edited to 120 before `at` is priced at 100', () => {
+  it('a profile priced 100 at the order time and edited to 120 before at is priced 120', () => {
     const at100 = makeVersion({
       label: '100',
-      effectiveFrom: '2026-01-01T00:00:00Z',
+      effectiveFrom: hoursBeforeTodayAt(10).toISOString(),
       versionNumber: 1,
     });
     const at120 = makeVersion({
       label: '120',
-      effectiveFrom: '2026-11-20T09:00:00Z',
+      effectiveFrom: hoursBeforeTodayAt(2).toISOString(),
       versionNumber: 2,
     });
     const link = makeLink(LONG_AGO, [at120, at100]);
 
-    expect(isCostLinkInForce(link, AT)).toBe(true);
-    expect(choose(link)).toBe('100');
+    // 100 was the amount in force when the order was placed.
+    expect(TODAY_ORDER_DATE.getTime()).toBeGreaterThan(at100.effectiveFrom.getTime());
+    expect(TODAY_ORDER_DATE.getTime()).toBeLessThan(at120.effectiveFrom.getTime());
+    expect(isCostLinkInForce(link, TODAY_AT)).toBe(true);
+    expect(chooseToday(link)).toBe('120');
+  });
+
+  it('a version effective after at is ignored', () => {
+    const first = makeVersion({
+      label: 'first',
+      effectiveFrom: hoursBeforeTodayAt(2).toISOString(),
+      versionNumber: 1,
+    });
+    const afterAt = makeVersion({
+      label: 'after-at',
+      effectiveFrom: new Date(TODAY_AT.getTime() + ONE_MS).toISOString(),
+      versionNumber: 2,
+    });
+    expect(chooseToday(makeLink(LONG_AGO, [first, afterAt]))).toBe('first');
+
+    // Positive control: the same version effective exactly at `at` is chosen.
+    const exactlyAtAt = makeVersion({
+      label: 'exactly-at',
+      effectiveFrom: TODAY_AT.toISOString(),
+      versionNumber: 2,
+    });
+    expect(chooseToday(makeLink(LONG_AGO, [first, exactlyAtAt]))).toBe('exactly-at');
+  });
+
+  it('archived at at -> null', () => {
+    const live = makeVersion({
+      label: 'live',
+      effectiveFrom: hoursBeforeTodayAt(10).toISOString(),
+      versionNumber: 1,
+    });
+    const archivedAtAt = makeVersion({
+      label: 'archive',
+      effectiveFrom: TODAY_AT.toISOString(),
+      versionNumber: 2,
+      archived: true,
+    });
+    expect(chooseToday(makeLink(LONG_AGO, [live, archivedAtAt]))).toBeNull();
+
+    // Positive control: archived one millisecond after `at`, the live version is chosen.
+    const archivedAfterAt = makeVersion({
+      label: 'archive',
+      effectiveFrom: new Date(TODAY_AT.getTime() + ONE_MS).toISOString(),
+      versionNumber: 2,
+      archived: true,
+    });
+    expect(chooseToday(makeLink(LONG_AGO, [live, archivedAfterAt]))).toBe('live');
   });
 
   it('a profile archived after `at` is in force', () => {

@@ -586,7 +586,7 @@ async function loadItemCosts(
     if (item.productVariantId === null) continue;
     const profiles: ItemCostProfileInput[] = [];
     for (const profile of profilesByVariant.get(item.productVariantId) ?? []) {
-      const version = chooseOrderCostVersion(profile, { orderDate, at });
+      const version = chooseOrderCostVersion(profile, { at });
       if (version === null) continue;
       // The same linked profile (id, type, link instant), priced by the chosen version only.
       profiles.push({ ...profile, versions: [version] });

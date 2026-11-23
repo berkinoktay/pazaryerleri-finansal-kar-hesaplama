@@ -17,8 +17,8 @@
 // the order's business day is still open, so a same-day attach, detach, archive or
 // restore never reaches it. A capture and the fill of an empty cost list pin versions
 // by the shared cost rule (`chooseOrderCostVersion`): only links in force at the end
-// of the order's business day count, each priced by its version at the order time, so
-// a cost linked (or restored) after that day never fills an empty list.
+// of the order's business day count, each priced by its version in force then, so a
+// cost linked (or restored) after that day never fills an empty list.
 //
 // Dated shared values (tariff versions, fee definitions, micro-export tiers) are not
 // copied; the engine keeps reading them by the order date.
@@ -277,11 +277,11 @@ async function captureItems(
   for (const item of captureList) {
     writes.push({
       id: item.id,
-      data: itemCaptureData(item, { rules, costsByVariant, orderDate, at, now }),
+      data: itemCaptureData(item, { rules, costsByVariant, at, now }),
     });
   }
   for (const item of fillList) {
-    const data = itemFillData(item, { rules, costsByVariant, orderDate, at });
+    const data = itemFillData(item, { rules, costsByVariant, at });
     if (data !== null) {
       writes.push({ id: item.id, data });
     }
@@ -310,7 +310,6 @@ function itemFillData(
   reference: {
     readonly rules: TrendyolCommissionRules;
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
     readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput | null {
@@ -335,7 +334,6 @@ function costListFillData(
   variantId: string,
   reference: {
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
     readonly at: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
@@ -343,7 +341,6 @@ function costListFillData(
     return {};
   }
   const pinned = pinnedCostVersionIds(reference.costsByVariant.get(variantId), {
-    orderDate: reference.orderDate,
     at: reference.at,
   });
   return pinned.length === 0 ? {} : { snapshotCostProfileVersionIds: pinned };
@@ -431,12 +428,11 @@ function itemCaptureData(
   reference: {
     readonly rules: TrendyolCommissionRules;
     readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
     readonly at: Date;
     readonly now: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
-  const { rules, costsByVariant, orderDate, at, now } = reference;
+  const { rules, costsByVariant, at, now } = reference;
   const variant = item.productVariant;
   if (variant === null) {
     return {
@@ -465,25 +461,22 @@ function itemCaptureData(
     snapshotSyncedCommissionRatePct: variant.syncedCommissionRate,
     snapshotCategoryRatePct: rates.categoryRatePct,
     snapshotCategoryBrandRatePct: rates.categoryBrandRatePct,
-    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), {
-      orderDate,
-      at,
-    }),
+    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), { at }),
     profitSnapshotAt: now,
   };
 }
 
 /**
  * The ids of the cost profile versions the item is priced with, by the shared cost
- * rule: per linked profile, the version `chooseOrderCostVersion` picks (the version
- * at the order time, else the one in force at `at`). A profile not in force at `at`
- * (linked after it, archived by it, or without versions) contributes nothing, as in
- * the engine's uncaptured-item path. Sorted ascending: the link query has no order,
- * and a stored list must not depend on it.
+ * rule: per linked profile, the version `chooseOrderCostVersion` picks (the one in
+ * force at `at`). A profile not in force at `at` (linked after it, archived by it, or
+ * without versions) contributes nothing, as in the engine's uncaptured-item path.
+ * Sorted ascending: the link query has no order, and a stored list must not depend
+ * on it.
  */
 function pinnedCostVersionIds(
   profiles: readonly IdentifiedItemCostProfileInput[] | undefined,
-  params: { readonly orderDate: Date; readonly at: Date },
+  params: { readonly at: Date },
 ): string[] {
   const ids: string[] = [];
   for (const profile of profiles ?? []) {
