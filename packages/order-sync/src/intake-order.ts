@@ -80,6 +80,7 @@ import type { MappedOrder } from '@pazarsync/marketplace';
 import {
   buildCalcCheckLines,
   costDecisionTime,
+  findFirstVariantByBarcode,
   resolveOrderCalculability,
 } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
@@ -237,12 +238,12 @@ export async function intakeOrder(args: {
         for (const row of bufferRows) {
           if (!isOrderOnBusinessToday(row.orderDate)) continue;
           for (const line of parseBufferResolvableLines(row.mappedOrder)) {
-            const variant = await tx.productVariant.findFirst({
-              where: { storeId, barcode: line.barcode },
-              // Lowest variant id for a barcode shared by two variants: the same choice
-              // as buildCalcCheckLines, so the gate and the stored order item name one variant.
-              orderBy: { id: 'asc' },
-              select: { id: true, productId: true },
+            // The same variant the buffered decrement chose (findFirstVariantByBarcode,
+            // organization + store scoped), so the restock undoes exactly that move.
+            const variant = await findFirstVariantByBarcode(tx, {
+              organizationId,
+              storeId,
+              barcode: line.barcode,
             });
             if (variant === null) continue;
             await incrementVariantStock(tx, variant.id, line.quantity);
@@ -383,7 +384,7 @@ export async function intakeOrder(args: {
       // upsertOrderWithSnapshot is called with promotedFromBuffer=true and skips its
       // own decrement, so the units drop exactly once across the buffer→orders life.
       if (isOrderOnBusinessToday(mapped.orderDate) && mapped.status !== 'CANCELLED') {
-        await decrementBufferedOrderStock(tx, storeId, mapped.lines);
+        await decrementBufferedOrderStock(tx, { organizationId, storeId }, mapped.lines);
       }
     });
     return { kind: 'buffered' };
@@ -451,31 +452,29 @@ async function persistWithBufferGraduation(
 /**
  * Decrement local variant stock for a buffered order's resolved lines, in the
  * SAME transaction as the buffer insert. Mirrors the first-insert decrement in
- * upsert-order.ts: variant lookup by (storeId, barcode), subtract the sold
- * quantity, then recompute the owning products' denormalized totalStock. Only
- * lines whose barcode resolves to a variant move stock — an unmatched line
- * carries none. The business-today / non-CANCELLED gates are order-level, applied
- * by the caller.
+ * upsert-order.ts: variant lookup by (organizationId, storeId, barcode) through
+ * `findFirstVariantByBarcode`, subtract the sold quantity, then recompute the owning
+ * products' denormalized totalStock. Only lines whose barcode resolves to a variant
+ * of the organization's store move stock — an unmatched line carries none. The
+ * business-today / non-CANCELLED gates are order-level, applied by the caller.
  */
 async function decrementBufferedOrderStock(
   tx: Prisma.TransactionClient,
-  storeId: string,
+  scope: { organizationId: string; storeId: string },
   lines: MappedOrder['lines'],
 ): Promise<void> {
   const affectedProductIds = new Set<string>();
   for (const line of lines) {
-    const variant = await tx.productVariant.findFirst({
-      where: { storeId, barcode: line.barcode },
-      // Lowest variant id for a barcode shared by two variants: the same choice
-      // as buildCalcCheckLines, so the gate and the stored order item name one variant.
-      orderBy: { id: 'asc' },
-      select: { id: true, productId: true },
+    const variant = await findFirstVariantByBarcode(tx, {
+      organizationId: scope.organizationId,
+      storeId: scope.storeId,
+      barcode: line.barcode,
     });
     if (variant === null) continue;
     await decrementVariantStock(tx, variant.id, line.quantity);
     affectedProductIds.add(variant.productId);
   }
-  await refreshProductAggregates(tx, storeId, [...affectedProductIds]);
+  await refreshProductAggregates(tx, scope.storeId, [...affectedProductIds]);
 }
 
 /**
@@ -495,16 +494,24 @@ async function decrementBufferedOrderStock(
  * on this path); the status predicate only guards the PROMOTING flip. Any stale
  * snapshot that wins the race is corrected by the order-row out-of-order guard
  * once the entry is promoted.
+ *
+ * Tenant-scoped: the read and the write filter organizationId + storeId, so a
+ * delivery whose store id belongs to another organization never rewrites that
+ * organization's buffer row (it is reported as a plain dedupe).
  */
 async function refreshBufferSnapshot(args: {
+  organizationId: string;
   storeId: string;
   mapped: MappedOrder;
   rawPayload?: Prisma.InputJsonValue;
 }): Promise<OrderIntakeOutcome> {
-  const { storeId, mapped } = args;
+  const { organizationId, storeId, mapped } = args;
 
   const existing = await prisma.livePerformanceBuffer.findUnique({
-    where: { storeId_platformOrderId: { storeId, platformOrderId: mapped.platformOrderId } },
+    where: {
+      storeId_platformOrderId: { storeId, platformOrderId: mapped.platformOrderId },
+      organizationId,
+    },
     select: { id: true, status: true, mappedOrder: true },
   });
 
@@ -532,7 +539,7 @@ async function refreshBufferSnapshot(args: {
   // orderDate + status are intentionally left untouched — only the mapped/raw
   // snapshot is replaced. Status-guarded so a concurrent flip to PROMOTING wins.
   const updated = await prisma.livePerformanceBuffer.updateMany({
-    where: { id: existing.id, status: 'PENDING' },
+    where: { id: existing.id, organizationId, storeId, status: 'PENDING' },
     data: {
       mappedOrder: mapped as unknown as Prisma.InputJsonValue,
       rawPayload: args.rawPayload ?? (mapped as unknown as Prisma.InputJsonValue),

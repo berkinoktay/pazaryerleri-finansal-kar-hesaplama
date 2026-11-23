@@ -452,12 +452,13 @@ describe('hadCostWithinOrderDay', () => {
     const store = await createStore(org.id);
     const variantId = await createVariant(org.id, store.id, 'EAN13-CW-FOREIGN');
 
-    // Two foreign rows that are fully in force (attached and effective long before
+    // Three foreign rows that are fully in force (attached and effective long before
     // the order, never archived) and point at THIS order's variant id, built directly
-    // (the attach service would reject both): a link of another organization, and a
-    // link stamped with this organization but pointing at the other organization's
-    // profile. The tenant filters (link and profile organization) are the only reason
-    // neither may count.
+    // (the attach service would reject them): a link of another organization, a link
+    // stamped with this organization but pointing at the other organization's profile,
+    // and a link stamped with the other organization whose profile is this
+    // organization's. The tenant filters (link and profile organization) are the only
+    // reason none may count; the last one is dropped by the link filter alone.
     const otherOrg = await createOrganization();
     const otherStore = await createStore(otherOrg.id);
     const otherProfile = await createCostProfile(otherOrg.id, {
@@ -484,6 +485,18 @@ describe('hadCostWithinOrderDay', () => {
         attachedAt: COST_FIXTURE_EPOCH,
       },
     });
+    const ownProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: otherOrg.id,
+        productVariantId: variantId,
+        profileId: ownProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
 
     const result = await hadCostWithinOrderDay(prisma, {
       organizationId: org.id,
@@ -492,6 +505,36 @@ describe('hadCostWithinOrderDay', () => {
       items: [{ productVariantId: variantId, isCancelled: false }],
     });
     expect(result).toBe(false);
+
+    // A variant row in THIS store stamped with the other organization (the database
+    // allows it), carrying a link and a profile of this organization: only the
+    // variant's organization filter drops it. Its own single-item call, because the
+    // check needs every item covered and a second item would mask the result.
+    const foreignStampedVariantId = await createVariant(
+      otherOrg.id,
+      store.id,
+      'EAN13-CW-FOREIGN-STAMP',
+    );
+    const stampedProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: org.id,
+        productVariantId: foreignStampedVariantId,
+        profileId: stampedProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+
+    const stampedResult = await hadCostWithinOrderDay(prisma, {
+      organizationId: org.id,
+      storeId: store.id,
+      orderDate: ORDER_DATE,
+      items: [{ productVariantId: foreignStampedVariantId, isCancelled: false }],
+    });
+    expect(stampedResult).toBe(false);
   });
 });
 

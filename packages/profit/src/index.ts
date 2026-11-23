@@ -12,6 +12,7 @@ export {
   type OrderLineForCalcCheck,
 } from './resolve-order-calculability';
 export { buildCalcCheckLines } from './build-calc-check-lines';
+export { findFirstVariantByBarcode } from './find-first-variant-by-barcode';
 export {
   resolveTariffForDesi,
   type EstimateOutcome,

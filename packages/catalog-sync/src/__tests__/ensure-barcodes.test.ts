@@ -18,9 +18,9 @@ import type {
 import { ensureBarcodesInCatalog } from '../ensure-barcodes';
 
 // ─── Mock'lar (modül sınırı) ─────────────────────────────────────────────
-const findMany = vi.fn<() => Promise<{ barcode: string }[]>>();
+const findMany = vi.fn<(args: unknown) => Promise<{ barcode: string }[]>>();
 vi.mock('@pazarsync/db', () => ({
-  prisma: { productVariant: { findMany: () => findMany() } },
+  prisma: { productVariant: { findMany: (args: unknown) => findMany(args) } },
 }));
 
 // Gerçek paket sabitiyle aynı değer — vi.mock fabrikası hoist edildiği için
@@ -263,5 +263,17 @@ describe('ensureBarcodesInCatalog — vendorMissing vs retriable sınıflandırm
 
     expect(result).toEqual({ resolved: ['B1', 'B2'], vendorMissing: [], retriable: [] });
     expect(fetchProductsByBarcodes).not.toHaveBeenCalled();
+  });
+
+  it("local probe is scoped to the store's organization and the store", async () => {
+    const store: Store = { ...STORE, organizationId: 'org-1' };
+    queueProbe('B1');
+
+    await ensureBarcodesInCatalog(store, ['B1']);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-1', storeId: 'store-1', barcode: { in: ['B1'] } },
+      select: { barcode: true },
+    });
   });
 });

@@ -50,11 +50,18 @@ export async function ensureBarcodesInCatalog(
   const distinct = [...new Set(barcodes.filter((b) => b.length > 0))];
   if (distinct.length === 0) return { resolved: [], vendorMissing: [], retriable: [] };
 
+  // Tenant-scoped like the order-line resolvers (findFirstVariantByBarcode): a
+  // variant row of this store stamped with another organization is not "known",
+  // otherwise the barcode would be reported resolved and never link.
   const localProbe = async (): Promise<Set<string>> =>
     new Set(
       (
         await prisma.productVariant.findMany({
-          where: { storeId: store.id, barcode: { in: distinct } },
+          where: {
+            organizationId: store.organizationId,
+            storeId: store.id,
+            barcode: { in: distinct },
+          },
           select: { barcode: true },
         })
       ).map((v) => v.barcode),

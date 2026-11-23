@@ -4,13 +4,14 @@
 // API çağrısıyla bağlar; (2) hâlâ eşleşmeyenler için mağaza-başına TEKİL
 // barkodlarla hedefli vendor sorgusu → mevcut products upsert hattı; (3) tekrar
 // eşle + bağla; (4) kalanlara attempts++ ve üstel backoff. Eşleştirme semantiği
-// intake ile birebir: (storeId, barcode) first-match (build-calc-check-lines).
+// intake ile birebir: (organizationId, storeId, barcode) first-match
+// (findFirstVariantByBarcode).
 // Tick crash-safe: çağıran (index.ts) catch'ler; burada mağaza-başına izolasyon.
 
 import { ensureBarcodesInCatalog } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
-import { enqueueProfitRecompute } from '@pazarsync/profit';
+import { enqueueProfitRecompute, findFirstVariantByBarcode } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 
 const MAX_BARCODES_PER_STORE_PER_TICK = 25;
@@ -24,6 +25,22 @@ interface DueItem {
   barcode: string | null;
   variantResolutionAttempts: number;
   order: { id: string; storeId: string; organizationId: string };
+}
+
+/**
+ * The tenant pair every read and write of one resolution group is pinned to. Work is
+ * grouped by the pair, never by the store alone, so a row carrying another
+ * organization's store id never reaches that organization's store, catalog or miss
+ * rows: the store load filters both ids and fails closed on a mismatch.
+ */
+interface ResolutionScope {
+  organizationId: string;
+  storeId: string;
+}
+
+/** Map key of a (organizationId, storeId) pair; both are UUIDs, so ':' never collides. */
+function scopeKey(scope: ResolutionScope): string {
+  return `${scope.organizationId}:${scope.storeId}`;
 }
 
 function nextBackoff(attempts: number): Date {
@@ -62,7 +79,8 @@ async function runResolutionTick(): Promise<void> {
 }
 
 async function resolveDueOrderItems(): Promise<void> {
-  // Vadesi gelmiş, çözülmemiş satırlar — mağaza başına gruplanır. Sıralama
+  // Vadesi gelmiş, çözülmemiş satırlar — (organizationId, storeId) çifti başına
+  // gruplanır. Sıralama
   // deterministik (vade önce, null=hiç denenmemiş en önde): take-500
   // penceresi tick'ler arasında kararlı dolaşır, tek mağazanın taşması
   // diğerlerini rastgele aç bırakamaz.
@@ -83,16 +101,18 @@ async function resolveDueOrderItems(): Promise<void> {
   });
   if (due.length === 0) return;
 
-  const byStore = new Map<string, DueItem[]>();
+  const byScope = new Map<string, { scope: ResolutionScope; items: DueItem[] }>();
   for (const item of due) {
-    const list = byStore.get(item.order.storeId) ?? [];
-    list.push(item);
-    byStore.set(item.order.storeId, list);
+    const scope = { organizationId: item.order.organizationId, storeId: item.order.storeId };
+    const group = byScope.get(scopeKey(scope)) ?? { scope, items: [] };
+    group.items.push(item);
+    byScope.set(scopeKey(scope), group);
   }
 
-  for (const [storeId, items] of byStore) {
+  for (const { scope, items } of byScope.values()) {
+    const { organizationId, storeId } = scope;
     try {
-      await resolveForStore(storeId, items);
+      await resolveForStore(scope, items);
     } catch (err) {
       // Mağaza-başına izolasyon: bir mağazanın hatası (ör. vendor 5xx, bozuk
       // credential) diğerlerini durdurmaz. Kalıcı hata 60s hot-loop'a ve
@@ -100,6 +120,7 @@ async function resolveDueOrderItems(): Promise<void> {
       // yazılır (best-effort) — transient hata 5 dk gecikme öder, kalıcı
       // hata üstel olarak pencereden çekilir.
       syncLog.error('resolution.store-failed', {
+        organizationId,
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
@@ -161,36 +182,47 @@ async function upsertBarcodeMiss(
  * Item bağlama gerekmez: mezuniyet/promote yazımı variant'ı kendisi bulur.
  */
 async function repairBufferCatalogGaps(): Promise<void> {
-  const bufferGaps = await prisma.$queryRaw<Array<{ store_id: string; barcode: string }>>`
-    SELECT DISTINCT b.store_id, line->>'barcode' AS barcode
+  // A gap is judged within the buffer row's own organization and store, the same
+  // scope the order-line resolvers (findFirstVariantByBarcode) link in: a variant row
+  // of the store stamped with another organization does not close it.
+  const bufferGaps = await prisma.$queryRaw<
+    Array<{ organization_id: string; store_id: string; barcode: string }>
+  >`
+    SELECT DISTINCT b.organization_id, b.store_id, line->>'barcode' AS barcode
     FROM live_performance_buffer b,
          jsonb_array_elements(b.mapped_order->'lines') AS line
     WHERE b.status = 'PENDING'
       AND line->>'barcode' IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM product_variants pv
-        WHERE pv.store_id = b.store_id AND pv.barcode = line->>'barcode'
+        WHERE pv.organization_id = b.organization_id
+          AND pv.store_id = b.store_id
+          AND pv.barcode = line->>'barcode'
       )
     LIMIT 200
   `;
   if (bufferGaps.length === 0) return;
 
-  const gapsByStore = new Map<string, string[]>();
+  const gapsByScope = new Map<string, { scope: ResolutionScope; barcodes: string[] }>();
   for (const row of bufferGaps) {
-    const list = gapsByStore.get(row.store_id) ?? [];
-    list.push(row.barcode);
-    gapsByStore.set(row.store_id, list);
+    const scope = { organizationId: row.organization_id, storeId: row.store_id };
+    const group = gapsByScope.get(scopeKey(scope)) ?? { scope, barcodes: [] };
+    group.barcodes.push(row.barcode);
+    gapsByScope.set(scopeKey(scope), group);
   }
 
   const now = new Date();
-  for (const [storeId, allBarcodes] of gapsByStore) {
+  for (const { scope, barcodes: allBarcodes } of gapsByScope.values()) {
+    const { organizationId, storeId } = scope;
     try {
-      const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+      // A mismatched pair (a buffer row carrying another organization's store id)
+      // throws into the catch below: the vendor is never queried with that store.
+      const store = await prisma.store.findFirstOrThrow({ where: { id: storeId, organizationId } });
       // Vade kontrolü tablodan: satırı OLMAYAN barkod (hiç denenmemiş) ya da
       // nextRetryAt NULL/geçmiş olan vadesi gelmiştir; geleceğe bakan
       // nextRetryAt'li barkod bu tick'te atlanır (vendor sorgusu YOK).
       const existing = await prisma.catalogBarcodeMiss.findMany({
-        where: { storeId, barcode: { in: allBarcodes } },
+        where: { organizationId, storeId, barcode: { in: allBarcodes } },
         select: { barcode: true, attempts: true, nextRetryAt: true },
       });
       const missByBarcode = new Map(existing.map((m) => [m.barcode, m]));
@@ -208,7 +240,7 @@ async function repairBufferCatalogGaps(): Promise<void> {
       });
       if (result.resolved.length > 0) {
         await prisma.catalogBarcodeMiss.deleteMany({
-          where: { storeId, barcode: { in: result.resolved } },
+          where: { organizationId, storeId, barcode: { in: result.resolved } },
         });
       }
       for (const barcode of result.vendorMissing) {
@@ -231,6 +263,7 @@ async function repairBufferCatalogGaps(): Promise<void> {
       }
     } catch (err) {
       syncLog.error('resolution.buffer-repair-failed', {
+        organizationId,
         storeId,
         errorMessage: err instanceof Error ? err.message : String(err),
       });
@@ -270,13 +303,14 @@ async function applyBackoff(storeId: string, items: DueItem[], kind: BackoffKind
   }
 }
 
-async function resolveForStore(storeId: string, items: DueItem[]): Promise<void> {
+async function resolveForStore(scope: ResolutionScope, items: DueItem[]): Promise<void> {
+  const { organizationId, storeId } = scope;
   // 1) Yerel first-match (ucuz yol — vendor'a gitmeden bağla).
   let remaining = await linkAgainstLocalCatalog(storeId, items);
   if (remaining.length === 0) {
     // İlk geçişte hepsi yerelden bağlandıysa: bunların açık bir
     // CatalogBarcodeMiss rozeti varsa kapat (gap kapandı).
-    await clearMissForLinked(storeId, items, remaining);
+    await clearMissForLinked(scope, items, remaining);
     return;
   }
 
@@ -286,7 +320,10 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   // GERÇEKTEN sorgulanan barkodlara işlesin — cap'e sığmayanlar denenmeden
   // cezalandırılmaz, vadesiz (null) kaldıkları için sıralama gereği sonraki
   // tick'in penceresinde öne geçerler.
-  const store = await prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+  // A mismatched pair (an order carrying another organization's store id) throws
+  // into the caller's per-store catch, which writes a backoff: the vendor is never
+  // queried with another organization's store or credentials.
+  const store = await prisma.store.findFirstOrThrow({ where: { id: storeId, organizationId } });
   const distinctBarcodes = [
     ...new Set(remaining.flatMap((i) => (i.barcode === null ? [] : [i.barcode]))),
   ].slice(0, MAX_BARCODES_PER_STORE_PER_TICK);
@@ -300,7 +337,7 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
   remaining = await linkAgainstLocalCatalog(storeId, remaining);
 
   // Bağlanan satırların barkodları için açık CatalogBarcodeMiss rozetini kapat.
-  await clearMissForLinked(storeId, beforeRelink, remaining);
+  await clearMissForLinked(scope, beforeRelink, remaining);
 
   // 4) Sorgulanıp hâlâ çözülemeyenleri eğriye göre ayır:
   //    - vendorMissing → DÜZ 24 saat + tabloya rozet (UI "Trendyol'da yok").
@@ -342,9 +379,10 @@ async function resolveForStore(storeId: string, items: DueItem[]): Promise<void>
  * Bu tick'te bağlanan satırların barkodları için açık CatalogBarcodeMiss
  * rozetini siler (gap kapandı). `before` bağlanmadan önceki listedir, `after`
  * hâlâ çözülemeyenler — ikisinin farkı bu tick'te bağlananlardır.
+ * Tenant-scoped: only the group's own (organizationId, storeId) rows are deleted.
  */
 async function clearMissForLinked(
-  storeId: string,
+  scope: ResolutionScope,
   before: DueItem[],
   after: DueItem[],
 ): Promise<void> {
@@ -356,7 +394,11 @@ async function clearMissForLinked(
   ];
   if (linkedBarcodes.length === 0) return;
   await prisma.catalogBarcodeMiss.deleteMany({
-    where: { storeId, barcode: { in: linkedBarcodes } },
+    where: {
+      organizationId: scope.organizationId,
+      storeId: scope.storeId,
+      barcode: { in: linkedBarcodes },
+    },
   });
 }
 
@@ -385,12 +427,13 @@ async function linkAgainstLocalCatalog(storeId: string, items: DueItem[]): Promi
           stillUnresolved.push(item);
           continue;
         }
-        const variant = await tx.productVariant.findFirst({
-          where: { storeId, barcode: item.barcode },
-          // Lowest variant id for a barcode shared by two variants: the same choice
-          // as buildCalcCheckLines, so the gate and the stored order item name one variant.
-          orderBy: { id: 'asc' },
-          select: { id: true },
+        // Lowest variant id for a barcode shared by two variants, inside the order's
+        // own organization and store: the same choice as buildCalcCheckLines, so the
+        // gate and the stored order item name one variant.
+        const variant = await findFirstVariantByBarcode(tx, {
+          organizationId: item.order.organizationId,
+          storeId,
+          barcode: item.barcode,
         });
         if (variant === null) {
           stillUnresolved.push(item);

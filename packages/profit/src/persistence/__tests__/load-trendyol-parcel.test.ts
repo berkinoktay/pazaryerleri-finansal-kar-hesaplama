@@ -1679,6 +1679,58 @@ describe('loadTrendyolParcel', () => {
     expect(costB.amount.gross.toFixed(2)).toBe('165.00');
   });
 
+  it('an uncaptured item never loads a link whose profile belongs to another organization', async () => {
+    const parcel = await seedMelontikParcel();
+    // Item A's own link is replaced by one stamped with this organization but pointing
+    // at another organization's in-force profile, built directly (the attach service
+    // refuses it). Only the profile's organization filter keeps it out.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    const otherOrg = await prisma.organization.create({
+      data: { name: 'Other Org', slug: `other-${randomUUID().slice(0, 8)}` },
+    });
+    const otherStoreId = await createAdditionalStore({ organizationId: otherOrg.id });
+    const otherProfile = await prisma.costProfile.create({
+      data: {
+        organizationId: otherOrg.id,
+        storeId: otherStoreId,
+        name: 'Other org COGS',
+        type: 'COGS',
+        amountGross: '999.00',
+        vatRate: '20',
+      },
+    });
+    await prisma.costProfileVersion.create({
+      data: {
+        profileId: otherProfile.id,
+        organizationId: otherOrg.id,
+        version: 1,
+        name: otherProfile.name,
+        type: 'COGS',
+        amountGross: '999.00',
+        vatRate: '20',
+        changedFields: [],
+        effectiveFrom: COST_FIXTURE_EPOCH,
+      },
+    });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: parcel.organizationId,
+        productVariantId: parcel.variantA,
+        profileId: otherProfile.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+
+    const loaded = await loadTrendyolParcel(prisma, {
+      organizationId: parcel.organizationId,
+      orderId: parcel.orderId,
+    });
+
+    expect(loaded.estimateInput.costs.map((entry) => entry.orderItemId)).toEqual([parcel.itemB]);
+  });
+
   it("uses the order's own carrier for the shipping estimate", async () => {
     // A carrier with a SHORT display name, the long "... Marketplace" name in
     // orderCargoNames and a cheaper desi tariff is the one Trendyol assigned to this

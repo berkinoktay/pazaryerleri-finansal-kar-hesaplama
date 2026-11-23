@@ -32,7 +32,11 @@ import { prisma } from '@pazarsync/db';
 import type { Prisma, ProfitExclusionReason } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { captureOrderProfitSnapshot, enqueueProfitRecompute } from '@pazarsync/profit';
+import {
+  captureOrderProfitSnapshot,
+  enqueueProfitRecompute,
+  findFirstVariantByBarcode,
+} from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
@@ -49,7 +53,7 @@ import { decrementVariantStock, isOrderOnBusinessToday } from './stock';
  *     orderCommissionRatePct (the line's own raw commission rate, null when the line
  *     carried none). The profit engine derives every commission amount from that rate;
  *     no commission or cost amount is stored on the item. Variant lookup by barcode
- *     (storeId scoped).
+ *     (organizationId + storeId scoped, `findFirstVariantByBarcode`).
  *   - Snapshot-at-create: the store's resolved profit settings are copied onto the
  *     order on CREATE only (forward-only; an UPDATE never rewrites them).
  *   - enqueueProfitRecompute (`@pazarsync/profit`): the last step of the tx on
@@ -357,14 +361,14 @@ export async function upsertOrderWithSnapshot(
 
     // 2. OrderItem'lar: variant lookup (barcode) + INSERT-if-new + snapshot.
     for (const line of order.lines) {
-      const variant = await tx.productVariant.findFirst({
-        where: { storeId, barcode: line.barcode },
-        // Lowest variant id for a barcode shared by two variants: the same choice
-        // as buildCalcCheckLines, so the gate and the stored order item name one variant.
-        orderBy: { id: 'asc' },
-        // productId is selected so the first-insert stock decrement below can
-        // recompute the owning product's denormalized totalStock.
-        select: { id: true, productId: true },
+      // Lowest variant id for a barcode shared by two variants, inside the
+      // organization's store: the same choice as buildCalcCheckLines, so the gate and
+      // the stored order item name one variant. productId drives the first-insert
+      // stock decrement's totalStock recompute below.
+      const variant = await findFirstVariantByBarcode(tx, {
+        organizationId,
+        storeId,
+        barcode: line.barcode,
       });
 
       // Dedupe (write-once item): platformLineId platform-taraflı satır
