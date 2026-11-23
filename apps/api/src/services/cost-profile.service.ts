@@ -120,17 +120,8 @@ function diffFields(before: CostProfile, after: Partial<CostProfile>): string[] 
   return changed;
 }
 
-/**
- * Enqueue a profit recompute for every order carrying a variant this profile is
- * attached to. A cost change (amount/vat, archive, or restore) reshapes those
- * orders' profit, so they must be recomputed. Runs inside the
- * mutation's own transaction. A profile with no attached variants enqueues
- * nothing (the empty id list short-circuits without a query).
- *
- * Returns the attached variant ids it loaded, so a caller that must act on the
- * same variants (the restore's buffer re-check) needs no second query.
- */
-async function enqueueProfileVariants(
+/** The ids of the variants this profile is attached to, within the organization. */
+async function loadProfileVariantIds(
   tx: Prisma.TransactionClient,
   orgId: string,
   profileId: string,
@@ -139,13 +130,40 @@ async function enqueueProfileVariants(
     where: { profileId, organizationId: orgId },
     select: { productVariantId: true },
   });
-  const variantIds = links.map((link) => link.productVariantId);
+  return links.map((link) => link.productVariantId);
+}
+
+/**
+ * Enqueue a profit recompute (COST_CHANGED) for every order carrying one of these
+ * variants. Runs inside the mutation's own transaction. An empty id list enqueues
+ * nothing (it short-circuits without a query).
+ */
+async function enqueueVariantsRecompute(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  variantIds: string[],
+): Promise<void> {
   await enqueueProfitRecomputeForVariants(tx, {
     organizationId: orgId,
     variantIds,
     reason: ProfitRecomputeReason.COST_CHANGED,
   });
-  return variantIds;
+}
+
+/**
+ * Enqueue a profit recompute for every order carrying a variant this profile is
+ * attached to. A cost change (amount/vat, archive, or restore) reshapes those
+ * orders' profit, so they must be recomputed. Runs inside the
+ * mutation's own transaction. A profile with no attached variants enqueues
+ * nothing.
+ */
+async function enqueueProfileVariants(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+  profileId: string,
+): Promise<void> {
+  const variantIds = await loadProfileVariantIds(tx, orgId, profileId);
+  await enqueueVariantsRecompute(tx, orgId, variantIds);
 }
 
 // ─── Service functions ───────────────────────────────────────────────────────
@@ -473,8 +491,12 @@ export async function restoreCostProfile(
       },
     });
 
-    const variantIds = await enqueueProfileVariants(tx, orgId, profileId);
+    // Lock order: flip the buffer BEFORE enqueueing the recompute, the same order the
+    // attach and replace services use, so a restore takes the buffer rows and then
+    // the recompute queue rows in the same order as a concurrent attach or replace.
+    const variantIds = await loadProfileVariantIds(tx, orgId, profileId);
     await flipBufferForVariants(tx, { organizationId: orgId, storeId: row.storeId, variantIds });
+    await enqueueVariantsRecompute(tx, orgId, variantIds);
 
     return row;
   });

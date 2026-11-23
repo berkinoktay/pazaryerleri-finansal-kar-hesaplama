@@ -158,9 +158,17 @@ const BACKFILL_CHUNK_SIZE = 500;
  *     instant comparison `orderDate < getBusinessDayRange(now).start` so the scan
  *     can prefilter on the indexed `order_date` column.
  *
- * For each candidate every non-cancelled line (order_items carries no per-line
- * cancel flag, so every line counts) is fed to `hadCostWithinOrderDay`. When the
- * window was missed the order is stamped:
+ * A candidate whose every line (digital ones too: every line needs a cost) already
+ * carries a non-empty captured cost list (`hasCapturedCostOnEveryItem`) is skipped:
+ * the list is frozen at capture and, since plan PR-3b, a capture pins only links in
+ * force at the order's day end, so the window was met even if its only profile was
+ * archived or detached later that day.
+ * A capture made before PR-3b could pin a link attached after the day; such an order
+ * is skipped as well (never stamped), the safe direction for an irreversible stamp.
+ *
+ * For every other candidate every non-cancelled line (order_items carries no
+ * per-line cancel flag, so every line counts) is fed to `hadCostWithinOrderDay`. When
+ * the window was missed the order is stamped:
  *   - `LATE_UNCOSTED_ARRIVAL` when our first record of it (`created_at`) is after
  *     the SAME day end the window used (`getBusinessDayRange(orderDate).end`) -- it
  *     arrived after its day had already closed; otherwise
@@ -217,7 +225,12 @@ export async function stampCostWindowExclusions(
         id: true,
         orderDate: true,
         createdAt: true,
-        items: { select: { productVariantId: true } },
+        items: {
+          select: {
+            productVariantId: true,
+            snapshotCostProfileVersionIds: true,
+          },
+        },
       },
     });
 
@@ -229,6 +242,14 @@ export async function stampCostWindowExclusions(
     const lateArrivalIds: string[] = [];
 
     for (const order of candidates) {
+      // A captured cost is taken as proof the window was met: since PR-3b a capture
+      // pins only links in force at the day end and the list is frozen afterwards, so
+      // a later archive or detach that the live links would read as "no cost" must
+      // not stamp it. (A capture made before PR-3b could pin a late link; such an
+      // order is skipped too, the safe direction for an irreversible stamp.)
+      if (hasCapturedCostOnEveryItem(order.items)) {
+        continue;
+      }
       const hadTimelyCost = await hadCostWithinOrderDay(tx, {
         organizationId,
         storeId,
@@ -279,6 +300,31 @@ export async function stampCostWindowExclusions(
   }
 
   return { costDeadlineMissed, lateUncostedArrival };
+}
+
+/**
+ * True iff the order has at least one item and every item already carries a
+ * non-empty captured cost list (`snapshot_cost_profile_version_ids`). Every line
+ * needs a cost, digital ones included (a digital line is exempt from desi only; see
+ * `resolveOrderCalculability` in `@pazarsync/profit`), and order_items carry no
+ * cancel flag while the scan already drops CANCELLED orders, so every listed item
+ * counts. The column is nullable in the database although Prisma reads it as a
+ * list, so a null counts as empty. An order with no item returns false and is left
+ * to the live-link check.
+ */
+function hasCapturedCostOnEveryItem(
+  items: readonly {
+    readonly snapshotCostProfileVersionIds: readonly string[] | null;
+  }[],
+): boolean {
+  return (
+    items.length > 0 &&
+    items.every(
+      (item) =>
+        item.snapshotCostProfileVersionIds !== null &&
+        item.snapshotCostProfileVersionIds.length > 0,
+    )
+  );
 }
 
 /**

@@ -622,6 +622,133 @@ describe('stampCostWindowExclusions', () => {
     expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
   });
 
+  // Plan PR-3b (A1, Berkin 2026-11-23: a cost list is frozen the moment the order
+  // enters profit): a captured cost proves the window was not missed. The live links
+  // alone read a same-day archive after the capture as "no cost at the day end".
+  it('the backfill never stamps an order whose captured cost list is non-empty, even if its only profile was archived before the day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-CAPTURED');
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    const pinned = await prisma.costProfileVersion.findFirstOrThrow({
+      where: { profileId, organizationId: org.id, version: 1 },
+      select: { id: true },
+    });
+    const beforeArchive = new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS);
+
+    // Captured in time with the profile's cost, then the only profile is archived
+    // later the same day.
+    const capturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: capturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [pinned.id], snapshotIsDigital: false },
+    });
+    // Twin: the same order shape with an empty captured list is still judged from the
+    // live links, so the guard cannot pass by skipping every order.
+    const uncapturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: IN_TIME,
+      archived: true,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const captured = await prisma.order.findUniqueOrThrow({ where: { id: capturedId } });
+    expect(captured.profitExcludedAt).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: capturedId } }),
+    ).toBeNull();
+    const uncaptured = await prisma.order.findUniqueOrThrow({ where: { id: uncapturedId } });
+    expect(uncaptured.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  // A digital line ships no cargo (no desi needed) but still needs a cost, so its
+  // captured cost list proves the window the same way a physical line's does.
+  it('the backfill never stamps an all-digital order whose captured cost list is non-empty, even if its only profile was archived before the day ended', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-DIGITAL');
+    await prisma.productVariant.updateMany({
+      where: { id: variantId, organizationId: org.id },
+      data: { isDigital: true },
+    });
+    const profileId = await attachCost({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      attachedAt: COST_FIXTURE_EPOCH,
+      versionEffectiveFrom: COST_FIXTURE_EPOCH,
+    });
+    const pinned = await prisma.costProfileVersion.findFirstOrThrow({
+      where: { profileId, organizationId: org.id, version: 1 },
+      select: { id: true },
+    });
+    const beforeArchive = new Date(DAY_END.getTime() - 2 * ONE_MINUTE_MS);
+
+    // Captured in time with the profile's cost, then the only profile is archived
+    // later the same day.
+    const capturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: capturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [pinned.id], snapshotIsDigital: true },
+    });
+    // Control: a digital line with an empty captured list is not exempt from cost, so
+    // it is still judged from the live links and stamped.
+    const uncapturedId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: beforeArchive,
+    });
+    await prisma.orderItem.updateMany({
+      where: { orderId: uncapturedId, organizationId: org.id },
+      data: { snapshotCostProfileVersionIds: [], snapshotIsDigital: true },
+    });
+    await appendArchiveVersion({
+      orgId: org.id,
+      profileId,
+      version: 2,
+      at: IN_TIME,
+      archived: true,
+    });
+
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const captured = await prisma.order.findUniqueOrThrow({ where: { id: capturedId } });
+    expect(captured.profitExcludedAt).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: capturedId } }),
+    ).toBeNull();
+    const uncaptured = await prisma.order.findUniqueOrThrow({ where: { id: uncapturedId } });
+    expect(uncaptured.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
   it('stamps a late arrival as LATE_UNCOSTED_ARRIVAL', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
