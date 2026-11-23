@@ -213,6 +213,36 @@ describe('profit recompute queue', () => {
     expect(otherRow).toBeNull();
   });
 
+  it('a final order of the variant gets no queue row, a non-final one does', async () => {
+    // The parcel's order is non-final (marker NULL): its seller inputs still follow its day.
+    const parcel = await seedMelontikParcel();
+    // A second order of the same organization and store carrying the same variant, whose
+    // seller inputs the day-close pass already made final.
+    const finalOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      sellerInputsFinalAt: new Date(),
+    });
+    await addOrderItemForVariant({
+      orderId: finalOrderId,
+      organizationId: parcel.organizationId,
+      productVariantId: parcel.variantA,
+      barcode: MELONTIK.items.a.barcode,
+    });
+
+    const count = await enqueueProfitRecomputeForVariants(prisma, {
+      organizationId: parcel.organizationId,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+      variantIds: [parcel.variantA],
+    });
+
+    expect(count).toBe(1);
+    expect(await queuedOrderIds()).toEqual([parcel.orderId]);
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: finalOrderId } }),
+    ).toBeNull();
+  });
+
   it('never enqueues another organization order even when its variant id is passed', async () => {
     const parcel = await seedMelontikParcel();
     const other = await seedMelontikParcel();

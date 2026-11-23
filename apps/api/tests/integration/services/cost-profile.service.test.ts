@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { drainProfitRecomputeQueue, recomputeParcelProfit } from '@pazarsync/profit';
 
 import {
   archiveCostProfile,
@@ -13,6 +14,7 @@ import {
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '@/lib/errors';
 
+import { seedCalculableTrendyolOrder } from '../../helpers/calculable-order';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createMembership,
@@ -276,7 +278,7 @@ describe('cost-profile service', () => {
   // ─── profit recompute queueing ──────────────────────────────────────────────
 
   describe('profit recompute queueing', () => {
-    it('queues the orders of the attached variants when a cost profile changes', async () => {
+    it('queues the non-final orders of the attached variants when a cost profile changes, never a final one', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       await createMembership(org.id, user.id);
@@ -294,37 +296,127 @@ describe('cost-profile service', () => {
         data: { organizationId: org.id, profileId: profile.id, productVariantId: variant.id },
       });
 
-      // Carries the attached variant → must be queued on a cost change.
+      // Carries the attached variant, seller inputs still following its day: must be
+      // queued on a cost change.
       const order = await createOrder(org.id, store.id);
       await createOrderItem(order.id, org.id, { productVariantId: variant.id });
+
+      // Carries the attached variant too, but the day-close pass made its seller inputs
+      // final: a cost change never reaches it, so it is never queued.
+      const finalOrder = await createOrder(org.id, store.id, { sellerInputsFinalAt: new Date() });
+      await createOrderItem(finalOrder.id, org.id, { productVariantId: variant.id });
 
       // Carries no attached variant → must stay out of the queue.
       const unrelated = await createOrder(org.id, store.id);
       await createOrderItem(unrelated.id, org.id, { productVariantId: null });
 
+      const requestReason = async (orderId: string): Promise<ProfitRecomputeReason | undefined> =>
+        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId } }))?.reason;
+
       // (1) update
       await updateCostProfile(org.id, profile.id, { amountGross: '40.00' }, user.id);
-      const afterUpdate = await prisma.profitRecomputeRequest.findUnique({
-        where: { orderId: order.id },
-      });
-      expect(afterUpdate?.reason).toBe(ProfitRecomputeReason.COST_CHANGED);
-      expect(
-        await prisma.profitRecomputeRequest.findUnique({ where: { orderId: unrelated.id } }),
-      ).toBeNull();
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
+      expect(await requestReason(unrelated.id)).toBeUndefined();
 
       // (2) archive — clear the mark first to prove archive re-enqueues.
       await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
       await archiveCostProfile(org.id, profile.id, user.id);
-      expect(
-        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason,
-      ).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
 
       // (3) restore
       await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
       await restoreCostProfile(org.id, profile.id, user.id);
-      expect(
-        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason,
-      ).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
+    });
+
+    // Owner rule (Berkin 2026-11-23): every PATCH appends a version, a name-only one
+    // included, so today's order re-pins to it; the amount is unchanged, so are the
+    // profit numbers. A final order keeps the version it pinned.
+    it("a name-only PATCH re-pins today's order to the new version with unchanged statement totals", async () => {
+      const user = await createUserProfile();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+
+      // Today's calculable order (marker NULL) and a final twin on the same variant.
+      const orderId = await seedCalculableTrendyolOrder(org.id, store.id);
+      const item = await prisma.orderItem.findFirstOrThrow({
+        where: { organizationId: org.id, orderId },
+      });
+      const variantId = item.productVariantId;
+      if (variantId === null) throw new Error('expected the calculable item to carry a variant');
+      const link = await prisma.productVariantCostProfile.findFirstOrThrow({
+        where: { organizationId: org.id, productVariantId: variantId },
+      });
+      const finalOrder = await createOrder(org.id, store.id, {
+        status: 'DELIVERED',
+        saleGross: '240.00',
+        saleVat: '40.00',
+        sellerInputsFinalAt: new Date(),
+      });
+      const finalItem = await prisma.orderItem.create({
+        data: {
+          orderId: finalOrder.id,
+          organizationId: org.id,
+          productVariantId: variantId,
+          quantity: item.quantity,
+          barcode: item.barcode,
+          lineListGross: item.lineListGross,
+          lineSaleGross: item.lineSaleGross,
+          lineSellerDiscountGross: item.lineSellerDiscountGross,
+          saleVatRate: item.saleVatRate,
+          orderCommissionRatePct: item.orderCommissionRatePct,
+        },
+      });
+
+      // Both orders capture version 1 and write their statements.
+      for (const id of [orderId, finalOrder.id]) {
+        await prisma.$transaction(
+          (tx) => recomputeParcelProfit(tx, { organizationId: org.id, orderId: id }),
+          { maxWait: 15_000, timeout: 30_000 },
+        );
+      }
+      const firstVersion = await prisma.costProfileVersion.findFirstOrThrow({
+        where: { organizationId: org.id, profileId: link.profileId, version: 1 },
+      });
+      const pinnedIds = async (orderItemId: string): Promise<string[]> =>
+        (
+          await prisma.orderItem.findUniqueOrThrow({
+            where: { id: orderItemId },
+            select: { snapshotCostProfileVersionIds: true },
+          })
+        ).snapshotCostProfileVersionIds;
+      const netProfits = async (): Promise<{ view: string; netProfit: string | null }[]> =>
+        (
+          await prisma.orderProfitStatement.findMany({
+            where: { organizationId: org.id, orderId },
+            orderBy: { view: 'asc' },
+          })
+        ).map((statement) => ({
+          view: statement.view,
+          netProfit: statement.netProfit?.toString() ?? null,
+        }));
+      expect(await pinnedIds(item.id)).toEqual([firstVersion.id]);
+      expect(await pinnedIds(finalItem.id)).toEqual([firstVersion.id]);
+      const before = await netProfits();
+      expect(before).toHaveLength(2);
+      for (const statement of before) {
+        expect(statement.netProfit).not.toBeNull();
+      }
+
+      await updateCostProfile(org.id, link.profileId, { name: 'Renamed COGS' }, user.id);
+      await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+
+      const newVersion = await prisma.costProfileVersion.findFirstOrThrow({
+        where: { organizationId: org.id, profileId: link.profileId, version: 2 },
+      });
+      expect(await pinnedIds(item.id)).toEqual([newVersion.id]);
+      expect(await netProfits()).toEqual(before);
+      // Control: the final order keeps the version it pinned.
+      expect(await pinnedIds(finalItem.id)).toEqual([firstVersion.id]);
     });
   });
 });

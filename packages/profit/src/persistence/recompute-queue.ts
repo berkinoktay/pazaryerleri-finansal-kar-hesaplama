@@ -86,9 +86,12 @@ export function enqueueProfitRecompute(
 }
 
 /**
- * Enqueues every order of the organization that carries at least one item of the
- * given variants. An empty variant list returns 0 without a query. Returns the
- * affected row count.
+ * Enqueues every NON-FINAL order of the organization that carries at least one item
+ * of the given variants. The callers are the seller-input writers (cost link, cost
+ * version, desi) and the catalog sync's desi change: a seller input reaches only the
+ * orders whose `seller_inputs_final_at` is still NULL (their day has not been made
+ * final), so a final order is never queued for it. An empty variant list returns 0
+ * without a query. Returns the affected row count.
  */
 export function enqueueProfitRecomputeForVariants(
   tx: Prisma.TransactionClient,
@@ -103,6 +106,7 @@ export function enqueueProfitRecomputeForVariants(
     tx,
     reason,
     Prisma.sql`o.organization_id = ${organizationId}::uuid
+      AND o.seller_inputs_final_at IS NULL
       AND EXISTS (
         SELECT 1 FROM order_items i
         WHERE i.order_id = o.id AND i.product_variant_id = ANY(${ids}::uuid[])

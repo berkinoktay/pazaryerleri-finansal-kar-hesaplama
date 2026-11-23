@@ -947,6 +947,13 @@ describe('captureOrderProfitSnapshot', () => {
       await linkedCostVersionIds(parcel.organizationId, parcel.variantB),
     );
 
+    // Positive control for the guard below: the same items, both matched now, on an
+    // order whose seller inputs still follow its day; captured before the edit, so its
+    // next capture is a re-derive.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    expect((await readItemSnapshot(twin.itemB)).snapshotUnitDesi?.toString()).toBe('1');
+
     // Once captured, a later variant edit does not reach the final order, not even one
     // stamped on the order's day (the day-end state now holds it).
     await prisma.productVariant.update({
@@ -956,6 +963,12 @@ describe('captureOrderProfitSnapshot', () => {
     await backdateSellerInputHistory(parcel.organizationId, laterOnOrderDay(1));
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemB)).toEqual(matched);
+
+    // The non-final twin does take the edit stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('6');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('a cost linked later the same day fills an empty list and reaches a filled one; a final order only gets the empty one filled', async () => {
@@ -1333,13 +1346,16 @@ describe('captureOrderProfitSnapshot', () => {
     await capture(parcel);
     const itemABefore = await readItemSnapshot(parcel.itemA);
 
-    // A same-day desi change: the item is re-derived, its capture time stays.
+    // A same-day desi change: the item is re-derived (one item written, the new desi),
+    // its capture time stays.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '7.00' },
     });
-    await capture(parcel);
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
     const rederived = await readItemSnapshot(parcel.itemA);
+    expect(rederived.snapshotUnitDesi?.toString()).toBe('7');
+    expect(rederived.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
     expect(rederived.profitSnapshotAt).toEqual(itemABefore.profitSnapshotAt);
 
     // Positive control: re-matched to another variant, the item is captured afresh.
@@ -1487,9 +1503,13 @@ describe('captureOrderProfitSnapshot', () => {
     });
     // Fixture setup, not history: neither variant had a desi on the order's day.
     await clearSellerInputHistory(parcel.organizationId);
+    // Positive control for the guard below: the same items on an order whose seller
+    // inputs still follow its day, captured (without a desi) before the later entries.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
 
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
-    for (const itemId of [parcel.itemA, parcel.itemB]) {
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    for (const itemId of [parcel.itemA, parcel.itemB, twin.itemA, twin.itemB]) {
       const item = await readItemSnapshot(itemId);
       expect(item.snapshotUnitDesi).toBeNull();
       expect(item.snapshotDesiSource).toBeNull();
@@ -1520,6 +1540,15 @@ describe('captureOrderProfitSnapshot', () => {
       expect(item.snapshotUnitDesi).toBeNull();
       expect(item.snapshotDesiSource).toBeNull();
     }
+
+    // The non-final twin does take both entries stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const twinA = await readItemSnapshot(twin.itemA);
+    expect(twinA.snapshotUnitDesi?.toString()).toBe('2.5');
+    expect(twinA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('4');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('keeps a stored synced desi of 0 as a known desi: captured as 0 from the synced value and never filled later on a final order', async () => {
@@ -1537,10 +1566,19 @@ describe('captureOrderProfitSnapshot', () => {
     });
     // Fixture setup, not history: both variants had that desi on the order's day.
     await clearSellerInputHistory(parcel.organizationId);
+    // Positive control for the guard below: the same items on an order whose seller
+    // inputs still follow its day, captured (with the 0) before the later entries.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
     await capture(parcel);
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
-    for (const item of [itemABefore, itemBBefore]) {
+    for (const item of [
+      itemABefore,
+      itemBBefore,
+      await readItemSnapshot(twin.itemA),
+      await readItemSnapshot(twin.itemB),
+    ]) {
       expect(item.snapshotUnitDesi?.toString()).toBe('0');
       expect(item.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
     }
@@ -1560,6 +1598,15 @@ describe('captureOrderProfitSnapshot', () => {
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+
+    // The non-final twin does take both entries stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const twinA = await readItemSnapshot(twin.itemA);
+    expect(twinA.snapshotUnitDesi?.toString()).toBe('2.5');
+    expect(twinA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('4');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('fills commission inputs that were all missing once a rule or synced rate appears, but never changes captured rates', async () => {

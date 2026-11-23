@@ -7,7 +7,9 @@
  *   2. Null body clears the override; effective value falls back to synced.
  *   3. Invalid bodies (bad format, out-of-range) → 422 VALIDATION_ERROR.
  *   4. 404 when the variant doesn't exist.
- *   5. Entering a desi promotes today's PENDING Live Performance buffer entries of
+ *   5. Every desi write (clear included) queues the variant's non-final orders for a
+ *      profit recompute (DESI_CHANGED); a final order is never queued.
+ *   6. Entering a desi promotes today's PENDING Live Performance buffer entries of
  *      the variant once their order is fully calculable (cost + desi).
  *
  * Cross-org isolation lives in tests/integration/tenant-isolation/.
@@ -19,6 +21,13 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import {
+  ProfitIssueCode,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+  ProfitStatus,
+} from '@pazarsync/db/enums';
+import { drainProfitRecomputeQueue, recomputeParcelProfit } from '@pazarsync/profit';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { createApp } from '@/app';
@@ -33,8 +42,16 @@ import {
   createOrganization,
   createStore,
 } from '../../helpers/factories';
+import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
 
 const app = createApp();
+
+/**
+ * The cargo name of a carrier in the shipping reference seed (SENDEOMP), part of the
+ * test database template and never truncated: an order naming it has a recognized
+ * carrier whose desi tariff prices it.
+ */
+const SEEDED_CARGO_PROVIDER_NAME = 'Kolay Gelsin Marketplace';
 
 interface Ctx {
   accessToken: string;
@@ -341,21 +358,105 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(res.status).toBe(404);
   });
 
-  it("does not queue stored orders when a variant's desi is overridden", async () => {
+  // Owner rule (Berkin 2026-11-23), replacing "desi frozen at intake, no queue row":
+  // an order's desi is the value in force at the end of its business day, so every
+  // desi write (set, change and clear) queues the variant's orders whose seller inputs
+  // are not final yet; an order the day-close pass made final is never queued.
+  it("queues the variant's non-final order on every desi write (set, change, clear), never a final one", async () => {
     const ctx = await setup({ syncedDimensionalWeight: '1.20' });
 
-    // A stored order carrying the variant: its desi is frozen at intake, so the
-    // override only reaches new orders and the catalog estimate.
     const order = await createOrder(ctx.orgId, ctx.storeId);
     await createOrderItem(order.id, ctx.orgId, { productVariantId: ctx.variantId });
+    const finalOrder = await createOrder(ctx.orgId, ctx.storeId, {
+      sellerInputsFinalAt: new Date(),
+    });
+    await createOrderItem(finalOrder.id, ctx.orgId, { productVariantId: ctx.variantId });
 
-    const res = await patchDesi(ctx, { dimensionalWeight: '4.50' });
-    expect(res.status).toBe(200);
+    const requestReason = async (orderId: string): Promise<ProfitRecomputeReason | undefined> =>
+      (await prisma.profitRecomputeRequest.findUnique({ where: { orderId } }))?.reason;
 
-    expect(
-      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }),
-    ).toBeNull();
-    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+    // set, change, clear: the mark is removed before each write, so each write must
+    // queue the order on its own (the enqueue refreshes an existing row in place).
+    for (const dimensionalWeight of ['4.50', '6.00', null]) {
+      await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
+      const res = await patchDesi(ctx, { dimensionalWeight });
+      expect(res.status).toBe(200);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.DESI_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
+    }
+  });
+
+  it("clearing the desi of today's calculated order makes it not computable; entering it again makes it computable", async () => {
+    // A non-digital variant Trendyol sent no desi for, with a cost and a seller desi.
+    const ctx = await setup({ syncedDimensionalWeight: null });
+    await ensureFeeDefinitions();
+    await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
+    await prisma.productVariant.update({
+      where: { id: ctx.variantId },
+      data: { dimensionalWeightOverride: '2.00' },
+    });
+
+    // Today's order (marker NULL) on a recognized seeded carrier.
+    const order = await createOrder(ctx.orgId, ctx.storeId, {
+      status: 'DELIVERED',
+      saleGross: '240.00',
+      saleVat: '40.00',
+    });
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        listGross: '240.00',
+        sellerDiscountGross: '0.00',
+        cargoProviderName: SEEDED_CARGO_PROVIDER_NAME,
+      },
+    });
+    await prisma.orderItem.create({
+      data: {
+        orderId: order.id,
+        organizationId: ctx.orgId,
+        productVariantId: ctx.variantId,
+        quantity: 1,
+        barcode: ctx.barcode,
+        lineListGross: '240.00',
+        lineSaleGross: '240.00',
+        lineSellerDiscountGross: '0.00',
+        saleVatRate: '20.00',
+        orderCommissionRatePct: '19.00',
+      },
+    });
+    await prisma.$transaction(
+      (tx) => recomputeParcelProfit(tx, { organizationId: ctx.orgId, orderId: order.id }),
+      { maxWait: 15_000, timeout: 30_000 },
+    );
+    const bestKnown = async (): Promise<{ status: string; issues: unknown }> =>
+      prisma.orderProfitStatement.findFirstOrThrow({
+        where: {
+          organizationId: ctx.orgId,
+          orderId: order.id,
+          view: ProfitStatementView.BEST_KNOWN,
+        },
+        select: { status: true, issues: true },
+      });
+    expect((await bestKnown()).status).toBe(ProfitStatus.ESTIMATED);
+
+    // The seller clears the desi: the order is queued and, drained, has no desi.
+    const cleared = await patchDesi(ctx, { dimensionalWeight: null });
+    expect(cleared.status).toBe(200);
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    const missing = await bestKnown();
+    expect(missing.status).toBe(ProfitStatus.NOT_COMPUTABLE);
+    expect(missing.issues).toContainEqual(
+      expect.objectContaining({
+        code: ProfitIssueCode.SHIPPING_ESTIMATE_UNAVAILABLE,
+        detail: 'UNKNOWN_DESI',
+      }),
+    );
+
+    // The seller enters it again: computable again after the next drain.
+    const entered = await patchDesi(ctx, { dimensionalWeight: '2.00' });
+    expect(entered.status).toBe(200);
+    await drainProfitRecomputeQueue(prisma, { batchSize: 10 });
+    expect((await bestKnown()).status).toBe(ProfitStatus.ESTIMATED);
   });
 });
 

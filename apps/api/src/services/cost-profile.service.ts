@@ -134,9 +134,10 @@ async function loadProfileVariantIds(
 }
 
 /**
- * Enqueue a profit recompute (COST_CHANGED) for every order carrying one of these
- * variants. Runs inside the mutation's own transaction. An empty id list enqueues
- * nothing (it short-circuits without a query).
+ * Enqueue a profit recompute (COST_CHANGED) for every non-final order (seller inputs
+ * not yet made final by the day-close pass) carrying one of these variants. Runs
+ * inside the mutation's own transaction. An empty id list enqueues nothing (it
+ * short-circuits without a query).
  */
 async function enqueueVariantsRecompute(
   tx: Prisma.TransactionClient,
@@ -151,11 +152,11 @@ async function enqueueVariantsRecompute(
 }
 
 /**
- * Enqueue a profit recompute for every order carrying a variant this profile is
- * attached to. A cost change (amount/vat, archive, or restore) reshapes those
- * orders' profit, so they must be recomputed. Runs inside the
- * mutation's own transaction. A profile with no attached variants enqueues
- * nothing.
+ * Enqueue a profit recompute for every non-final order carrying a variant this
+ * profile is attached to. Every change (any PATCH, a name-only one included, since
+ * each appends a version; archive; restore) re-pins those orders' cost list at their
+ * day end, so they must be recomputed. Runs inside the mutation's own transaction. A
+ * profile with no attached variants enqueues nothing.
  */
 async function enqueueProfileVariants(
   tx: Prisma.TransactionClient,

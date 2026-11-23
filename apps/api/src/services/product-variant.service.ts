@@ -1,5 +1,7 @@
 import { prisma } from '@pazarsync/db';
 import type { ProductVariant } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 
 import { NotFoundError } from '../lib/errors';
 import { flipBufferForVariants } from './live-performance-buffer-flip.service';
@@ -26,6 +28,13 @@ import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 // entries of today in the same transaction, store-scoped, and flips those
 // whose order is now fully calculable (cost + desi) to PROMOTING. Clearing
 // the override (null) cannot make an order calculable, so it skips the check.
+//
+// Profit recompute (owner rule, Berkin 2026-11-23): an order's desi is the
+// value in force at the end of its business day, so every write, a clear
+// included, queues the variant's orders whose seller inputs are not final yet
+// (DESI_CHANGED); the recompute re-derives their desi at their day end. Lock
+// order: the product_variants row (and the desi log row its trigger writes),
+// then the buffer rows, then the queue rows; no order_items row is written.
 
 export async function setDimensionalWeight(opts: {
   organizationId: string;
@@ -37,9 +46,8 @@ export async function setDimensionalWeight(opts: {
 > {
   const { organizationId, storeId, variantId, value } = opts;
 
-  // A stored order keeps the desi captured at intake, so the override reaches
-  // only new orders, buffered orders not yet in `orders`, and the catalog
-  // estimate; no stored order is queued.
+  // The write reaches the variant's non-final stored orders through the queue,
+  // its buffered orders through the flip, and the catalog estimate directly.
   return prisma.$transaction(async (tx) => {
     const result = await tx.productVariant.updateMany({
       where: { id: variantId, organizationId, storeId },
@@ -53,6 +61,12 @@ export async function setDimensionalWeight(opts: {
     if (value !== null) {
       await flipBufferForVariants(tx, { organizationId, storeId, variantIds: [variantId] });
     }
+
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId,
+      variantIds: [variantId],
+      reason: ProfitRecomputeReason.DESI_CHANGED,
+    });
 
     // updateMany doesn't return rows; fetch the canonical state to
     // serialize back to the client. The where-clause is the same tenant
@@ -86,6 +100,10 @@ export async function setDimensionalWeight(opts: {
 // Live Performance buffer: the setDimensionalWeight re-check, run only for
 // the ids the write actually touched (this store's variants), so a filtered-out
 // id of another store or org never triggers a flip.
+//
+// Profit recompute: the setDimensionalWeight enqueue (every write, a clear
+// included), for the same touched ids only, so a filtered-out id never queues
+// another store's or org's order. Same lock order as setDimensionalWeight.
 
 export async function bulkSetDimensionalWeight(opts: {
   organizationId: string;
@@ -97,23 +115,27 @@ export async function bulkSetDimensionalWeight(opts: {
 
   if (variantIds.length === 0) return { updated: 0 };
 
-  // A stored order keeps the desi captured at intake, so the overrides reach
-  // only new orders, buffered orders not yet in `orders`, and the catalog
-  // estimate; no stored order is queued.
+  // The writes reach the written variants' non-final stored orders through the
+  // queue, their buffered orders through the flip, and the catalog estimate
+  // directly.
   return prisma.$transaction(async (tx) => {
     const written = await tx.productVariant.updateManyAndReturn({
       where: { id: { in: variantIds }, organizationId, storeId },
       data: { dimensionalWeightOverride: value },
       select: { id: true },
     });
+    const writtenIds = written.map((variant) => variant.id);
 
-    if (value !== null && written.length > 0) {
-      await flipBufferForVariants(tx, {
-        organizationId,
-        storeId,
-        variantIds: written.map((variant) => variant.id),
-      });
+    if (value !== null && writtenIds.length > 0) {
+      await flipBufferForVariants(tx, { organizationId, storeId, variantIds: writtenIds });
     }
+
+    // An empty id list enqueues nothing (it returns without a query).
+    await enqueueProfitRecomputeForVariants(tx, {
+      organizationId,
+      variantIds: writtenIds,
+      reason: ProfitRecomputeReason.DESI_CHANGED,
+    });
 
     return { updated: written.length };
   });

@@ -10,6 +10,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -18,6 +19,8 @@ import {
   createBufferEntry,
   createCostProfile,
   createMembership,
+  createOrder,
+  createOrderItem,
   createOrganization,
   createStore,
 } from '../../helpers/factories';
@@ -187,5 +190,73 @@ describe('Tenant isolation: PATCH variant dimensional-weight', () => {
       where: { platformOrderId: 'pkg-org-a' },
     });
     expect(promoted.status).toBe('PROMOTING');
+  });
+
+  it("Org B's desi writes on Org A's variant never queue Org A's non-final order", async () => {
+    // Org A: a variant carried by an order whose seller inputs still follow its day,
+    // so any desi write on the variant would queue it.
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA = await createStore(orgA.id);
+    const productA = await prisma.product.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        platformContentId: BigInt(7003),
+        productMainId: `pm-${randomUUID().slice(0, 8)}`,
+        title: 'Org A Queued Product',
+      },
+    });
+    const variantA = await prisma.productVariant.create({
+      data: {
+        organizationId: orgA.id,
+        storeId: storeA.id,
+        productId: productA.id,
+        platformVariantId: BigInt(7103),
+        barcode: 'BA-TI-Q',
+        stockCode: 'SA-TI-Q',
+        salePrice: new Decimal('100.00'),
+        listPrice: new Decimal('100.00'),
+        syncedDimensionalWeight: '1.00',
+      },
+    });
+    const orderA = await createOrder(orgA.id, storeA.id);
+    await createOrderItem(orderA.id, orgA.id, { productVariantId: variantA.id });
+
+    // Org B: its own user and store.
+    const userB = await createAuthenticatedTestUser();
+    const orgB = await createOrganization();
+    await createMembership(orgB.id, userB.id);
+    const storeB = await createStore(orgB.id);
+
+    const single = await desiRequest(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/products/variants/${variantA.id}/dimensional-weight`,
+      userB.accessToken,
+      { dimensionalWeight: '3.00' },
+    );
+    expect(single.status).toBe(404);
+
+    const bulk = await desiRequest(
+      `/v1/organizations/${orgB.id}/stores/${storeB.id}/products/variants/dimensional-weight`,
+      userB.accessToken,
+      { variantIds: [variantA.id], dimensionalWeight: null },
+    );
+    expect(bulk.status).toBe(200);
+    expect(await bulk.json()).toEqual({ updated: 0 });
+
+    expect(await prisma.profitRecomputeRequest.count()).toBe(0);
+
+    // Positive control: Org A's own desi write queues its non-final order.
+    const own = await desiRequest(
+      `/v1/organizations/${orgA.id}/stores/${storeA.id}/products/variants/${variantA.id}/dimensional-weight`,
+      userA.accessToken,
+      { dimensionalWeight: '3.00' },
+    );
+    expect(own.status).toBe(200);
+    const queued = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: orderA.id },
+    });
+    expect(queued?.reason).toBe(ProfitRecomputeReason.DESI_CHANGED);
   });
 });
