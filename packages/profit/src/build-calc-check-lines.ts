@@ -74,9 +74,12 @@ export async function buildCalcCheckLines(
           profile: {
             select: {
               amountGross: true,
-              // Only versions effective by `at`: the rule never reads a later one.
+              // Only the version in force at `at` (the highest version number effective
+              // by then): the in-force rule reads nothing else.
               versions: {
                 where: { effectiveFrom: { lte: args.at } },
+                orderBy: { version: 'desc' },
+                take: 1,
                 select: { effectiveFrom: true, version: true, archivedAt: true },
               },
             },

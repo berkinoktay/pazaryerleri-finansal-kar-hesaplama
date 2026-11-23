@@ -153,7 +153,9 @@ async function resolveDueOrderItems(): Promise<void> {
  * store stamped with another organization (the database allows it) holds the key.
  * That row is never modified: the update is guarded by organizationId and the insert
  * skips the conflict instead of throwing into the per-store catch. The computed
- * deadline is still returned, so the caller's items back off on it.
+ * deadline is still returned, so the caller's items back off on it. When the skipped
+ * insert met a row of this organization written concurrently, that row's deadline is
+ * returned instead.
  */
 async function upsertBarcodeMiss(
   scope: ResolutionScope,
@@ -178,11 +180,20 @@ async function upsertBarcodeMiss(
     data: [{ organizationId, storeId, barcode, vendorMissing, attempts: 1, nextRetryAt }],
     skipDuplicates: true,
   });
-  if (created.count === 0) {
-    // The (storeId, barcode) key is held by a row this organization cannot update:
-    // another organization's row in this store, or a concurrent insert.
-    syncLog.warn('resolution.miss-row-skipped', { organizationId, storeId, barcode });
-  }
+  if (created.count > 0) return nextRetryAt;
+
+  // The (storeId, barcode) key is held by another row. When it is this
+  // organization's (a concurrent insert), its deadline is the barcode's one clock:
+  // read it back instead of updating again, which would count this tick's attempt
+  // twice.
+  const concurrent = await prisma.catalogBarcodeMiss.findFirst({
+    where: { organizationId, storeId, barcode },
+    select: { nextRetryAt: true },
+  });
+  if (concurrent !== null) return concurrent.nextRetryAt ?? nextRetryAt;
+
+  // Another organization's row in this store holds the key; it is never touched.
+  syncLog.warn('resolution.miss-row-skipped', { organizationId, storeId, barcode });
   return nextRetryAt;
 }
 
@@ -384,12 +395,10 @@ async function resolveForStore(scope: ResolutionScope, items: DueItem[]): Promis
   const { organizationId, storeId } = scope;
   // 1) Yerel first-match (ucuz yol — vendor'a gitmeden bağla).
   let remaining = await linkAgainstLocalCatalog(storeId, items);
-  if (remaining.length === 0) {
-    // İlk geçişte hepsi yerelden bağlandıysa: bunların açık bir
-    // CatalogBarcodeMiss rozeti varsa kapat (gap kapandı).
-    await clearMissForLinked(scope, items, remaining);
-    return;
-  }
+  // A barcode linked locally always drops its stale CatalogBarcodeMiss row (the gap
+  // closed), whatever stays unresolved: a gated barcode below may end the tick early.
+  await clearMissForLinked(scope, items, remaining);
+  if (remaining.length === 0) return;
 
   // 2) Hedefli vendor sorgusu — ensureBarcodesInCatalog'a delege (spec
   // 2026-06-12 PR-2): tekil barkod fetch + tam katalog hattı + hata yutma

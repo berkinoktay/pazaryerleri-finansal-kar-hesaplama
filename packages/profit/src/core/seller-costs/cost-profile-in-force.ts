@@ -1,5 +1,7 @@
 import { getBusinessDayRange } from '@pazarsync/utils';
 
+import { latestVersionAt } from './cost-version-order';
+
 /**
  * The one cost rule (plan PR-3b): which seller cost links count for an order and
  * which version prices them. Owner rule (Berkin 2026-11-23): an archived or detached
@@ -15,6 +17,11 @@ import { getBusinessDayRange } from '@pazarsync/utils';
  *     time (Berkin 2026-11-23: the amount at the order time), unless none was in
  *     force then or it was an archive version; then the version in force at `at`.
  *
+ * The version in force at an instant is the one with the highest version number
+ * among those effective by then (`latestVersionAt`, amendment A11): the number, not
+ * `effectiveFrom`, orders versions, since overlapping writes can commit out of
+ * `effectiveFrom` order.
+ *
  * Every boundary is inclusive: a link attached, or a version effective, exactly at
  * `at` counts.
  */
@@ -22,7 +29,7 @@ import { getBusinessDayRange } from '@pazarsync/utils';
 /** The fields of a cost profile version the rule reads. `CostProfileVersionInput` satisfies it. */
 export interface CostVersionState {
   readonly effectiveFrom: Date;
-  readonly versionNumber: number; // breaks an effective-date tie: the higher number is the newer version
+  readonly versionNumber: number; // orders versions: the higher number is the newer version
   readonly archivedAt: Date | null; // non-null = the profile is archived from this version on
 }
 
@@ -37,30 +44,6 @@ export function costDecisionTime(orderDate: Date): Date {
   return getBusinessDayRange(orderDate).end;
 }
 
-/** True when `a` sorts before `b` by (effectiveFrom, versionNumber) ascending. */
-function versionPrecedes(a: CostVersionState, b: CostVersionState): boolean {
-  const aTime = a.effectiveFrom.getTime();
-  const bTime = b.effectiveFrom.getTime();
-  if (aTime !== bTime) return aTime < bTime;
-  return a.versionNumber < b.versionNumber;
-}
-
-/**
- * The version in force at `instant`: the greatest (effectiveFrom, versionNumber)
- * among the versions effective on or before it; null when none is.
- */
-function versionAt<V extends CostVersionState>(versions: readonly V[], instant: Date): V | null {
-  const time = instant.getTime();
-  let latest: V | null = null;
-  for (const version of versions) {
-    if (version.effectiveFrom.getTime() > time) continue;
-    if (latest === null || versionPrecedes(latest, version)) {
-      latest = version;
-    }
-  }
-  return latest;
-}
-
 /**
  * True when the link counts at `at`: it was attached on or before `at`, its profile
  * has a version in force at `at`, and that version is not an archive version. A
@@ -68,7 +51,7 @@ function versionAt<V extends CostVersionState>(versions: readonly V[], instant: 
  */
 export function isCostLinkInForce(link: LinkedCostProfile<CostVersionState>, at: Date): boolean {
   if (link.attachedAt.getTime() > at.getTime()) return false;
-  const current = versionAt(link.versions, at);
+  const current = latestVersionAt(link.versions, at);
   return current !== null && current.archivedAt === null;
 }
 
@@ -78,7 +61,7 @@ export function chooseOrderCostVersion<V extends CostVersionState>(
   params: { readonly orderDate: Date; readonly at: Date },
 ): V | null {
   if (!isCostLinkInForce(link, params.at)) return null;
-  const atOrderTime = versionAt(link.versions, params.orderDate);
+  const atOrderTime = latestVersionAt(link.versions, params.orderDate);
   if (atOrderTime !== null && atOrderTime.archivedAt === null) return atOrderTime;
-  return versionAt(link.versions, params.at);
+  return latestVersionAt(link.versions, params.at);
 }

@@ -130,6 +130,33 @@ describe('isCostLinkInForce and chooseOrderCostVersion', () => {
     expect(isCostLinkInForce(link, AT)).toBe(false);
   });
 
+  it('a higher version number wins even when its effectiveFrom is earlier (overlapping archive and restore)', () => {
+    // Archived the day before; then a restore and a second archive overlap: the
+    // archive transaction started first (earlier effectiveFrom) but committed after
+    // the restore, so it holds the higher version number and decides.
+    const firstArchive = makeVersion({
+      label: 'archive-1',
+      effectiveFrom: '2026-11-19T10:00:00Z',
+      versionNumber: 2,
+      archived: true,
+    });
+    const restore = makeVersion({
+      label: 'restore',
+      effectiveFrom: '2026-11-20T07:10:00Z',
+      versionNumber: 3,
+    });
+    const secondArchive = makeVersion({
+      label: 'archive-2',
+      effectiveFrom: '2026-11-20T07:05:00Z',
+      versionNumber: 4,
+      archived: true,
+    });
+    const link = makeLink(LONG_AGO, [BASE, firstArchive, restore, secondArchive]);
+
+    expect(isCostLinkInForce(link, AT)).toBe(false);
+    expect(choose(link)).toBeNull();
+  });
+
   it('archived then restored before `at` is in force: priced at the order time when that version was active, else by the restore', () => {
     // Archived and restored after the order: the order-time version is the base.
     const archivedAfterOrder = makeVersion({

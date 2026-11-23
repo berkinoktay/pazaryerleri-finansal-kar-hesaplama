@@ -32,8 +32,8 @@ import { getBusinessDayRange } from '@pazarsync/utils';
  *   - the variant has at least one `product_variant_cost_profiles` link that is in
  *     force at the day end by the shared cost rule (`isCostLinkInForce` in
  *     `@pazarsync/profit`, plan PR-3b): the link was attached on or before the day
- *     end, its profile has a version effective on or before it, and the latest such
- *     version is not an archive version. A profile archived before the day ended
+ *     end, its profile has a version effective on or before it, and the newest such
+ *     version (the highest version number) is not an archive version. A profile archived before the day ended
  *     (and not restored before it) therefore never counts (Berkin 2026-11-23: an
  *     archived or detached profile is ignored by every later order); one archived
  *     after the day ended still does.
@@ -97,7 +97,7 @@ export async function hadCostWithinOrderDay(
 
   // Tenant-scoped: every cost profile link of these variants, where the link, the
   // variant (with its store) and the profile all belong to THIS organization. The
-  // in-force decision needs each profile's version history up to the day end, so it
+  // in-force decision needs each profile's version in force at the day end, so it
   // runs in memory with the shared rule rather than as a SQL filter.
   const links = await tx.productVariantCostProfile.findMany({
     where: {
@@ -111,9 +111,12 @@ export async function hadCostWithinOrderDay(
       attachedAt: true,
       profile: {
         select: {
-          // Only versions effective by the day end: the rule never reads a later one.
+          // Only the version in force at the day end (the highest version number
+          // effective by then): the in-force rule reads nothing else.
           versions: {
             where: { effectiveFrom: { lte: at } },
+            orderBy: { version: 'desc' },
+            take: 1,
             select: { effectiveFrom: true, version: true, archivedAt: true },
           },
         },

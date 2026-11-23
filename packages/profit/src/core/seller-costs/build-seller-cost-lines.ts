@@ -12,11 +12,12 @@ import { activeItems, type ParcelItemSnapshot, type ParcelSnapshot } from '../pa
 import { createProfitLine, type LineMoney, type ProfitLine } from '../profit-line';
 import { type ProfitIssue } from '../profit-issue';
 import { vatFromGross } from '../../tax/tr/vat';
+import { latestVersionAt, versionPrecedes } from './cost-version-order';
 
 /** One version of a seller cost profile, as it stood at a point in time. All amounts are in Turkish lira. */
 export interface CostProfileVersionInput {
   readonly effectiveFrom: Date;
-  readonly versionNumber: number; // breaks an effective-date tie: the higher number is the newer version
+  readonly versionNumber: number; // orders versions: the higher number is the newer version
   readonly amountGross: Decimal; // per unit, in Turkish lira
   readonly vatRatePct: Decimal;
   readonly archivedAt: Date | null; // version snapshot: non-null = the profile is archived from this version on
@@ -35,48 +36,32 @@ export interface ItemCostInput {
   readonly profiles: readonly ItemCostProfileInput[];
 }
 
-/** True when `a` sorts before `b` by (effectiveFrom, versionNumber) ascending. */
-function versionPrecedes(a: CostProfileVersionInput, b: CostProfileVersionInput): boolean {
-  const aTime = a.effectiveFrom.getTime();
-  const bTime = b.effectiveFrom.getTime();
-  if (aTime !== bTime) return aTime < bTime;
-  return a.versionNumber < b.versionNumber;
-}
-
 /**
- * Chooses the version that applies at `orderDate`, ordering versions by
- * (effectiveFrom, versionNumber): the version with the greatest (effectiveFrom,
- * versionNumber) among those whose `effectiveFrom` is on or before the order date.
- * When none qualifies the version with the smallest (effectiveFrom, versionNumber)
- * is used (the first-version rule, design section 6.6). The version number breaks
- * an effective-date tie. Throws `RangeError` on an empty list.
+ * Chooses the version that applies at `orderDate`: the version in force then
+ * (`latestVersionAt`, the highest version number among those whose `effectiveFrom`
+ * is on or before the order date; amendment A11). When none qualifies the oldest
+ * version by the same order is used (the first-version rule, design section 6.6).
+ * Throws `RangeError` on an empty list.
  *
- * Generic so the order profit snapshot can pin the chosen version by its id with
- * the same rule the engine prices by; the chosen element is returned as passed in.
+ * Generic so a caller can keep its own version element; the chosen element is
+ * returned as passed in.
  */
 export function chooseCostVersion<T extends CostProfileVersionInput>(
   versions: readonly T[],
   orderDate: Date,
 ): T {
-  const orderTime = orderDate.getTime();
-  let latestApplicable: T | null = null;
+  const applicable = latestVersionAt(versions, orderDate);
+  if (applicable !== null) return applicable;
   let earliest: T | null = null;
   for (const version of versions) {
     if (earliest === null || versionPrecedes(version, earliest)) {
       earliest = version;
     }
-    if (
-      version.effectiveFrom.getTime() <= orderTime &&
-      (latestApplicable === null || versionPrecedes(latestApplicable, version))
-    ) {
-      latestApplicable = version;
-    }
   }
-  const chosen = latestApplicable ?? earliest;
-  if (chosen === null) {
+  if (earliest === null) {
     throw new RangeError('a cost profile must have at least one version');
   }
-  return chosen;
+  return earliest;
 }
 
 /**

@@ -229,8 +229,10 @@ export async function detachCostProfiles(
  * Replace cost profiles for a set of variants atomically.
  *
  * For each variant in `variantIds`:
- *   1. Delete all existing links for that variant within `orgId`.
- *   2. Insert new links for each profileId in `profileIds`.
+ *   1. Delete its links within `orgId` whose profile is not in `profileIds`.
+ *   2. Insert the links for each profileId in `profileIds` it does not have yet.
+ * A link that stays keeps its `attachedAt`, so the cost rule keeps judging it from
+ * the instant it was first attached.
  *
  * `profileIds` may be empty — this clears all profiles for the listed variants.
  *
@@ -257,15 +259,19 @@ export async function replaceCostProfilesForVariants(
   const storeId = await assertSameStore(orgId, profileIds, variantIds);
 
   const bufferEntriesPromoted = await prisma.$transaction(async (tx) => {
-    // Delete all existing links for these variants within the org
+    // Delete only the links whose profile leaves the set, within the org. A link
+    // that stays keeps its row and its attachedAt (the cost rule judges a link by
+    // it); an empty set clears every link of these variants.
     await tx.productVariantCostProfile.deleteMany({
       where: {
         productVariantId: { in: variantIds },
         organizationId: orgId,
+        ...(profileIds.length > 0 ? { profileId: { notIn: profileIds } } : {}),
       },
     });
 
-    // Insert new Cartesian product (skipped when clearing all profiles).
+    // Insert the pairs not linked yet (skipDuplicates leaves the kept links as they
+    // are; skipped when clearing all profiles).
     if (profileIds.length > 0) {
       const data = variantIds.flatMap((productVariantId) =>
         profileIds.map((profileId) => ({

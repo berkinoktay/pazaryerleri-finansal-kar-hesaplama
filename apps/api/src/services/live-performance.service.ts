@@ -1173,6 +1173,7 @@ export async function getBufferDetail(args: {
     select: {
       id: true,
       platformOrderNumber: true,
+      orderDate: true,
       mappedOrder: true,
     },
   });
@@ -1181,6 +1182,10 @@ export async function getBufferDetail(args: {
   }
 
   const mapped = entry.mappedOrder as unknown as MappedOrder;
+  // The mapped order's own instant when it holds a valid date (the JSONB round-trip
+  // leaves it an ISO string); else the row's business-day anchor, so a row with a
+  // missing or broken date still opens.
+  const orderDate = parseMappedOrderDate(mapped.orderDate) ?? entry.orderDate;
 
   const barcodes = [...new Set(mapped.lines.map((l) => l.barcode))];
   const variants =
@@ -1207,14 +1212,15 @@ export async function getBufferDetail(args: {
 
   // The calculability gate's own lines for this order, scoped by organizationId +
   // storeId and judged at the order's cost decision time (its business-day end), as
-  // the gate that holds the order judges them. buildCalcCheckLines returns one line
-  // per input line in input order, so index i is mapped.lines[i]. The JSONB
-  // round-trip leaves orderDate an ISO string, hence the Date conversion.
+  // the gate that holds the order judges them. The decision time comes from the
+  // row's order_date column, as in the promote and flush workers, never from the
+  // JSONB. buildCalcCheckLines returns one line per input line in input order, so
+  // index i is mapped.lines[i].
   const calcLines = await buildCalcCheckLines(prisma, {
     organizationId: args.orgId,
     storeId: args.storeId,
     lines: mapped.lines.map((l) => ({ barcode: l.barcode })),
-    at: costDecisionTime(new Date(mapped.orderDate)),
+    at: costDecisionTime(entry.orderDate),
   });
 
   const lines: BufferDetailLine[] = mapped.lines.map((line, index) => {
@@ -1239,11 +1245,18 @@ export async function getBufferDetail(args: {
 
   return {
     platformOrderNumber: entry.platformOrderNumber,
-    orderDate: new Date(mapped.orderDate).toISOString(),
+    orderDate: orderDate.toISOString(),
     status: mapped.status,
     saleGross: new Decimal(mapped.saleGross).toFixed(2),
     lines,
   };
+}
+
+/** A buffer row's JSONB order date as a Date; null when it is missing or not a valid date string. */
+function parseMappedOrderDate(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**

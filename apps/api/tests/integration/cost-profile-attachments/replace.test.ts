@@ -109,6 +109,48 @@ describe('POST /v1/organizations/:orgId/cost-profile-attachments/replace', () =>
     expect(links[0]?.profileId).toBe(profile2!.id);
   });
 
+  it('replace keeps the attachedAt of a profile that stays in the set', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const [staying, added] = await Promise.all([
+      seedProfile(org.id, store.id),
+      seedProfile(org.id, store.id),
+    ]);
+    const variant = await seedVariant(org.id, store.id);
+
+    // The cost rule judges a link by its attachedAt, so a profile that stays must keep it.
+    const attachedLongAgo = new Date('2000-01-01T00:00:00Z');
+    await prisma.productVariantCostProfile.create({
+      data: {
+        profileId: staying!.id,
+        productVariantId: variant.id,
+        organizationId: org.id,
+        attachedAt: attachedLongAgo,
+      },
+    });
+
+    const beforeReplace = Date.now();
+    const res = await app.request(`/v1/organizations/${org.id}/cost-profile-attachments/replace`, {
+      method: 'POST',
+      headers: { Authorization: bearer(user.accessToken), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variantIds: [variant.id], profileIds: [staying!.id, added!.id] }),
+    });
+    expect(res.status).toBe(200);
+
+    const stayingLink = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { productVariantId: variant.id, profileId: staying!.id, organizationId: org.id },
+    });
+    expect(stayingLink.attachedAt).toEqual(attachedLongAgo);
+    const addedLink = await prisma.productVariantCostProfile.findFirstOrThrow({
+      where: { productVariantId: variant.id, profileId: added!.id, organizationId: org.id },
+    });
+    // Allow for clock skew between the app and the database.
+    expect(addedLink.attachedAt.getTime()).toBeGreaterThanOrEqual(beforeReplace - 60_000);
+  });
+
   it('clears all profiles when profileIds is empty', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();

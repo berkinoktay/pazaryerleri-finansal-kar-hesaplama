@@ -405,6 +405,53 @@ describe('GET live-performance/buffer/{bufferId}', () => {
     });
   });
 
+  it('returns the lines of a buffer row whose mapped order has no orderDate', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id, 'OWNER');
+    const store = await createStore(org.id);
+    const variantId = await seedVariant(org.id, store.id, {
+      title: 'Dateless Line',
+      barcode: 'BC-DATELESS',
+      seq: 40,
+      syncedDimensionalWeight: '1.00',
+    });
+    const profile = await createCostProfile(org.id, { storeId: store.id });
+    await prisma.productVariantCostProfile.create({
+      data: {
+        organizationId: org.id,
+        productVariantId: variantId,
+        profileId: profile.id,
+        attachedBy: user.id,
+        attachedAt: COST_FIXTURE_EPOCH,
+      },
+    });
+    // The row's own order_date column (the business-day anchor) is the decision time.
+    const rowOrderDate = new Date('2026-06-05T00:00:00.000Z');
+    const bufferEntry = await createBufferEntry(org.id, store.id, {
+      orderDate: rowOrderDate,
+      mappedOrder: {
+        status: 'PENDING',
+        saleGross: '100.00',
+        lines: [{ barcode: 'BC-DATELESS', quantity: 1, lineSaleGross: '100.00' }],
+      },
+    });
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/buffer/${bufferEntry.id}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.orderDate).toBe(rowOrderDate.toISOString());
+    expect(body.lines).toHaveLength(1);
+    expect(body.lines[0]).toMatchObject({
+      barcode: 'BC-DATELESS',
+      variantId,
+      isCostMissing: false,
+    });
+  });
+
   it('404 when the buffer entry does not exist for this store', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();

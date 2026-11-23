@@ -19,7 +19,7 @@ import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
 import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { encryptCredentials } from '@pazarsync/sync-core';
+import { encryptCredentials, syncLog } from '@pazarsync/sync-core';
 
 import { processVariantResolution } from '../../src/handlers/variant-resolution';
 
@@ -1104,6 +1104,79 @@ describe('processVariantResolution', () => {
         where: { storeId: ctx.storeId, barcode: 'BC-GATED-LOCAL' },
       }),
     ).toBe(0);
+  });
+
+  it('a barcode linked locally drops its miss row even when another barcode stays gated', async () => {
+    const ctx = await buildStore();
+    await buildUnresolvedOrder(ctx, ['BC-LOCAL-A', 'BC-GATED-B']);
+    // A has a stale miss row but reached the catalog meanwhile; B is a confirmed
+    // vendor-missing barcode whose deadline is still ahead.
+    await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-LOCAL-A',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    const gatedRow = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-GATED-B',
+        vendorMissing: true,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 12 * 60 * 60_000),
+      },
+    });
+    await seedCatalogVariant(ctx.organizationId, ctx.storeId, 'BC-LOCAL-A', true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('vendor must NOT be called: A links locally and B is gated');
+    });
+
+    await processVariantResolution();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      await prisma.catalogBarcodeMiss.count({
+        where: { storeId: ctx.storeId, barcode: 'BC-LOCAL-A' },
+      }),
+    ).toBe(0);
+    const gatedAfter = await prisma.catalogBarcodeMiss.findUniqueOrThrow({
+      where: { id: gatedRow.id },
+    });
+    expect(gatedAfter.attempts).toBe(1);
+    expect(gatedAfter.nextRetryAt).toEqual(gatedRow.nextRetryAt);
+  });
+
+  it('a miss row of this organization inserted concurrently gives the items its deadline, without the cross-organization warning', async () => {
+    const ctx = await buildUnresolvedScenario('BC-MISS-RACE');
+    // The row a concurrent writer of this organization inserted between this tick's
+    // update and insert: the first update is made to find nothing, the insert then
+    // skips on the (storeId, barcode) key.
+    const concurrent = await prisma.catalogBarcodeMiss.create({
+      data: {
+        organizationId: ctx.organizationId,
+        storeId: ctx.storeId,
+        barcode: 'BC-MISS-RACE',
+        vendorMissing: false,
+        attempts: 1,
+        nextRetryAt: new Date(Date.now() + 3 * 60 * 60_000),
+      },
+    });
+    vi.spyOn(prisma.catalogBarcodeMiss, 'updateMany').mockResolvedValueOnce({ count: 0 });
+    const warnSpy = vi.spyOn(syncLog, 'warn');
+    const fetchSpy = spyVendorMissing('BC-MISS-RACE');
+
+    await processVariantResolution();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalledWith('resolution.miss-row-skipped', expect.anything());
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: ctx.itemId } });
+    expect(item.variantResolutionAttempts).toBe(1);
+    expect(item.nextResolutionAt).toEqual(concurrent.nextRetryAt);
   });
 
   it("a vendor-missing row of another organization's store does not gate this store", async () => {
