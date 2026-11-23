@@ -233,6 +233,13 @@ export {
   captureOrderProfitSnapshot,
   type OrderProfitSnapshotOutcome,
 } from './persistence/order-profit-snapshot';
+// Seller inputs at an order's business-day end (same-day edit window, PR-1)
+export {
+  loadSellerInputsAt,
+  resolveDesiAtDayEnd,
+  type SellerDesiAt,
+  type SellerInputsAt,
+} from './persistence/seller-inputs-at';
 // Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md
 export {
   loadTrendyolScenarioBases,

@@ -830,6 +830,33 @@ export async function seedBareOrder(params: {
 }
 
 /**
+ * Deletes the organization's rows from both seller-input history logs: "the writes
+ * so far were fixture setup, not history". Once the history triggers exist, a test
+ * that arranges a past-dated order's fixture with a desi UPDATE or a link DELETE gets
+ * a log row stamped now, after that order's day end, so the day-end reconstruction
+ * would return the value from before the arrangement.
+ */
+export async function clearSellerInputHistory(organizationId: string): Promise<void> {
+  await prisma.costLinkRemoval.deleteMany({ where: { organizationId } });
+  await prisma.variantDesiChange.deleteMany({ where: { organizationId } });
+}
+
+/**
+ * Restamps the organization's seller-input history rows (`detached_at`,
+ * `changed_at`) to `at`: "the writes so far happened at `at`".
+ */
+export async function backdateSellerInputHistory(organizationId: string, at: Date): Promise<void> {
+  await prisma.costLinkRemoval.updateMany({
+    where: { organizationId },
+    data: { detachedAt: at },
+  });
+  await prisma.variantDesiChange.updateMany({
+    where: { organizationId },
+    data: { changedAt: at },
+  });
+}
+
+/**
  * Attaches an extra single-version COGS profile to a variant and returns the profile
  * id. The version's `effectiveFrom` and the link's `attachedAt` default to
  * COST_FIXTURE_EPOCH.
