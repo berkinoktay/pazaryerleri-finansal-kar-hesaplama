@@ -23,6 +23,8 @@ interface VariantRow {
 }
 interface VariantWhereArg {
   where: { storeId_platformVariantId: { platformVariantId: bigint } };
+  create: { syncedDimensionalWeight?: string | null };
+  update: { syncedDimensionalWeight?: string | null };
 }
 
 const productUpsert = vi.fn<() => Promise<{ id: string }>>();
@@ -156,5 +158,62 @@ describe('upsertCatalogBatch', () => {
     await upsertCatalogBatch(STORE, [content(101n, 102n, 103n, 104n, 105n)], null);
 
     expect(variantUpsert).toHaveBeenCalledTimes(5);
+  });
+
+  // Owner rule (Berkin 2026-11-23): catalog sync never erases a known Trendyol
+  // desi. When Trendyol sends no usable desi (0 or absent, mapped to null) for
+  // an existing variant, the update leaves the stored synced desi as it is; a
+  // real value still replaces it, and a new variant is created with null.
+  describe('synced desi', () => {
+    function programOne(): void {
+      program(
+        new Map<bigint, VariantRow>([
+          [
+            201n,
+            {
+              id: 'v201',
+              syncedCommissionRate: null,
+              syncedDimensionalWeight: new Decimal('2'),
+            },
+          ],
+        ]),
+      );
+    }
+
+    function withDesi(syncedDimensionalWeight: string | null): MappedProduct {
+      const mapped = content(201n);
+      return {
+        ...mapped,
+        variants: mapped.variants.map((variant) => ({ ...variant, syncedDimensionalWeight })),
+      };
+    }
+
+    function upsertArgs(): VariantWhereArg {
+      const args = variantUpsert.mock.calls[0]?.[0];
+      if (args === undefined) throw new Error('no variant upsert recorded');
+      return args;
+    }
+
+    it('leaves the stored synced desi unchanged on update when Trendyol sends none', async () => {
+      programOne();
+
+      await upsertCatalogBatch(STORE, [withDesi(null)], null);
+
+      const args = upsertArgs();
+      expect(args.update.syncedDimensionalWeight).toBeUndefined();
+      expect(args.update).not.toHaveProperty('syncedDimensionalWeight');
+      // A new variant with no desi is still created with an empty synced desi.
+      expect(args.create).toHaveProperty('syncedDimensionalWeight', null);
+    });
+
+    it('writes a real Trendyol desi on both create and update', async () => {
+      programOne();
+
+      await upsertCatalogBatch(STORE, [withDesi('3.50')], null);
+
+      const args = upsertArgs();
+      expect(args.update).toHaveProperty('syncedDimensionalWeight', '3.50');
+      expect(args.create).toHaveProperty('syncedDimensionalWeight', '3.50');
+    });
   });
 });

@@ -41,7 +41,7 @@
  *   1. NO_CARRIER  (TRENDYOL_CONTRACT + null carrier) takes precedence over
  *      the NO_DESI check, as the resolver checks the carrier first.
  *   2. NO_DESI     (effective desi NULL: no seller override and no desi from
- *      the marketplace). A desi of 0 is a real desi and is priced.
+ *      the marketplace). Any stored desi is priced (a seller desi is at least 1).
  *   3. OWN_CONTRACT_EMPTY (OWN_CONTRACT + no own_shipping_tariffs row).
  *   4. OK          (any tariff resolved).
  *   5. DESI_OVERFLOW (fall-through).

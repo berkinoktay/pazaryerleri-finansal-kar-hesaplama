@@ -189,11 +189,13 @@ export interface MappedProductVariant {
   // Desi as a 2-decimal string, or null when Trendyol sent no usable desi (the
   // field is absent, null, not a number, negative, or 0 once rounded to 2
   // decimals). Trendyol omits it on some products and sends 0 on others whose desi
-  // was never entered, so a Trendyol 0 is stored as null, never as '0.00'; a real
-  // desi of 0 only comes from the seller's override. Always written, so a null
-  // clears a desi Trendyol no longer sends. Lands in the syncedDimensionalWeight
-  // column only, never in dimensionalWeightOverride, which is exclusively the
-  // user's override (see ProductVariant schema comment).
+  // was never entered, so a Trendyol 0 is mapped to null, never to '0.00'. A
+  // seller desi (the override) is at least 1 (Berkin 2026-11-23). A new variant is
+  // created with this value; on an existing variant a null leaves the stored
+  // synced desi unchanged, so sync never erases a known Trendyol desi (Berkin
+  // 2026-11-23), while a real value replaces it. Lands in the
+  // syncedDimensionalWeight column only, never in dimensionalWeightOverride,
+  // which is exclusively the user's override (see ProductVariant schema comment).
   syncedDimensionalWeight: string | null;
   // Commission PERCENT synced from Trendyol (7.83 = %7.83). Like desi, a 0 is
   // not a real value: 0/absent both mean "unknown" and collapse to null — a real %0

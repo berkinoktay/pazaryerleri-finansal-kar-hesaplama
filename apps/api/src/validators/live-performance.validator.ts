@@ -105,7 +105,7 @@ const LIVE_DESI_FIELDS = {
       description:
         'Effective desi (decimal string): the seller override, else the marketplace desi. ' +
         'Null when the variant has neither, and on a row whose barcode resolves to no variant. ' +
-        '"0" is a real desi.',
+        'A seller override is at least 1.',
       example: '1.5',
     }),
   syncedDimensionalWeight: z
@@ -113,8 +113,9 @@ const LIVE_DESI_FIELDS = {
     .nullable()
     .openapi({
       description:
-        'The marketplace desi (decimal string). Null when the marketplace sent none, and on a ' +
-        'row whose barcode resolves to no variant.',
+        'The last known marketplace desi (decimal string); a sync without a desi keeps it. ' +
+        'Null when the marketplace never sent one, and on a row whose barcode resolves to no ' +
+        'variant.',
       example: '1.2',
     }),
   isDimensionalWeightOverridden: z.boolean().openapi({
@@ -125,8 +126,8 @@ const LIVE_DESI_FIELDS = {
   isDimensionalWeightMissing: z.boolean().openapi({
     description:
       'True when a non-digital variant has no seller desi and no marketplace desi (same rule ' +
-      'as VariantSummary.isDimensionalWeightMissing). A desi of 0 is not missing; a digital ' +
-      'variant needs none. False on a row whose barcode resolves to no variant.',
+      'as VariantSummary.isDimensionalWeightMissing). Any stored desi is not missing; a ' +
+      'digital variant needs none. False on a row whose barcode resolves to no variant.',
     example: false,
   }),
 };

@@ -8,7 +8,7 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { formatTrDecimal } from '@/lib/parse-tr-decimal';
+import { formatTrDecimal, parseTrDecimal } from '@/lib/parse-tr-decimal';
 import { cn } from '@/lib/utils';
 
 import type { VariantSummary } from '../api/list-products.api';
@@ -45,19 +45,33 @@ export interface DesiCellPopoverProps {
 /**
  * The editing string the input opens with: empty for a variant with no desi
  * (null on the wire), otherwise the effective value in Turkish format ("1.50"
- * opens as "1,5"; a real 0 opens as "0"). Formatted with the locale-fixed tr
- * formatter, never next-intl's: the field's convention is Turkish whatever the
- * UI locale.
+ * opens as "1,5"; a stored 0 opens as "0" and must be raised to at least 1 to
+ * save). Formatted with the locale-fixed tr formatter, never next-intl's: the
+ * field's convention is Turkish whatever the UI locale.
  */
 function initialInputValue(variant: DesiEditableVariant): string {
   if (variant.dimensionalWeight === null) return '';
   return formatTrDecimal(variant.dimensionalWeight);
 }
 
-/** Trendyol's desi; null when Trendyol sent none (its 0 is stored as null too). */
+/**
+ * Trendyol's last known desi; null when Trendyol never sent one (its 0 is "no
+ * desi" too). Catalog sync keeps a known value when Trendyol later sends none.
+ */
 function syncedDesi(variant: DesiEditableVariant): Decimal | null {
   if (variant.syncedDimensionalWeight === null) return null;
   return new Decimal(variant.syncedDimensionalWeight);
+}
+
+/**
+ * Whether the typed text names Trendyol's own (last known) desi. Compared by
+ * value, independent of the seller-desi bounds: a Trendyol desi below 1 (or a
+ * stored 0) is not a valid seller desi, yet it is the same value.
+ */
+function inputEqualsSyncedDesi(value: string, synced: Decimal | null): boolean {
+  if (synced === null) return false;
+  const typed = parseTrDecimal(value, { grouping: false });
+  return typed !== null && typed.eq(synced);
 }
 
 /**
@@ -117,6 +131,17 @@ export function DesiCellPopover({
 
   function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    // The seller has no desi of their own and the input still shows Trendyol's:
+    // there is nothing to save. Sending it would only fail when Trendyol's desi
+    // is below the seller minimum of 1.
+    if (
+      !variant.isDimensionalWeightOverridden &&
+      inputEqualsSyncedDesi(value, syncedDesi(variant))
+    ) {
+      setErrorCode(null);
+      setOpen(false);
+      return;
+    }
     const parsed = parseDesiInput(value);
     switch (parsed.kind) {
       case 'empty':
@@ -140,9 +165,7 @@ export function DesiCellPopover({
   }
 
   const synced = syncedDesi(variant);
-  const parsedInput = parseDesiInput(value);
-  const inputMatchesSynced =
-    synced !== null && parsedInput.kind === 'valid' && parsedInput.value.eq(synced);
+  const inputMatchesSynced = inputEqualsSyncedDesi(value, synced);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>

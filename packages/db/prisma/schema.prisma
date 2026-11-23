@@ -622,18 +622,21 @@ model ProductVariant {
   // syncs refresh it.
   syncedCommissionRate    Decimal? @map("synced_commission_rate") @db.Decimal(5, 2)
   // Two-column sync-protection pair (see docs/plans/archive/... for rationale):
-  // syncedDimensionalWeight is the marketplace's value, refreshed every sync.
+  // syncedDimensionalWeight is the marketplace's last known value: a sync that
+  // brings a desi refreshes it, a sync that brings none keeps it (sync never
+  // erases a known Trendyol desi, Berkin 2026-11-23).
   // dimensionalWeightOverride is the user's manual override; null = no
   // override. The sync worker writes ONLY to the synced column, never to
   // dimensionalWeightOverride, so the "user value is sacred" invariant is
   // structural, not just enforced in code.
   //
-  // Null vs 0: null on the synced column = the marketplace sent no usable desi
-  // (the field was absent, null, not a number, 0 or negative). Trendyol sends 0
-  // for a product whose desi was never entered, so the mapper stores its 0 as
-  // null (Berkin 2026-11-22). A stored 0 (a seller override) is a REAL desi, the
-  // lowest tariff tier: the tariff table covers desi 0 onward, so a 0-desi variant
-  // gets a real cargo cost. A stored 0 never means "missing".
+  // Null vs 0: null on the synced column = the marketplace never sent a usable
+  // desi (the field was absent, null, not a number, 0 or negative). Trendyol
+  // sends 0 for a product whose desi was never entered, so the mapper maps its 0
+  // to null (Berkin 2026-11-22). A seller desi (the override) is at least 1
+  // (Berkin 2026-11-23); the API validators enforce it. Any stored value still
+  // counts as a desi, a stored 0 included (priced at the lowest tariff tier); a
+  // stored value never means "missing".
   //
   // Effective desi = dimensionalWeightOverride ?? syncedDimensionalWeight.
   // Both null = the variant has no desi: the shipping estimate is NO_DESI (no
@@ -641,8 +644,8 @@ model ProductVariant {
   // it waits at the desi gate, like a missing cost, until the seller enters one.
   //
   // The column default 0 is kept on purpose: the production writer (the mapper
-  // through upsertCatalogBatch) always writes the value explicitly, so the
-  // default only serves test and seed writers.
+  // through upsertCatalogBatch) always writes the value explicitly when it
+  // creates a variant, so the default only serves test and seed writers.
   //
   // A CHECK constraint forbids any value below 0 on either column; null passes
   // (product_variants_dimensional_weight_override_nonneg_check in

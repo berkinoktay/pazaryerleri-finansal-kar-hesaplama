@@ -78,7 +78,8 @@ function buildScenarioBase(params: {
       barcode: variant.barcode,
       saleVatRatePct: new Decimal(variant.vatRate ?? DEFAULT_SALE_VAT_RATE_PCT),
       // The user override wins when set, else the synced desi; both null = no desi
-      // (the engine reports UNKNOWN_DESI). 0 is a real desi.
+      // (the engine reports UNKNOWN_DESI). Any stored value counts, a stored 0
+      // included (a seller desi is at least 1).
       unitDesi: decOrNull(variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight),
       isDigital: variant.isDigital,
       categoryId: variant.product.categoryId?.toString() ?? null,

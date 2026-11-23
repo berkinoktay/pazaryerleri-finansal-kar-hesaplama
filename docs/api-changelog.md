@@ -26,6 +26,20 @@ section "Versioning" for details.
 
 ### Changed
 
+- **A seller desi is at least 1; a sync without a desi keeps the last known Trendyol desi**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
+  `PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/dimensional-weight`). The
+  `dimensionalWeight` body field now accepts the closed range `[1, 999.99]` instead of
+  `[0, 999.99]`: `"0"` and anything below 1 (for example `"0.99"`) answer 422 `VALIDATION_ERROR`
+  with `INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL` (a negative stays `INVALID_DIMENSIONAL_WEIGHT_FORMAT`).
+  `null` still clears the override. This replaces the rule that a seller desi of 0 is a real desi; a
+  Trendyol 0 or missing desi still counts as no desi. `syncedDimensionalWeight` (products list,
+  the desi PATCH response, live performance) is now the last known Trendyol desi: a catalog sync
+  that brings no desi for an existing variant leaves it unchanged instead of clearing it; a real
+  new value still replaces it. Only descriptions change in the spec; no field or schema shape changes.
+  Breaking for a client that sends a desi below 1; the web client ships the matching change in the
+  same PR.
+
 - **Orders and returns date filters select whole Istanbul business days**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`,

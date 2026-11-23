@@ -1,4 +1,5 @@
 export { formatCurrency, formatNumber, formatPercent } from './currency';
+export { SELLER_DESI_MAX_INCLUSIVE, SELLER_DESI_MIN_INCLUSIVE } from './desi';
 export { requireEnv } from './env';
 export {
   APP_TIME_ZONE,

@@ -139,27 +139,72 @@ describe('DesiCellPopover', () => {
     expect(screen.getByText(popover.syncedMissing)).toBeInTheDocument();
   });
 
-  it('treats a stored synced desi of 0 as a real value: pre-filled "0", hint instead of the note', async () => {
+  // A synced desi below 1: a stored 0 only comes from the column default (the
+  // mapper stores a Trendyol 0 as null), while a real Trendyol desi such as 0.5
+  // is kept by the mapper. The popover shows either as a desi, never the
+  // "no Trendyol desi" note, and the synced value hint still hides while the
+  // input equals it. It is not a valid seller desi (a seller desi is at least 1,
+  // Berkin 2026-11-23), but it is already the variant's working desi, so saving
+  // it unchanged closes the popover without a request instead of refusing it.
+  it.each([
+    ['0', '0'],
+    ['0.50', '0,5'],
+  ] as const)(
+    'pre-fills a synced desi of %s below 1: hint hidden while equal, shown once different, unchanged save is a no-op',
+    async (wire, display) => {
+      const bodies = capturePatches();
+      const { user } = renderPopover(
+        makeVariantSummary({
+          id: VARIANT_ID,
+          dimensionalWeight: wire,
+          syncedDimensionalWeight: wire,
+          isDimensionalWeightOverridden: false,
+          isDimensionalWeightMissing: false,
+        }),
+      );
+      await user.click(screen.getByRole('button', { name: display }));
+
+      const input = screen.getByLabelText(popover.title);
+      expect(input).toHaveValue(display);
+      expect(screen.queryByText(popover.syncedMissing)).toBeNull();
+      // The input equals the Trendyol value, so the hint is hidden until it differs.
+      expect(screen.queryByText(syncedHint(display))).toBeNull();
+
+      await user.clear(input);
+      await user.type(input, '2');
+      expect(screen.getByText(syncedHint(display))).toBeInTheDocument();
+
+      await user.clear(input);
+      await user.type(input, display);
+      expect(screen.queryByText(syncedHint(display))).toBeNull();
+
+      await user.click(screen.getByRole('button', { name: popover.save }));
+      await waitFor(() => expect(screen.queryByLabelText(popover.title)).toBeNull());
+      expect(screen.queryByText(popover.errors.INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL)).toBeNull();
+      expect(bodies).toEqual([]);
+    },
+  );
+
+  // A stored seller desi of 0 (saved under the 2026-11-22 rule) is the seller's
+  // own value, not Trendyol's: saving it again is refused inline until the
+  // seller raises it to at least 1 or clears it.
+  it('refuses to save an override below 1 that equals nothing of Trendyol', async () => {
+    const bodies = capturePatches();
     const { user } = renderPopover(
       makeVariantSummary({
         id: VARIANT_ID,
         dimensionalWeight: '0',
-        syncedDimensionalWeight: '0',
-        isDimensionalWeightOverridden: false,
+        syncedDimensionalWeight: '2',
+        isDimensionalWeightOverridden: true,
         isDimensionalWeightMissing: false,
       }),
     );
-    await user.click(screen.getByRole('button', { name: '0' }));
-
-    const input = screen.getByLabelText(popover.title);
-    expect(input).toHaveValue('0');
-    expect(screen.queryByText(popover.syncedMissing)).toBeNull();
-    // The input equals the Trendyol value, so the hint is hidden until it differs.
-    expect(screen.queryByText(syncedHint('0'))).toBeNull();
-
-    await user.clear(input);
-    await user.type(input, '2');
-    expect(screen.getByText(syncedHint('0'))).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: desiCell.overrideAria }));
+    await user.click(screen.getByRole('button', { name: popover.save }));
+    expect(
+      await screen.findByText(popover.errors.INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL),
+    ).toBeInTheDocument();
+    expect(bodies).toEqual([]);
   });
 
   it('saves "1,5" as the dot string "1.5" and closes', async () => {
@@ -177,7 +222,10 @@ describe('DesiCellPopover', () => {
     ['abc', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
     ['1,555', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
     ['1.234,5', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
-    ['-1', 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL'],
+    // A minus sign is a format error, as the backend answers.
+    ['-1', 'INVALID_DIMENSIONAL_WEIGHT_FORMAT'],
+    // A seller desi is at least 1 (Berkin 2026-11-23).
+    ['0', 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL'],
     ['1000', 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE'],
   ] as const)('shows the %s error inline and sends no request', async (raw, code) => {
     const bodies = capturePatches();

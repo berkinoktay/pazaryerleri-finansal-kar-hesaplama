@@ -750,7 +750,10 @@ describe('processProductsChunk', () => {
     expect(variant.syncedDimensionalWeight?.toString()).toBe('2');
   });
 
-  it('a re-sync without a Trendyol desi empties the synced desi and keeps the user override', async () => {
+  // Owner rule (Berkin 2026-11-23): catalog sync never erases a known Trendyol
+  // desi. This replaces the earlier behaviour where a re-sync without a desi
+  // emptied the synced column.
+  it('a re-sync without a Trendyol desi keeps the last known synced desi and the user override', async () => {
     const user = await createUserProfile();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
@@ -822,11 +825,20 @@ describe('processProductsChunk', () => {
     await runSync();
 
     const variant = await readVariant();
-    // The synced column mirrors Trendyol: no desi now, so it is empty (not 0, not
-    // the old 2.5).
-    expect(variant.syncedDimensionalWeight).toBeNull();
+    // The synced column keeps the last known Trendyol desi (not null, not 0).
+    expect(variant.syncedDimensionalWeight?.toString()).toBe('2.5');
     // The seller's desi is untouched.
     expect(variant.dimensionalWeightOverride?.toString()).toBe('5');
+
+    // Third sync: Trendyol sends 0 (its value for "no desi"): still kept.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(page(0));
+    await runSync();
+    expect((await readVariant()).syncedDimensionalWeight?.toString()).toBe('2.5');
+
+    // Positive control: a real new Trendyol desi still replaces it.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(page(3));
+    await runSync();
+    expect((await readVariant()).syncedDimensionalWeight?.toString()).toBe('3');
   });
 
   it('stores an omitted, null or 0 dimensionalWeight from Trendyol as null', async () => {

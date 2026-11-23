@@ -2,7 +2,8 @@
  * Variant-level shipping cost estimator (products-list display).
  *
  * Prepares the variant's inputs - desi = `dimensionalWeightOverride ?? syncedDimensionalWeight`
- * (>= 0, 0 is a real desi; both null = no desi), Barem range = `variant.salePrice`, Barem table from
+ * (any stored value counts, a seller desi is at least 1; both null = no desi),
+ * Barem range = `variant.salePrice`, Barem table from
  * `hasFastDeliverySetup` (table 1 when it holds, table 2 otherwise, through
  * `resolveTrendyolCatalogBaremTier`) - and delegates the Barem-vs-desi tariff resolution to
  * `resolveTariffForDesi` (in `@pazarsync/profit`). This variant estimator is that
@@ -80,7 +81,7 @@ export async function estimateShippingCostForVariant(
   if (!variant?.store) return { ok: false, reason: 'STORE_NOT_FOUND' };
 
   // Desi: the user override wins when set, else the marketplace's synced value;
-  // both null = no desi (NO_DESI from the resolver). 0 is a real desi.
+  // both null = no desi (NO_DESI from the resolver). Any stored value counts.
   const effectiveDesi = variant.dimensionalWeightOverride ?? variant.syncedDimensionalWeight;
   const desi = effectiveDesi === null ? null : new Decimal(effectiveDesi.toString());
   const carrier = variant.store.defaultShippingCarrier;

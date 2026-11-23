@@ -3115,14 +3115,14 @@
       "popover": {
         "title": "Desi",
         "placeholder": "1,5",
-        "syncedHint": "Trendyol değeri: {value}",
+        "syncedHint": "Son bilinen Trendyol değeri: {value}",
         "syncedMissing": "Trendyol'da bu ürünün desisi tanımlı değil.",
         "reset": "Trendyol değerine geri al",
         "save": "Kaydet",
         "cancel": "İptal",
         "errors": {
           "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Geçerli bir sayı gir (örn. 1,5).",
-          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi 0'dan küçük olamaz.",
+          "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi en az 1 olmalı.",
           "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi en fazla 999,99 olabilir."
         }
       }
@@ -3186,7 +3186,7 @@
       },
       "errors": {
         "INVALID_DIMENSIONAL_WEIGHT_FORMAT": "Geçerli bir sayı gir (örn. 1,5).",
-        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi 0'dan küçük olamaz.",
+        "INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL": "Desi en az 1 olmalı.",
         "INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE": "Desi en fazla 999,99 olabilir."
       }
     },

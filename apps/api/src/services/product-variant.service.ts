@@ -22,7 +22,7 @@ import { flipBufferForVariants } from './live-performance-buffer-flip.service';
 // another org.
 //
 // Live Performance buffer (plan PR-2c, decision 7): entering a desi (any
-// non-null value; 0 is a real desi) re-checks the variant's PENDING buffer
+// non-null value; a seller desi is at least 1) re-checks the variant's PENDING buffer
 // entries of today in the same transaction, store-scoped, and flips those
 // whose order is now fully calculable (cost + desi) to PROMOTING. Clearing
 // the override (null) cannot make an order calculable, so it skips the check.

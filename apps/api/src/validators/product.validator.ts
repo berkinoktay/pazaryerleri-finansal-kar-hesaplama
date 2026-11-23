@@ -1,8 +1,10 @@
 import { z } from '@hono/zod-openapi';
+import { Decimal } from 'decimal.js';
 
 import { SyncStatus, SyncType } from '@pazarsync/db';
 import type { Prisma, SyncLog } from '@pazarsync/db';
 import { ProductVariantStatus, SyncErrorCode, isSyncErrorCode } from '@pazarsync/db/enums';
+import { SELLER_DESI_MAX_INCLUSIVE, SELLER_DESI_MIN_INCLUSIVE } from '@pazarsync/utils';
 
 import { csvParam, decimalBoundParam, intBoundParam } from '../lib/query-params';
 import { TableMetaSchema, TablePaginationQuerySchema } from '../openapi';
@@ -222,10 +224,12 @@ export type ProductOverrideMissing = (typeof PRODUCT_OVERRIDE_MISSING)[number];
 /**
  * The missing-desi rule, defined once: a physical variant with an empty effective
  * desi, i.e. no seller desi (dimensionalWeightOverride IS NULL) and no desi from
- * the marketplace (syncedDimensionalWeight IS NULL). A desi of 0 is a real desi in
- * either column, so it is not missing. A digital variant ships no parcel and needs
- * no desi, so it never misses one. products-list.service.ts uses this object as the
- * where clause of the overrideMissing=desi list and the facets missingDesi count;
+ * the marketplace (syncedDimensionalWeight IS NULL). Any stored value in either
+ * column is a desi, so it is not missing (a seller desi is at least 1 and a
+ * Trendyol 0 is stored as null; a stored 0 still counts). A digital variant ships
+ * no parcel and needs no desi, so it never misses one. products-list.service.ts
+ * uses this object as the where clause of the overrideMissing=desi list and the
+ * facets missingDesi count;
  * isVariantDesiMissing evaluates the same fields against the same values on a
  * loaded row (the VariantSummary.isDimensionalWeightMissing flag).
  */
@@ -316,8 +320,9 @@ export const ListProductsQuerySchema = TablePaginationQuerySchema.extend({
       description:
         'Variant-level filter: "cost" matches variants with no active (non-archived) cost ' +
         'profile attached; "desi" matches non-digital variants with no desi at all: no ' +
-        'seller desi override and no synced (Trendyol) desi. A desi of 0 is a real desi ' +
-        'and is not missing; a digital variant needs no desi. Either ' +
+        'seller desi override and no synced (Trendyol) desi. Any stored desi is not ' +
+        'missing (a seller desi is at least 1; a Trendyol 0 is stored as no desi); a ' +
+        'digital variant needs no desi. Either ' +
         'value composes via AND with the status filter, or with the default ' +
         'listing scope when status is omitted. Parent included if at least one variant ' +
         'matches; response variants[] is filtered to matching variants (consistent with ' +
@@ -454,7 +459,7 @@ const ShippingEstimateStatusSchema = z.enum(SHIPPING_ESTIMATE_STATUSES).openapi(
     'Outcome of the shipping estimate. OK = estimate available. NO_CARRIER = ' +
     'TRENDYOL_CONTRACT store with no defaultShippingCarrierId. NO_DESI = the variant has ' +
     'no desi (no seller override and no desi from the marketplace), so there is no ' +
-    'tariff row to price from; a desi of 0 is a real desi and is priced. ' +
+    'tariff row to price from; any stored desi is priced (a seller desi is at least 1). ' +
     'OWN_CONTRACT_EMPTY = ' +
     'OWN_CONTRACT store with no own_shipping_tariffs row for this desi (V1 always). ' +
     'DESI_OVERFLOW = variant desi exceeds the carrier tariff coverage.',
@@ -482,7 +487,7 @@ const VariantSummarySchema = z
           'Effective dimensional weight (TR: "desi"). Decimal string. The user override takes ' +
           'precedence; falls back to the marketplace-synced value when no override is set. ' +
           'Null when the variant has no desi: the marketplace sent none and the user entered ' +
-          'none. "0" is a real desi.',
+          'none. A user override is at least 1.',
         example: '1.50',
       }),
     syncedDimensionalWeight: z
@@ -490,10 +495,11 @@ const VariantSummarySchema = z
       .nullable()
       .openapi({
         description:
-          "The marketplace's latest dimensional weight for this variant. Refreshed every sync. " +
-          'Independent of any user override. Used by the UI to show the seller what the ' +
-          'marketplace currently reports. Null when the marketplace sent no desi; a Trendyol ' +
-          'desi of 0 (its value for a desi that was never entered) is stored as null too.',
+          "The marketplace's last known dimensional weight for this variant. Every sync " +
+          'that brings a desi refreshes it; a sync that brings none keeps the last known ' +
+          'value. Independent of any user override. Used by the UI to show the seller what ' +
+          'the marketplace reports. Null when the marketplace never sent a desi; a Trendyol ' +
+          'desi of 0 (its value for a desi that was never entered) counts as no desi.',
         example: '1.20',
       }),
     isDimensionalWeightOverridden: z.boolean().openapi({
@@ -505,9 +511,10 @@ const VariantSummarySchema = z
       description:
         'True when the variant misses desi: a non-digital variant with no user override and ' +
         'no synced (marketplace) dimensional weight. The same rule as the ' +
-        'overrideMissing=desi filter and the facets overrideCounts.missingDesi count. A desi ' +
-        'of 0 (synced or override) is a real desi and is not missing; a digital variant ' +
-        'needs no desi. The shipping estimate of a missing-desi variant is NO_DESI.',
+        'overrideMissing=desi filter and the facets overrideCounts.missingDesi count. Any ' +
+        'stored desi (synced or override) is not missing (a user override is at least 1); ' +
+        'a digital variant needs no desi. The shipping estimate of a missing-desi variant ' +
+        'is NO_DESI.',
       example: false,
     }),
     quantity: z.number().int().nonnegative(),
@@ -729,8 +736,8 @@ export interface VariantDesiFields {
  * The desi fields of every variant response (the products list and the PATCH
  * desi endpoint), so each rule exists once. Effective desi = override ?? synced;
  * null when both are null (the marketplace sent no desi and the seller entered
- * none). 0 is a real desi. The missing flag is isVariantDesiMissing, the
- * per-row reading of MISSING_DESI_VARIANT_WHERE.
+ * none). Any stored value counts (a seller desi is at least 1). The missing flag
+ * is isVariantDesiMissing, the per-row reading of MISSING_DESI_VARIANT_WHERE.
  */
 export function toVariantDesiFields(
   variant: Pick<VariantRow, 'dimensionalWeightOverride' | 'syncedDimensionalWeight' | 'isDigital'>,
@@ -917,37 +924,45 @@ function normalizeSkippedPages(raw: SyncLog['skippedPages']): SkippedPageWire[] 
 }
 
 // ─── PATCH variant dimensional weight (Desi) ──────────────────────────
-// Bounds: Decimal(6,2) max is 9999.99 at the DB level; the cap below is a
-// UX guard against typos. Floor is 0 (inclusive): desi 0 is a VALID tariff
-// tier — the cargo fee is matched from the DB tariff table (carrier +
-// ceil(desi)), which covers desi 0 onward, so a 0-desi variant still gets a
-// real (lowest-tier) shipping cost. Below 0 is impossible — the format regex
-// (`^\d+...`) admits no minus sign, and a DB CHECK constraint mirrors the
-// floor. Null is permitted and clears the override (the read path then falls
-// back to syncedDimensionalWeight, which is null when the marketplace sent no
-// desi: the variant then has no desi).
+// Bounds: the shared seller-desi bounds from @pazarsync/utils (the web desi
+// inputs read the same ones). Owner rule (Berkin 2026-11-23): a seller desi is
+// at least 1, replacing the 2026-11-22 rule that a seller 0 is a real desi; a
+// Trendyol 0 or missing desi is "no desi" and is stored as null by the mapper.
+// The cap is a UX guard against typos (the Decimal(6,2) column holds 9999.99).
+// A negative is impossible: the format regex (`^\d+...`) admits no minus sign,
+// and the DB CHECK constraint keeps its own floor of 0. Null is permitted and
+// clears the override (the read path then falls back to syncedDimensionalWeight,
+// which is null when the marketplace never sent a desi: the variant then has no
+// desi).
 
-const DIMENSIONAL_WEIGHT_MIN_INCLUSIVE = 0;
-const DIMENSIONAL_WEIGHT_MAX_INCLUSIVE = 999.99;
+const DIMENSIONAL_WEIGHT_PATTERN = /^\d+(\.\d{1,2})?$/;
+const SELLER_DESI_MIN = new Decimal(SELLER_DESI_MIN_INCLUSIVE);
+const SELLER_DESI_MAX = new Decimal(SELLER_DESI_MAX_INCLUSIVE);
+
+// Zod runs every refinement even after the format regex failed, so a range
+// check reads only a well-formed value (decimal.js throws on a malformed one)
+// and passes a malformed one: the format error alone describes it, without a
+// contradictory TOO_SMALL and TOO_LARGE pair.
+function isDesiAtLeastMin(value: string): boolean {
+  return !DIMENSIONAL_WEIGHT_PATTERN.test(value) || new Decimal(value).gte(SELLER_DESI_MIN);
+}
+
+function isDesiAtMostMax(value: string): boolean {
+  return !DIMENSIONAL_WEIGHT_PATTERN.test(value) || new Decimal(value).lte(SELLER_DESI_MAX);
+}
 
 export const UpdateVariantDimensionalWeightBodySchema = z
   .object({
     dimensionalWeight: z
       .string()
-      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
-      .refine(
-        (v) => Number(v) >= DIMENSIONAL_WEIGHT_MIN_INCLUSIVE,
-        'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL',
-      )
-      .refine(
-        (v) => Number(v) <= DIMENSIONAL_WEIGHT_MAX_INCLUSIVE,
-        'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE',
-      )
+      .regex(DIMENSIONAL_WEIGHT_PATTERN, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
+      .refine(isDesiAtLeastMin, 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL')
+      .refine(isDesiAtMostMax, 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE')
       .nullable()
       .openapi({
         description:
           'Decimal string with up to 2 fractional digits, in the (closed) range ' +
-          `[${DIMENSIONAL_WEIGHT_MIN_INCLUSIVE.toString()}, ${DIMENSIONAL_WEIGHT_MAX_INCLUSIVE.toString()}], ` +
+          `[${SELLER_DESI_MIN_INCLUSIVE}, ${SELLER_DESI_MAX_INCLUSIVE}] (a seller desi is at least 1), ` +
           'or null. Null clears the user override and reverts the read path to ' +
           "the marketplace's last synced value.",
         example: '1.50',
@@ -972,8 +987,8 @@ export const VariantDimensionalWeightResponseSchema = z
         'Missing-desi state after the update: a non-digital variant with no user override ' +
         'and no synced desi (same rule as VariantSummary.isDimensionalWeightMissing). ' +
         'Clearing the override of a variant the marketplace sent no desi for makes it true ' +
-        'again; a seller desi of 0 is a real desi and keeps it false (a Trendyol 0 is ' +
-        'stored as no desi).',
+        'again; a seller desi (at least 1) keeps it false (a Trendyol 0 is stored as no ' +
+        'desi).',
       example: false,
     }),
   })
@@ -1001,19 +1016,14 @@ export const BulkUpdateVariantDimensionalWeightBodySchema = z
       }),
     dimensionalWeight: z
       .string()
-      .regex(/^\d+(\.\d{1,2})?$/, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
-      .refine(
-        (v) => Number(v) >= DIMENSIONAL_WEIGHT_MIN_INCLUSIVE,
-        'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL',
-      )
-      .refine(
-        (v) => Number(v) <= DIMENSIONAL_WEIGHT_MAX_INCLUSIVE,
-        'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE',
-      )
+      .regex(DIMENSIONAL_WEIGHT_PATTERN, 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')
+      .refine(isDesiAtLeastMin, 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL')
+      .refine(isDesiAtMostMax, 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE')
       .nullable()
       .openapi({
         description:
-          'Same shape as the single-variant endpoint. Applied uniformly to every ' +
+          'Same shape and range as the single-variant endpoint (a seller desi is at ' +
+          'least 1). Applied uniformly to every ' +
           'listed variant. Null clears the override on all of them.',
         example: '1.50',
       }),

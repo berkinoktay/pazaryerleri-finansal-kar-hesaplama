@@ -18,11 +18,9 @@ describe('parseDesiInput', () => {
     ['1,50', '1.5'],
     [' 2,25 ', '2.25'],
     ['12', '12'],
-    ['0', '0'],
-    ['0,00', '0'],
-    ['-0', '0'],
+    ['1', '1'],
+    ['1,00', '1'],
     ['999,99', '999.99'],
-    [',5', '0.5'],
   ])('accepts %j and sends %j', (raw, payload) => {
     const result = parseDesiInput(raw);
     expect(result.kind).toBe('valid');
@@ -62,10 +60,21 @@ describe('parseDesiInput', () => {
     },
   );
 
-  it('rejects a negative value with the TOO_SMALL error (0 itself is valid)', () => {
-    expect(parseDesiInput('-1')).toEqual({
+  // Owner rule (Berkin 2026-11-23): a seller desi is at least 1, so 0 and
+  // anything below 1 are refused (this replaces the 2026-11-22 rule that a
+  // seller 0 is a real desi).
+  it.each(['0', '0,00', ',5', '0,99'])('rejects %j below 1 with the TOO_SMALL error', (raw) => {
+    expect(parseDesiInput(raw)).toEqual({
       kind: 'invalid',
       code: 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL',
+    });
+  });
+
+  // A minus sign is a format error, matching the backend's digits-only pattern.
+  it.each(['-0', '-1', '-2,5'])('rejects a negative %j with the FORMAT error', (raw) => {
+    expect(parseDesiInput(raw)).toEqual({
+      kind: 'invalid',
+      code: 'INVALID_DIMENSIONAL_WEIGHT_FORMAT',
     });
   });
 

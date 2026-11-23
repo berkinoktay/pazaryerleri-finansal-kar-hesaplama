@@ -15,7 +15,8 @@ export type ListSnapshot = readonly [QueryKey, ListProductsResponse | undefined]
  * the dot string being saved) or clearing (`null`) the user override.
  *
  * The missing flag is the backend's (VariantSummary.isDimensionalWeightMissing:
- * no override and no Trendyol desi; a desi of 0 is a real desi). This preview
+ * no override and no Trendyol desi; any stored desi counts, a seller desi is at
+ * least 1). This preview
  * mirrors it only for the moment between the click and the server answer; the
  * PATCH response or the list refetch then replaces it with the backend's own
  * value. The wire carries no digital flag, so clearing the override of a

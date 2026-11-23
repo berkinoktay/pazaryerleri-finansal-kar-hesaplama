@@ -28,7 +28,8 @@ interface InputLine {
  * the nested links and their profiles are filtered on `organizationId` too.
  *
  * Effective desi (plan PR-2c): the seller's override, else the Trendyol desi;
- * null when neither exists. `??` (never `||`) so a desi of 0, a real desi, is kept.
+ * null when neither exists. `??` (never `||`) so any stored value is kept, a stored
+ * 0 included (a seller desi is at least 1).
  *
  * GROSS konvansiyon (2026-06-16): `CostProfile.amountGross` is GROSS (KDV-dahil).
  * The calculability gate only checks presence (non-null) — gross vs net is

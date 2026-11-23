@@ -180,11 +180,11 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
   it('isDimensionalWeightMissing follows the missing-desi rule on a variant Trendyol sent no desi for', async () => {
     const ctx = await setup({ syncedDimensionalWeight: null });
 
-    // An explicit override of 0 is the seller's choice, so it is not missing.
-    const setZero = await patchDesi(ctx, { dimensionalWeight: '0' });
-    expect(setZero.status).toBe(200);
-    expect(await setZero.json()).toMatchObject({
-      dimensionalWeight: '0',
+    // A seller desi (at least 1, Berkin 2026-11-23) is a desi, so it is not missing.
+    const setFloor = await patchDesi(ctx, { dimensionalWeight: '1' });
+    expect(setFloor.status).toBe(200);
+    expect(await setFloor.json()).toMatchObject({
+      dimensionalWeight: '1',
       syncedDimensionalWeight: null,
       isDimensionalWeightOverridden: true,
       isDimensionalWeightMissing: false,
@@ -248,6 +248,29 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_FORMAT')).toBe(true);
   });
 
+  it.each(['1.234', '-1', '.5'])(
+    'a malformed desi %s reports only INVALID_DIMENSIONAL_WEIGHT_FORMAT',
+    async (dimensionalWeight) => {
+      const ctx = await setup();
+
+      const res = await patchDesi(ctx, { dimensionalWeight });
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { errors: { field: string; code: string }[] };
+      // The range checks pass a malformed value, so no contradictory TOO_SMALL /
+      // TOO_LARGE pair joins the format error.
+      expect(body.errors.map((e) => e.code)).toEqual(['INVALID_DIMENSIONAL_WEIGHT_FORMAT']);
+    },
+  );
+
+  it('keeps the range error for a well-formed desi below 1', async () => {
+    const ctx = await setup();
+
+    const res = await patchDesi(ctx, { dimensionalWeight: '0.5' });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { errors: { field: string; code: string }[] };
+    expect(body.errors.map((e) => e.code)).toEqual(['INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL']);
+  });
+
   it('returns 422 INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE when value exceeds the soft cap', async () => {
     const ctx = await setup();
 
@@ -257,23 +280,44 @@ describe('PATCH .../variants/:variantId/dimensional-weight', () => {
     expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_LARGE')).toBe(true);
   });
 
-  it('accepts 0 (the floor) as a valid desi override; rejects negatives as a format error', async () => {
+  // Owner rule (Berkin 2026-11-23): a seller desi is at least 1. This replaces
+  // the 2026-11-22 rule that a seller 0 is a real desi, so 0 is now refused.
+  it('rejects 0 and 0.99 with 422 INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL and leaves the override unset', async () => {
     const ctx = await setup({ syncedDimensionalWeight: '1.20' });
 
-    // 0 is the floor — a valid override (desi 0 resolves the lowest tariff tier).
-    const ok = await patchDesi(ctx, { dimensionalWeight: '0' });
+    for (const below of ['0', '0.99']) {
+      const res = await patchDesi(ctx, { dimensionalWeight: below });
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { code: string; errors: { code: string }[] };
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors.some((e) => e.code === 'INVALID_DIMENSIONAL_WEIGHT_TOO_SMALL')).toBe(true);
+    }
+
+    const row = await prisma.productVariant.findFirstOrThrow({
+      where: { id: ctx.variantId, organizationId: ctx.orgId },
+    });
+    expect(row.dimensionalWeightOverride).toBeNull();
+  });
+
+  it('accepts 1 (the floor) as a valid desi override; rejects negatives as a format error', async () => {
+    const ctx = await setup({ syncedDimensionalWeight: '1.20' });
+
+    // 1 is the floor: a valid override.
+    const ok = await patchDesi(ctx, { dimensionalWeight: '1' });
     expect(ok.status).toBe(200);
     const okBody = (await ok.json()) as {
       dimensionalWeight: string;
       isDimensionalWeightOverridden: boolean;
     };
-    expect(okBody.dimensionalWeight).toBe('0');
+    expect(okBody.dimensionalWeight).toBe('1');
     expect(okBody.isDimensionalWeightOverridden).toBe(true);
-    const row = await prisma.productVariant.findFirstOrThrow({ where: { id: ctx.variantId } });
-    expect(row.dimensionalWeightOverride?.toString()).toBe('0');
+    const row = await prisma.productVariant.findFirstOrThrow({
+      where: { id: ctx.variantId, organizationId: ctx.orgId },
+    });
+    expect(row.dimensionalWeightOverride?.toString()).toBe('1');
 
-    // Below 0 is impossible — the format regex admits no minus sign, so a
-    // negative is a FORMAT error, never reaching the DB CHECK floor.
+    // A negative is impossible: the format regex admits no minus sign, so it is
+    // a FORMAT error, never reaching the DB CHECK floor.
     const neg = await patchDesi(ctx, { dimensionalWeight: '-1' });
     expect(neg.status).toBe(422);
     const negBody = (await neg.json()) as { errors: { code: string }[] };
@@ -346,7 +390,9 @@ describe('PATCH .../variants/:variantId/dimensional-weight: Live Performance buf
     expect(await bufferStatus('pkg-today')).toBe('PROMOTING');
   });
 
-  it('a desi of 0 is a real desi and promotes the entry too', async () => {
+  // Owner rule (Berkin 2026-11-23): a seller desi is at least 1, replacing the
+  // 2026-11-22 rule that a seller 0 is a real desi that promotes the entry.
+  it('a seller desi of 0 is refused and promotes nothing; the floor 1 promotes the entry', async () => {
     const ctx = await setup({ syncedDimensionalWeight: null });
     await linkCost(ctx.orgId, ctx.storeId, ctx.variantId);
     await createBufferEntry(ctx.orgId, ctx.storeId, {
@@ -354,9 +400,12 @@ describe('PATCH .../variants/:variantId/dimensional-weight: Live Performance buf
       mappedOrder: { lines: [{ barcode: ctx.barcode }] },
     });
 
-    const res = await patchDesi(ctx, { dimensionalWeight: '0' });
+    const zero = await patchDesi(ctx, { dimensionalWeight: '0' });
+    expect(zero.status).toBe(422);
+    expect(await bufferStatus('pkg-zero')).toBe('PENDING');
 
-    expect(res.status).toBe(200);
+    const floor = await patchDesi(ctx, { dimensionalWeight: '1' });
+    expect(floor.status).toBe(200);
     expect(await bufferStatus('pkg-zero')).toBe('PROMOTING');
   });
 

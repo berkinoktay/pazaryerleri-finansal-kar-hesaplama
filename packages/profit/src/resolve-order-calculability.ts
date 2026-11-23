@@ -12,7 +12,8 @@
  *     order misses both a cost and a desi (on the same or on different lines) the
  *     cost reason wins. `variantId: null` lets callers log the variant gap.
  *   - `desi_missing`: a resolved, non-digital line whose effective desi
- *     (seller override ?? Trendyol desi) is empty. A desi of 0 is a REAL desi. A
+ *     (seller override ?? Trendyol desi) is empty. Any stored value counts, a
+ *     stored 0 included (a seller desi is at least 1). A
  *     digital line ships no cargo, so it never needs a desi (it still needs a cost).
  *     The order's cargo-measured desi (`cargoDeci`) never stands in for it.
  *
@@ -29,7 +30,8 @@ export interface OrderLineForCalcCheck {
   unitCostSnapshotNet: string | null;
   /**
    * Effective desi (override ?? synced) as a decimal string; null when the variant
-   * has no desi at all, or when the line has no resolved variant. '0' is a real desi.
+   * has no desi at all, or when the line has no resolved variant. Any stored value
+   * counts, a stored '0' included (a seller desi is at least 1).
    */
   unitDesi: string | null;
   /** The variant's digital flag; false for a line with no resolved variant. */

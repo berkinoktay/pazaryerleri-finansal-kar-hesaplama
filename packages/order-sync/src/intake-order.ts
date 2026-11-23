@@ -53,7 +53,8 @@
  * the order after its day had closed.
  *
  * Desi rule (Berkin 2026-11-22, plan PR-2c): the gate (`resolveOrderCalculability`) wants
- * a cost AND an effective desi (override ?? synced; 0 is a real desi) on every
+ * a cost AND an effective desi (override ?? synced; any stored value counts, a seller
+ * desi is at least 1) on every
  * non-digital item. Today's desiless order waits in the buffer exactly like a cost-missing
  * one. For a past-day order the cost keeps its "entered before the order day ended" check;
  * the desi is only checked for presence when the order is written (a desi is a physical
