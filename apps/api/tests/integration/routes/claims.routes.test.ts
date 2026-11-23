@@ -4,9 +4,11 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { getBusinessDate } from '@pazarsync/utils';
 
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
+import { businessDayEdges } from '../../helpers/business-day-edges';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createFinanceRecord,
@@ -203,6 +205,13 @@ async function createClaimFixture(args: {
   return { orderId: order.id, claimId: claim.id };
 }
 
+/** A bare order + open claim filed at `claimDate`; the list needs no items. */
+async function createBareClaim(orgId: string, storeId: string, claimDate: Date): Promise<string> {
+  const order = await createOrder(orgId, storeId);
+  const claim = await createOrderClaim(orgId, storeId, order.id, { claimDate, resolved: false });
+  return claim.id;
+}
+
 describe('Claims routes', () => {
   const app = createApp();
 
@@ -355,6 +364,117 @@ describe('Claims routes', () => {
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.platformOrderNumber).toBe('11101228439');
   });
+
+  it('LIST: to=<day> lists a claim filed at 23:30 Istanbul on that day', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const edges = businessDayEdges();
+
+    const lateInDay = await createBareClaim(org.id, store.id, edges.lateInDay);
+    await createBareClaim(org.id, store.id, edges.nextDayEarly);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/claims?from=${edges.day}&to=${edges.day}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body: { data: { id: string }[]; counts: { all: number } } = await res.json();
+    // The 00:10 claim of the next day stays out.
+    expect(body.data.map((c) => c.id)).toEqual([lateInDay]);
+    expect(body.counts.all).toBe(1);
+  });
+
+  it('LIST: from=<day> lists a claim filed at 00:30 Istanbul on that day', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const edges = businessDayEdges();
+
+    const earlyInDay = await createBareClaim(org.id, store.id, edges.earlyInDay);
+    await createBareClaim(org.id, store.id, edges.prevDayLate);
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/claims?from=${edges.day}&to=${edges.day}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body: { data: { id: string }[]; counts: { all: number } } = await res.json();
+    // The 23:30 claim of the previous day stays out.
+    expect(body.data.map((c) => c.id)).toEqual([earlyInDay]);
+    expect(body.counts.all).toBe(1);
+  });
+
+  it('SUMMARY: from=<day>&to=<day> counts the whole Istanbul day, like the list', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+    const edges = businessDayEdges();
+
+    for (const claimDate of [
+      edges.earlyInDay,
+      edges.lateInDay,
+      edges.prevDayLate,
+      edges.nextDayEarly,
+    ]) {
+      const order = await createOrder(org.id, store.id);
+      await createOrderClaim(org.id, store.id, order.id, { claimDate, resolved: true });
+    }
+
+    const res = await app.request(
+      `/v1/organizations/${org.id}/stores/${store.id}/claims/summary?from=${edges.day}&to=${edges.day}`,
+      { headers: { Authorization: bearer(user.accessToken) } },
+    );
+    expect(res.status).toBe(200);
+    const body: { resolvedInPeriod: number } = await res.json();
+    // 00:30 and 23:30 of the day count; the neighbouring days' claims do not.
+    expect(body.resolvedInPeriod).toBe(2);
+  });
+
+  it('LIST: a business date outside the accepted window is a 422, not a 500', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    for (const query of ['to=9999-12-31', 'from=0001-01-01']) {
+      const res = await app.request(
+        `/v1/organizations/${org.id}/stores/${store.id}/claims?${query}`,
+        { headers: { Authorization: bearer(user.accessToken) } },
+      );
+      expect(res.status).toBe(422);
+      const body: { code: string; errors: { code: string }[] } = await res.json();
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors.map((e) => e.code)).toContain('INVALID_DATE_OUT_OF_RANGE');
+    }
+  });
+
+  it.each(['to=2026-06-01T00:00:00%2B03:00', 'to=2026/06/01', 'to=2026-02-30', 'to=9999/12/31'])(
+    'LIST: %s is not a business date, a 422 INVALID_BUSINESS_DATE',
+    async (query) => {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      const listUrl = `/v1/organizations/${org.id}/stores/${store.id}/claims`;
+      const headers = { Authorization: bearer(user.accessToken) };
+
+      // Positive control: a date-only business date is accepted.
+      const ok = await app.request(`${listUrl}?to=${getBusinessDate(new Date())}`, { headers });
+      expect(ok.status).toBe(200);
+
+      const res = await app.request(`${listUrl}?${query}`, { headers });
+      expect(res.status).toBe(422);
+      const body: { code: string; errors: { field: string; code: string }[] } = await res.json();
+      expect(body.code).toBe('VALIDATION_ERROR');
+      expect(body.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([
+        { field: 'to', code: 'INVALID_BUSINESS_DATE' },
+      ]);
+    },
+  );
 
   it('LIST: derives status, scope and summaries per row', async () => {
     const user = await createAuthenticatedTestUser();
@@ -558,10 +678,12 @@ describe('Claims routes', () => {
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // A fixed, past window so both record dates are absolute, not clock-relative.
+    // A past window of whole business days: from the business day 40 days back
+    // through the one 10 days back. Every record date sits at least four days
+    // away from either edge, so it is clearly inside or outside the period.
     const now = Date.now();
-    const from = new Date(now - 40 * DAY_MS);
-    const to = new Date(now - 10 * DAY_MS);
+    const fromDay = getBusinessDate(new Date(now - 40 * DAY_MS));
+    const toDay = getBusinessDate(new Date(now - 10 * DAY_MS));
     const inPeriod = new Date(now - 20 * DAY_MS);
     const afterPeriod = new Date(now - 5 * DAY_MS); // later than inPeriod, past `to`
     const beforePeriod = new Date(now - 50 * DAY_MS); // earlier than the window
@@ -590,7 +712,7 @@ describe('Claims routes', () => {
     });
 
     const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/claims/summary?from=${from.toISOString()}&to=${to.toISOString()}`,
+      `/v1/organizations/${org.id}/stores/${store.id}/claims/summary?from=${fromDay}&to=${toDay}`,
       { headers: { Authorization: bearer(user.accessToken) } },
     );
     expect(res.status).toBe(200);

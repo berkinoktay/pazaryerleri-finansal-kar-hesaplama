@@ -1,8 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
 
+// The picker hands over local-midnight Dates and the URL carries the calendar
+// day the user picked. The zone-pinned cases below stub TZ at runtime; each one
+// first asserts the pin took effect so a runner that ignores it fails loudly
+// instead of passing vacuously.
+const ISTANBUL_OFFSET_MINUTES = -180;
+const NEW_YORK_SUMMER_OFFSET_MINUTES = 240;
+const NEW_YORK_WINTER_OFFSET_MINUTES = 300;
+
 describe('date-range-params helpers', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('round-trips a full from+to param pair through a DateRange back to the same ISO strings', () => {
     const range = dateRangeFromParams('2026-07-05', '2026-07-10');
 
@@ -28,14 +40,36 @@ describe('date-range-params helpers', () => {
     expect(dateRangeToParams(undefined)).toEqual({ from: '', to: '' });
   });
 
-  it('emits UTC YYYY-MM-DD strings that do not shift the calendar day (timezone-safe)', () => {
-    // An ISO date-only string parses as UTC midnight and toUtcIsoDate reads UTC
-    // components, so the day never drifts regardless of the runner's local zone.
-    // Month/day boundaries (Jan 31, Dec 01) would surface any off-by-one shift.
-    const params = dateRangeToParams(dateRangeFromParams('2026-01-31', '2026-12-01'));
+  it('writes the picked local calendar day, not the UTC day (UTC+3 runner)', () => {
+    vi.stubEnv('TZ', 'Europe/Istanbul');
+    expect(new Date(2026, 6, 10).getTimezoneOffset()).toBe(ISTANBUL_OFFSET_MINUTES); // pin control
 
-    expect(params.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(params.to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(params).toEqual({ from: '2026-01-31', to: '2026-12-01' });
+    expect(dateRangeToParams({ from: new Date(2026, 6, 10), to: new Date(2026, 6, 12) })).toEqual({
+      from: '2026-07-10',
+      to: '2026-07-12',
+    });
   });
+
+  it('reads a param as that local calendar day (UTC-4 runner)', () => {
+    vi.stubEnv('TZ', 'America/New_York');
+    expect(new Date(2026, 6, 10).getTimezoneOffset()).toBe(NEW_YORK_SUMMER_OFFSET_MINUTES); // pin control
+
+    expect(dateRangeFromParams('2026-07-05', '')?.from?.getDate()).toBe(5);
+  });
+
+  it.each([
+    { zone: 'Europe/Istanbul', januaryOffset: ISTANBUL_OFFSET_MINUTES },
+    { zone: 'America/New_York', januaryOffset: NEW_YORK_WINTER_OFFSET_MINUTES },
+  ])(
+    'round-trips month and day boundaries without shifting the calendar day ($zone)',
+    ({ zone, januaryOffset }) => {
+      vi.stubEnv('TZ', zone);
+      expect(new Date(2026, 0, 31).getTimezoneOffset()).toBe(januaryOffset); // pin control
+
+      // Jan 31 and Dec 01 would surface any off-by-one shift at a month edge.
+      const params = dateRangeToParams(dateRangeFromParams('2026-01-31', '2026-12-01'));
+
+      expect(params).toEqual({ from: '2026-01-31', to: '2026-12-01' });
+    },
+  );
 });

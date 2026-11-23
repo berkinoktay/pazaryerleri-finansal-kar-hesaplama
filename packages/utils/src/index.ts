@@ -6,6 +6,7 @@ export {
   getBusinessDate,
   getBusinessDateAnchor,
   getBusinessDayRange,
+  getBusinessDayRangeOfDate,
   getBusinessHour,
   toUtcIsoDate,
 } from './timezone';

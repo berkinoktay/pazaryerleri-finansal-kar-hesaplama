@@ -10523,31 +10523,25 @@
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
-              "example": "2026-04-01T00:00:00.000Z"
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "example": "2026-04-01"
             },
             "required": false,
-            "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
-              "example": "2026-05-23T23:59:59.999Z"
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "example": "2026-05-23"
             },
             "required": false,
-            "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
             "name": "to",
             "in": "query"
           },
@@ -10780,31 +10774,25 @@
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
-              "example": "2026-04-01T00:00:00.000Z"
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "example": "2026-04-01"
             },
             "required": false,
-            "description": "Inclusive lower bound on Order.orderDate (ISO 8601).",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
-              "example": "2026-05-23T23:59:59.999Z"
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "example": "2026-05-23"
             },
             "required": false,
-            "description": "Inclusive upper bound on Order.orderDate (ISO 8601).",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
             "name": "to",
             "in": "query"
           },
@@ -11116,29 +11104,25 @@
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Period start — defaults to 30 days before `to` when absent."
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD): the period starts at the start of that business day. Defaults to 30 days before the period end when absent.",
+              "example": "2026-06-01"
             },
             "required": false,
-            "description": "Period start — defaults to 30 days before `to` when absent.",
+            "description": "Istanbul business date (YYYY-MM-DD): the period starts at the start of that business day. Defaults to 30 days before the period end when absent.",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "Period end — defaults to now."
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: the period ends at the end of that business day. Defaults to now when absent.",
+              "example": "2026-06-30"
             },
             "required": false,
-            "description": "Period end — defaults to now.",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: the period ends at the end of that business day. Defaults to now when absent.",
             "name": "to",
             "in": "query"
           }
@@ -11316,29 +11300,25 @@
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "claimDate >= (ISO date)."
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD): lists claims whose claimDate is at or after the start of that business day.",
+              "example": "2026-06-01"
             },
             "required": false,
-            "description": "claimDate >= (ISO date).",
+            "description": "Istanbul business date (YYYY-MM-DD): lists claims whose claimDate is at or after the start of that business day.",
             "name": "from",
             "in": "query"
           },
           {
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "format": "date-time",
-              "description": "claimDate <= (ISO date)."
+              "type": "string",
+              "format": "date",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists claims whose claimDate is before the end of that business day.",
+              "example": "2026-06-30"
             },
             "required": false,
-            "description": "claimDate <= (ISO date).",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists claims whose claimDate is before the end of that business day.",
             "name": "to",
             "in": "query"
           },
