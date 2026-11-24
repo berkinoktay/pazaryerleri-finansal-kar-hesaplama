@@ -3863,7 +3863,8 @@
       "tabs": {
         "all": "Tümü",
         "calculated": "Hesaplanmış",
-        "pending": "Bekliyor"
+        "pending": "Bekliyor",
+        "cancelled": "İptal edilen"
       },
       "columns": {
         "orderNumber": "Sipariş No",
@@ -3875,7 +3876,9 @@
       },
       "statusCalculated": "Hesaplandı",
       "statusPending": "Bekliyor",
-      "emptyTitle": "Bugün henüz sipariş yok"
+      "statusCancelled": "İptal",
+      "emptyTitle": "Bugün henüz sipariş yok",
+      "emptyCancelledTitle": "Bugün iptal edilen sipariş yok"
     },
     "orderDetail": {
       "sheetTitle": "Sipariş ayrıntısı",

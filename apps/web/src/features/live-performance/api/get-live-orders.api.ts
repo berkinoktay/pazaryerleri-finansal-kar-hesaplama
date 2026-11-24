@@ -10,8 +10,9 @@ export type LiveOrderRow = LivePerformanceOrders['data'][number];
 
 /**
  * Today's orders as a UNION of the `orders` table (fully calculated) and
- * cost-missing buffer entries. `filter` selects the Tümü / Hesaplanmış /
- * Bekliyor tab; `counts` always reports every tab's total regardless of filter.
+ * cost-missing buffer entries. `filter` selects the all / calculated / pending /
+ * cancelled tab; `counts` always reports every tab's total regardless of filter.
+ * Today's cancelled orders appear only under `cancelled`.
  */
 export async function getLiveOrders(args: {
   orgId: string;

@@ -5,19 +5,21 @@ import { useFormatter, useTranslations } from 'next-intl';
 import { parseAsStringEnum, useQueryStates } from 'nuqs';
 import * as React from 'react';
 
+import { OrderStatus } from '@pazarsync/db/enums';
+
 import { Currency } from '@/components/patterns/currency';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { FilterTabs } from '@/components/patterns/filter-tabs';
 import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
-import type { LiveOrderRow } from '../api/get-live-orders.api';
+import type { LiveOrderRow, LivePerformanceOrders } from '../api/get-live-orders.api';
 import { useLiveOrders } from '../hooks/use-live-orders';
-import { type LiveOrdersFilter } from '../query-keys';
+import { LIVE_ORDERS_FILTERS, type LiveOrdersFilter } from '../query-keys';
 
 interface LiveOrdersTableProps {
   orgId: string;
@@ -25,16 +27,55 @@ interface LiveOrdersTableProps {
   onRowClick?: (row: LiveOrderRow) => void;
 }
 
-const EMPTY_COUNTS = { all: 0, calculated: 0, pending: 0 } as const;
+const EMPTY_COUNTS: LivePerformanceOrders['counts'] = {
+  all: 0,
+  calculated: 0,
+  pending: 0,
+  cancelled: 0,
+};
+
+const TAB_LABEL_KEY = {
+  all: 'tabs.all',
+  calculated: 'tabs.calculated',
+  pending: 'tabs.pending',
+  cancelled: 'tabs.cancelled',
+} as const satisfies Record<LiveOrdersFilter, string>;
+
+/** What the status column says about a row. */
+type LiveRowStatus = 'calculated' | 'pending' | 'cancelled';
+
+const ROW_STATUS_BADGE = {
+  calculated: { tone: 'success', labelKey: 'statusCalculated' },
+  pending: { tone: 'warning', labelKey: 'statusPending' },
+  cancelled: { tone: 'neutral', labelKey: 'statusCancelled' },
+} as const satisfies Record<
+  LiveRowStatus,
+  {
+    tone: NonNullable<BadgeProps['tone']>;
+    labelKey: 'statusCalculated' | 'statusPending' | 'statusCancelled';
+  }
+>;
+
+function liveRowStatus(row: LiveOrderRow): LiveRowStatus {
+  // A cancelled order has no profit either, but it is not waiting for anything.
+  if (row.status === OrderStatus.CANCELLED) return 'cancelled';
+  // The API serves a profit only for a calculated row, so a null profit is
+  // pending -- whether a buffer entry or an order not computed yet.
+  return row.profit !== null ? 'calculated' : 'pending';
+}
 
 /**
  * Today's orders feed: each row is either an order whose profit is calculated or a
  * pending row -- a cost-missing buffer entry, or an order whose profit is not
  * calculated yet. The served profit decides the status badge (a null profit is
- * pending), not the row's source. The Tümü / Hesaplanmış / Bekliyor FilterTabs drive
- * a server-side filter; `counts` always reports every tab's total so the chips
- * stay honest. Rows persist all day — attaching a cost moves a row from Bekliyor
- * into Hesaplanmış, never off the feed (until the 00:00 reset).
+ * pending), not the row's source. The all / calculated / pending tabs drive a
+ * server-side filter; `counts` always reports every tab's total so the chips stay
+ * honest. Rows persist all day: attaching a cost moves a row from pending into
+ * calculated, never off the feed (until the 00:00 reset).
+ *
+ * The cancelled tab lists today's cancelled orders on their own. They carry no
+ * profit or margin (a cancellation is not an earning), are badged as cancelled
+ * rather than pending, and never count towards the other tabs.
  */
 export function LiveOrdersTable({
   orgId,
@@ -48,9 +89,7 @@ export function LiveOrdersTable({
   // URL state (nuqs) — the selected tab survives reload/share; distinct param
   // name because the products table on the same page owns its own tab/search.
   const [{ ordersFilter: filter }, setUrlState] = useQueryStates({
-    ordersFilter: parseAsStringEnum<LiveOrdersFilter>(['all', 'calculated', 'pending']).withDefault(
-      'all',
-    ),
+    ordersFilter: parseAsStringEnum<LiveOrdersFilter>([...LIVE_ORDERS_FILTERS]).withDefault('all'),
   });
   const setFilter = (next: LiveOrdersFilter): void => void setUrlState({ ordersFilter: next });
   const query = useLiveOrders(orgId, storeId, filter);
@@ -123,14 +162,8 @@ export function LiveOrdersTable({
         id: 'status',
         header: () => t('columns.status'),
         cell: ({ row }) => {
-          // The API serves a profit only for a calculated row, so a null profit is
-          // pending -- whether a buffer entry or an order not computed yet.
-          const calculated = row.original.profit !== null;
-          return (
-            <Badge tone={calculated ? 'success' : 'warning'}>
-              {calculated ? t('statusCalculated') : t('statusPending')}
-            </Badge>
-          );
+          const badge = ROW_STATUS_BADGE[liveRowStatus(row.original)];
+          return <Badge tone={badge.tone}>{t(badge.labelKey)}</Badge>;
         },
       },
     ],
@@ -142,11 +175,11 @@ export function LiveOrdersTable({
       value={filter}
       onValueChange={setFilter}
       loading={query.isPending}
-      options={[
-        { value: 'all', label: t('tabs.all'), count: counts.all },
-        { value: 'calculated', label: t('tabs.calculated'), count: counts.calculated },
-        { value: 'pending', label: t('tabs.pending'), count: counts.pending },
-      ]}
+      options={LIVE_ORDERS_FILTERS.map((value) => ({
+        value,
+        label: t(TAB_LABEL_KEY[value]),
+        count: counts[value],
+      }))}
     />
   );
 
@@ -161,7 +194,12 @@ export function LiveOrdersTable({
         onRetry={() => void query.refetch()}
         onRowClick={onRowClick !== undefined ? (row) => onRowClick(row) : undefined}
         tabs={tabs}
-        empty={<EmptyState title={t('emptyTitle')} embedded />}
+        empty={
+          <EmptyState
+            title={filter === 'cancelled' ? t('emptyCancelledTitle') : t('emptyTitle')}
+            embedded
+          />
+        }
       />
     </section>
   );

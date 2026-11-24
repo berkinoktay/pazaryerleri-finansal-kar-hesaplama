@@ -3802,7 +3802,8 @@
       "tabs": {
         "all": "All",
         "calculated": "Calculated",
-        "pending": "Pending"
+        "pending": "Pending",
+        "cancelled": "Cancelled"
       },
       "columns": {
         "orderNumber": "Order No",
@@ -3814,7 +3815,9 @@
       },
       "statusCalculated": "Calculated",
       "statusPending": "Pending",
-      "emptyTitle": "No orders yet today"
+      "statusCancelled": "Cancelled",
+      "emptyTitle": "No orders yet today",
+      "emptyCancelledTitle": "No orders were cancelled today"
     },
     "orderDetail": {
       "sheetTitle": "Order detail",

@@ -83,11 +83,15 @@ const POST_CLOSE_PROFIT = '4321.00';
  * would fire it at once.
  */
 function listResponse(
-  over: { openDay?: Partial<OrderListOpenDay>; counts?: ListOrdersResponse['counts'] } = {},
+  over: {
+    openDay?: Partial<OrderListOpenDay>;
+    counts?: ListOrdersResponse['counts'];
+    pagination?: ListOrdersResponse['pagination'];
+  } = {},
 ): ListOrdersResponse {
   return {
     data: [],
-    pagination: { page: 1, perPage: 25, total: 0, totalPages: 0 },
+    pagination: over.pagination ?? { page: 1, perPage: 25, total: 0, totalPages: 0 },
     counts: over.counts ?? { calculated: 0, excluded: 0 },
     openDay: {
       businessDate: getBusinessDate(),
@@ -114,9 +118,12 @@ interface HandlerCounts {
   summary: number;
 }
 
-/** Register list + summary handlers that count calls; the list body comes from `list`. */
+/**
+ * Register list + summary handlers that count calls; the list body comes from
+ * `list`, given the call number and the request URL.
+ */
 function serve(
-  list: (call: number) => ListOrdersResponse,
+  list: (call: number, url: URL) => ListOrdersResponse,
   summary = summaryResponse,
 ): HandlerCounts {
   const counts: HandlerCounts = { list: 0, summary: 0 };
@@ -125,9 +132,9 @@ function serve(
       counts.summary += 1;
       return HttpResponse.json(summary());
     }),
-    http.get(LIST_URL, () => {
+    http.get(LIST_URL, ({ request }) => {
       counts.list += 1;
-      return HttpResponse.json(list(counts.list));
+      return HttpResponse.json(list(counts.list, new URL(request.url)));
     }),
   );
   return counts;
@@ -334,6 +341,40 @@ describe('OrdersPageClient - refresh triggers', () => {
     await waitFor(() =>
       expect(screen.getByText(formatCurrency(POST_CLOSE_PROFIT))).toBeInTheDocument(),
     );
+
+    // Nothing polls any more.
+    const settled = { ...counts };
+    await advance(queryClient, POLL_STEP_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts).toEqual(settled);
+  });
+
+  it('refetches the summary when finalizing ends during a list query swap', async () => {
+    // Page 1 is still finalizing, page 2 no longer is. Keyed on the page param
+    // (not the call number) so a page-1 poll cannot report the end before the
+    // swap. The page is part of the list key but not of the summary key, so the
+    // summary fetches again only through the page's trailing refetch.
+    const counts = serve((_call, url) => {
+      const onSecondPage = url.searchParams.get('page') === '2';
+      return listResponse({
+        openDay: { finalizing: !onSecondPage },
+        counts: { calculated: 50, excluded: 0 },
+        pagination: { page: onSecondPage ? 2 : 1, perPage: 25, total: 50, totalPages: 2 },
+      });
+    });
+    const queryClient = createTestQueryClient();
+    const { user } = renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+    const summaryBeforeSwap = counts.summary;
+
+    // The list query swaps to page 2: its data is undefined until page 2 lands
+    // with finalizing: false.
+    await user.click(screen.getByRole('button', { name: trMessages.common.pagination.nextPage }));
+    await waitFor(() => expect(counts.summary).toBe(summaryBeforeSwap + 1));
+    await waitForIdle(queryClient);
+
+    expect(counts.list).toBe(2);
+    expect(counts.summary).toBe(summaryBeforeSwap + 1);
 
     // Nothing polls any more.
     const settled = { ...counts };
