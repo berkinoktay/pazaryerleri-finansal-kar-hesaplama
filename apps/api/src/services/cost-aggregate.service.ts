@@ -7,6 +7,13 @@
 // to another organization's profile is never summed. The profile's store is NOT
 // filtered: the cost rule (loadSellerInputsAt) is organization-scoped and the
 // attach guard already refuses a cross-store attach.
+//
+// Agreement with the cost rule: the rule reads each link's version in force at the
+// day end, this reads the profile row. Every writer of cost_profiles (create,
+// update, archive, restore) writes the row and its matching version in one
+// transaction with DB-clock stamps, so for an open day the two agree. A profile
+// row with no version (no writer creates one) would count here but not in the
+// rule.
 
 import { Decimal } from 'decimal.js';
 

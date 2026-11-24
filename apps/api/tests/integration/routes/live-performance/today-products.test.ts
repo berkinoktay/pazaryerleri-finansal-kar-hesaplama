@@ -5,7 +5,8 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
-import { updateCostProfile } from '@/services/cost-profile.service';
+import { archiveCostProfile, updateCostProfile } from '@/services/cost-profile.service';
+import { detachCostProfiles } from '@/services/cost-profile-attachment.service';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
@@ -808,10 +809,10 @@ describe('GET /v1/.../live-performance/today-products', () => {
     await attachProfile(org.id, variantY, archivedY.id);
     await sellInOrders(org.id, store.id, variantY, { count: 1, lineSaleGross: '100.00' });
 
-    await prisma.costProfile.updateMany({
-      where: { organizationId: org.id, id: { in: [archivedX.id, archivedY.id] } },
-      data: { archivedAt: new Date() },
-    });
+    // Through the real service: the profile row and its archived version are written
+    // together, the state the cost rule reads.
+    await archiveCostProfile(org.id, archivedX.id, user.id);
+    await archiveCostProfile(org.id, archivedY.id, user.id);
 
     const rows = await fetchTodayProducts(app, {
       orgId: org.id,
@@ -963,6 +964,14 @@ describe('GET /v1/.../live-performance/today-products', () => {
     await attachProfile(org.id, variantId, packaging.id);
     // A second version through the real service: the cost rule prices the link by it.
     await updateCostProfile(org.id, cogs.id, { amountGross: '33.30' }, user.id);
+    // An archived profile and a detached link, both through the real services: neither
+    // counts for the column nor for the cost rule.
+    const archived = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+    await attachProfile(org.id, variantId, archived.id);
+    await archiveCostProfile(org.id, archived.id, user.id);
+    const detached = await createCostProfile(org.id, { storeId: store.id, amountGross: '60.00' });
+    await attachProfile(org.id, variantId, detached.id);
+    await detachCostProfiles(org.id, [detached.id], [variantId], null);
     await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '100.00' });
 
     // What the cost rule gives today's orders: each link in force at the day end,
@@ -974,12 +983,12 @@ describe('GET /v1/.../live-performance/today-products', () => {
       at,
     });
     const links = inputs.get(variantId)?.costProfiles ?? [];
-    expect(links).toHaveLength(2);
     const expected = links.reduce((sum, link) => {
       const version = chooseOrderCostVersion(link, { at });
       return version === null ? sum : sum.add(version.amountGross.toString());
     }, new Decimal(0));
-    // Not vacuous: the updated profile is priced by its second version (33.30 + 7.25).
+    // Not vacuous: the updated profile is priced by its second version (33.30 + 7.25);
+    // the archived 50.00 and the detached 60.00 add nothing.
     expect(expected.toFixed(2)).toBe('40.55');
 
     const rows = await fetchTodayProducts(app, {
