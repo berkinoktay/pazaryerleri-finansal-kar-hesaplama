@@ -9,12 +9,14 @@ import {
   recomputeParcelProfit,
   statementTotalsFromStatement,
 } from '@pazarsync/profit';
+import { getBusinessDate } from '@pazarsync/utils';
 
 import { createApp } from '../../../src/app';
-import { listOrders } from '../../../src/services/order.service';
+import { getOrdersSummary, listOrders } from '../../../src/services/order.service';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { businessDayEdges } from '../../helpers/business-day-edges';
 import { seedCalculableTrendyolOrder } from '../../helpers/calculable-order';
+import { completedBusinessDayInstant, openBusinessDayInstant } from '../../helpers/completed-day';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createMembership,
@@ -42,7 +44,9 @@ describe('Order routes', () => {
 
   // Seeds an order plus its estimate + best-known statements (net 60, margin 25
   // by default) so the list reads its profit fields from the statements, not the
-  // legacy columns. Overrides shape the best-known view the list surfaces.
+  // legacy columns. Overrides shape the best-known view the list surfaces. The
+  // order sits on a completed business day unless the test dates it: the list and
+  // the summary show completed days only.
   async function seedSimpleOrder(
     orgId: string,
     storeId: string,
@@ -60,7 +64,7 @@ describe('Order routes', () => {
       where: { id: base.id },
       data: {
         platformOrderNumber: overrides.platformOrderNumber ?? `ON-${randomUUID().slice(0, 6)}`,
-        orderDate: overrides.orderDate ?? base.orderDate,
+        orderDate: overrides.orderDate ?? completedBusinessDayInstant(),
         // GROSS konvansiyon: saleGross = KDV-dahil satış (eski net 200 + KDV 40).
         saleGross: new Decimal('240.00'),
         saleVat: new Decimal('40.00'),
@@ -139,7 +143,9 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      const losing = await createOrder(org.id, store.id);
+      const losing = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(losing.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '240.00',
@@ -148,7 +154,9 @@ describe('Order routes', () => {
       });
       // Excluded order: the best-known net profit is null, so the lossOnly filter
       // (best-known net < 0) must never match it, even though it carries no profit.
-      const excluded = await createOrder(org.id, store.id);
+      const excluded = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await prisma.order.update({
         where: { id: excluded.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -416,21 +424,27 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      const partial = await createOrder(org.id, store.id);
+      const partial = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(partial.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '240.00',
         netProfit: '55.00',
         reconciliationStatus: 'PARTIALLY_SETTLED',
       });
-      const notSettled = await createOrder(org.id, store.id);
+      const notSettled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(notSettled.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '240.00',
         netProfit: '60.00',
         reconciliationStatus: 'NOT_SETTLED',
       });
-      const noStatement = await createOrder(org.id, store.id);
+      const noStatement = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
 
       const notSettledRes = await app.request(
         `/v1/organizations/${org.id}/stores/${store.id}/orders?reconciliationStatus=NOT_SETTLED`,
@@ -457,7 +471,9 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      const fully = await createOrder(org.id, store.id);
+      const fully = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(fully.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'SETTLED',
@@ -465,14 +481,18 @@ describe('Order routes', () => {
         netProfit: '50.00',
         reconciliationStatus: 'FULLY_SETTLED',
       });
-      const partial = await createOrder(org.id, store.id);
+      const partial = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(partial.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '240.00',
         netProfit: '55.00',
         reconciliationStatus: 'PARTIALLY_SETTLED',
       });
-      const notSettled = await createOrder(org.id, store.id);
+      const notSettled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(notSettled.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '240.00',
@@ -501,7 +521,9 @@ describe('Order routes', () => {
 
       const withStatement: string[] = [];
       for (let i = 0; i < 3; i += 1) {
-        const order = await createOrder(org.id, store.id);
+        const order = await createOrder(org.id, store.id, {
+          orderDate: completedBusinessDayInstant(),
+        });
         await createProfitStatement(order.id, org.id, store.id, {
           view: 'BEST_KNOWN',
           saleGross: '100.00',
@@ -510,7 +532,9 @@ describe('Order routes', () => {
         });
         withStatement.push(order.id);
       }
-      const noStatement = await createOrder(org.id, store.id);
+      const noStatement = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
 
       // Segment 1 shares one margin → order id descending; segment 2 follows.
       const expected = [...[...withStatement].sort().reverse(), noStatement.id];
@@ -533,29 +557,39 @@ describe('Order routes', () => {
       const org = await createOrganization();
       const store = await createStore(org.id);
 
-      const m5 = await createOrder(org.id, store.id);
+      const m5 = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(m5.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '100.00',
         netProfit: '5.00',
         saleMarginPct: '5.00',
       });
-      const m15 = await createOrder(org.id, store.id);
+      const m15 = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(m15.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '100.00',
         netProfit: '15.00',
         saleMarginPct: '15.00',
       });
-      const mNull = await createOrder(org.id, store.id);
+      const mNull = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await createProfitStatement(mNull.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '100.00',
         netProfit: null,
         saleMarginPct: null,
       });
-      const noStmtA = await createOrder(org.id, store.id);
-      const noStmtB = await createOrder(org.id, store.id);
+      const noStmtA = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
+      const noStmtB = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
 
       // Segment 2 is ordered by order id descending in both directions.
       const segment2Desc = [noStmtA.id, noStmtB.id].sort().reverse();
@@ -583,6 +617,7 @@ describe('Order routes', () => {
 
       // Return-adjusted order → the best-known statement's sale wins.
       const withReturn = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -593,11 +628,13 @@ describe('Order routes', () => {
       });
       // Cancelled order, no statement → sale is 0 (rule B5).
       const cancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
       });
       // Plain order, no statement → its own sale.
       const plain = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '150.00',
       });
@@ -621,6 +658,7 @@ describe('Order routes', () => {
 
       const normal = await seedSimpleOrder(org.id, store.id); // best-known net 60, sale 240
       const excluded = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '100.00',
       });
@@ -681,6 +719,7 @@ describe('Order routes', () => {
       // Cancelled with no penalty: both views are CANCELLED with a zero net profit.
       // Reconciliation has finished, so without the rule the settled net would show 0.
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
       });
@@ -726,6 +765,7 @@ describe('Order routes', () => {
       // zero-net CANCELLED view. The penalty arrives with the settlement on the best-known
       // view: its non-zero net profit stays visible as the settled profit.
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
       });
@@ -764,6 +804,7 @@ describe('Order routes', () => {
       // The order column holds the pre-return VAT (36.06); the best-known statement's
       // output VAT (12.73) is what remains after the return, alongside its sale (140).
       const withStatement = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
         saleVat: '36.06',
@@ -776,12 +817,14 @@ describe('Order routes', () => {
       });
       // Cancelled, no statement: VAT is 0 like its sale (rule B5).
       const cancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
         saleVat: '36.06',
       });
       // Open, no statement: the order's own VAT column.
       const open = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'PROCESSING',
         saleGross: '240.00',
         saleVat: '36.06',
@@ -946,7 +989,10 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       const calc = await seedSimpleOrder(org.id, store.id, { platformOrderNumber: 'CALC-1' });
-      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const excluded = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: excluded.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -975,8 +1021,14 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       await seedSimpleOrder(org.id, store.id, { status: 'DELIVERED' }); // calc + delivered
-      const exDelivered = await createOrder(org.id, store.id, { status: 'DELIVERED' });
-      const exCancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      const exDelivered = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
+      const exCancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'CANCELLED',
+      });
       await prisma.order.updateMany({
         where: { id: { in: [exDelivered.id, exCancelled.id] } },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
@@ -1047,7 +1099,10 @@ describe('Order routes', () => {
       // Blocked: a Trendyol-contract order with a cost whose carrier name is not
       // recognized, so the carrier is the only blocking cause. A warning stored beside it
       // does not block and stays out of profitBlockers.
-      const blocked = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const blocked = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: blocked.id },
         data: { cargoProviderName: 'Alternative Delivery' },
@@ -1070,7 +1125,10 @@ describe('Order routes', () => {
         ],
       });
       // Computed with a warning only: a seller-cargo-agreement estimate does not block.
-      const computed = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const computed = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(computed.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'ESTIMATED',
@@ -1080,7 +1138,10 @@ describe('Order routes', () => {
       });
       // The status is the gate, not the code: an estimated statement that still carries a
       // blocking code (an engine before version 12 wrote such rows) has no blockers.
-      const staleWarned = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const staleWarned = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(staleWarned.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'ESTIMATED',
@@ -1089,7 +1150,10 @@ describe('Order routes', () => {
         issues: [carrierIssue],
       });
       // Excluded from profit: its EXCLUDED statement has no blockers.
-      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const excluded = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: excluded.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -1103,7 +1167,10 @@ describe('Order routes', () => {
       });
       // Cancelled (even one still missing reference data), and an order with no statement
       // yet: no blockers either.
-      const cancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      const cancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'CANCELLED',
+      });
       await createProfitStatement(cancelled.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'CANCELLED',
@@ -1111,7 +1178,10 @@ describe('Order routes', () => {
         netProfit: '0',
         issues: [{ code: 'REFERENCE_DATA_MISSING', orderItemId: null, detail: 'FEE:SHIPPING' }],
       });
-      const fresh = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const fresh = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
 
       const res = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
         headers: { Authorization: bearer(user.accessToken) },
@@ -1147,7 +1217,10 @@ describe('Order routes', () => {
       // carrier, while the best-known view is computed from the invoice. The order's profit
       // is computable, so neither surface lists a blocker: the list row's estimate cell is
       // a plain empty value and its settled profit and margin are filled.
-      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: order.id },
         data: { cargoProviderName: 'Yeni Kargo Marketplace' },
@@ -1216,7 +1289,10 @@ describe('Order routes', () => {
       // Two not-computable best-known statements (the view the list row reads) whose stored
       // issues the reader rejects (an unknown code, and a value that is not an array),
       // beside a healthy blocked order.
-      const unknownCode = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const unknownCode = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(unknownCode.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'NOT_COMPUTABLE',
@@ -1224,7 +1300,10 @@ describe('Order routes', () => {
         netProfit: null,
         issues: [{ code: 'NOT_A_REAL_CODE', orderItemId: null, detail: null }],
       });
-      const notArray = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const notArray = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(notArray.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'NOT_COMPUTABLE',
@@ -1232,7 +1311,10 @@ describe('Order routes', () => {
         netProfit: null,
         issues: { broken: true },
       });
-      const healthy = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const healthy = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(healthy.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'NOT_COMPUTABLE',
@@ -1478,7 +1560,9 @@ describe('Order routes', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
-      const order = await createOrder(org.id, store.id);
+      const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await prisma.order.update({
         where: { id: order.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -1607,8 +1691,13 @@ describe('Order routes', () => {
       // detail top-level sale must read the order's own recorded sale. Give that column a
       // value distinct from the 240 the engine computes from the single line, so the
       // parity check also proves the detail no longer surfaces the computed statement's
-      // sale -- exactly the divergence an accepted return produces.
-      await prisma.order.update({ where: { id: orderId }, data: { saleGross: '180.00' } });
+      // sale -- exactly the divergence an accepted return produces. The order moves to a
+      // completed business day so the list shows it; its cost and variant link date from
+      // COST_FIXTURE_EPOCH and the variant is digital, so the breakdown does not change.
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { saleGross: '180.00', orderDate: completedBusinessDayInstant() },
+      });
 
       const listRes = await app.request(`/v1/organizations/${org.id}/stores/${store.id}/orders`, {
         headers: { Authorization: bearer(user.accessToken) },
@@ -1650,7 +1739,9 @@ describe('Order routes', () => {
       // Hepsiburada has no profit computer yet, so a request with no stored statement
       // returns a null breakdown instead of raising a 500.
       const store = await createStore(org.id, { platform: 'HEPSIBURADA' });
-      const order = await createOrder(org.id, store.id);
+      const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       // With no line context the profit part is empty: the item's commission rates and
       // amounts are all null, never a fabricated 0.00.
       const item = await prisma.orderItem.create({
@@ -1693,7 +1784,10 @@ describe('Order routes', () => {
       const org = await createOrganization();
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
-      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: order.id },
         data: { saleGross: '240.00', saleVat: '40.00' },
@@ -1807,6 +1901,7 @@ describe('Order routes', () => {
       // throws -- it is a REFERENCE_DATA_MISSING issue -- so it cannot drive this path.)
       // The detail must still open with an empty profit section.
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -1870,6 +1965,7 @@ describe('Order routes', () => {
       // nested object -- a shape the reader rejects. Rebuilding the stored rows throws, so
       // the detail must still open with an empty profit section (owner decision 2026-11-04).
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -1951,6 +2047,7 @@ describe('Order routes', () => {
       // the page opens with an empty profit section, is pinned above by "opens the detail
       // without profit when the in-request computation fails": an invalid seller discount.)
       const cancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
       });
@@ -1970,6 +2067,7 @@ describe('Order routes', () => {
 
       // Cancelled but with a best-known statement: the sale follows the statement.
       const settled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '240.00',
       });
@@ -1994,6 +2092,7 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -2054,6 +2153,7 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -2097,6 +2197,7 @@ describe('Order routes', () => {
       // The order column holds 240, but a return shrank the best-known statement's sale
       // to 180 -- the list row and the detail must agree on the latter.
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '240.00',
       });
@@ -2132,6 +2233,7 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'DELIVERED',
         saleGross: '280.00',
       });
@@ -2202,6 +2304,7 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
       const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
         status: 'CANCELLED',
         saleGross: '140.00',
       });
@@ -2317,7 +2420,10 @@ describe('Order routes', () => {
       };
 
       // Warned: the stored issue is returned as it is.
-      const warned = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const warned = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(warned.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '140.00',
@@ -2325,7 +2431,10 @@ describe('Order routes', () => {
         issues: [carrierIssue],
       });
       // Plain: no stored issue.
-      const plain = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const plain = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(plain.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         saleGross: '140.00',
@@ -2333,7 +2442,10 @@ describe('Order routes', () => {
       });
       // Invoiced: the same issue, but a cargo-invoice actual shipping line is selected,
       // so the warning no longer applies and is hidden.
-      const invoiced = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const invoiced = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitLine(invoiced.id, org.id, store.id, {
         orderItemId: null,
         type: 'SHIPPING',
@@ -2384,7 +2496,10 @@ describe('Order routes', () => {
 
       // Blocked: an order with a cost whose carrier name is not recognized; a warning
       // stored beside the carrier does not block.
-      const blocked = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const blocked = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await prisma.order.update({
         where: { id: blocked.id },
         data: { cargoProviderName: 'Alternative Delivery' },
@@ -2397,7 +2512,10 @@ describe('Order routes', () => {
         issues: [carrierIssue, ambiguousIssue],
       });
       // Computed: an estimated statement has no blockers.
-      const computed = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const computed = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(computed.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'ESTIMATED',
@@ -2434,7 +2552,10 @@ describe('Order routes', () => {
 
       // A not-computable best-known statement whose profit line the reader rejects: the
       // detail opens with an empty profit section, and no blocker is shown either.
-      const order = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const order = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       const item = await prisma.orderItem.create({
         data: {
           orderId: order.id,
@@ -2518,7 +2639,10 @@ describe('Order routes', () => {
       await seedSimpleOrder(org.id, store.id, { netProfit: '-40.00', saleMarginPct: '-16.67' });
 
       // Cancelled with a zero net: not a sold order, so not in the denominator (rule B5).
-      const cancelled = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      const cancelled = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'CANCELLED',
+      });
       await createProfitStatement(cancelled.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'CANCELLED',
@@ -2527,7 +2651,10 @@ describe('Order routes', () => {
       });
       // Cancelled with a penalty (a loss): still not a sale, so it enters neither the
       // denominator nor the loss count -- the count stays a subset of the denominator.
-      const penalized = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      const penalized = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'CANCELLED',
+      });
       await createProfitStatement(penalized.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'CANCELLED',
@@ -2535,7 +2662,10 @@ describe('Order routes', () => {
         netProfit: '-15.00',
       });
       // Excluded with no net profit: an order without a profit stays out of the rate.
-      const excluded = await createOrder(org.id, store.id, { status: 'DELIVERED' });
+      const excluded = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'DELIVERED',
+      });
       await createProfitStatement(excluded.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'EXCLUDED',
@@ -2558,7 +2688,10 @@ describe('Order routes', () => {
       await createMembership(org.id, user.id);
       const store = await createStore(org.id);
 
-      const penalized = await createOrder(org.id, store.id, { status: 'CANCELLED' });
+      const penalized = await createOrder(org.id, store.id, {
+        orderDate: completedBusinessDayInstant(),
+        status: 'CANCELLED',
+      });
       await createProfitStatement(penalized.id, org.id, store.id, {
         view: 'BEST_KNOWN',
         status: 'CANCELLED',
@@ -2583,7 +2716,9 @@ describe('Order routes', () => {
       const store = await createStore(org.id);
 
       for (const margin of ['10.00', '20.00', '30.00']) {
-        const order = await createOrder(org.id, store.id);
+        const order = await createOrder(org.id, store.id, {
+          orderDate: completedBusinessDayInstant(),
+        });
         await createProfitStatement(order.id, org.id, store.id, {
           view: 'BEST_KNOWN',
           saleGross: '240.00',
@@ -2624,6 +2759,237 @@ describe('Order routes', () => {
       } = await res.json();
       expect(body.totalRevenueGross).toBe('480'); // 2 x 240, the neighbours stay out
       expect(body.lossOrderRate).toMatchObject({ lossCount: 0, totalCount: 2 });
+    });
+  });
+
+  // --- Completed business days: the list and the summary hide today's orders ---
+
+  describe('completed business days', () => {
+    const MINUTE_MS = 60 * 1000;
+
+    interface StoreContext {
+      accessToken: string;
+      orgId: string;
+      storeId: string;
+    }
+
+    interface ListBody {
+      data: { id: string }[];
+      pagination: { total: number };
+      counts: { calculated: number; excluded: number };
+    }
+
+    interface SummaryBody {
+      totalRevenueGross: string;
+      netProfitGross: string;
+      avgMarginPct: string | null;
+      lossOrderRate: { lossCount: number; totalCount: number };
+    }
+
+    async function memberStore(): Promise<StoreContext> {
+      const user = await createAuthenticatedTestUser();
+      const org = await createOrganization();
+      await createMembership(org.id, user.id);
+      const store = await createStore(org.id);
+      return { accessToken: user.accessToken, orgId: org.id, storeId: store.id };
+    }
+
+    function ordersUrl(ctx: StoreContext, path = ''): string {
+      return `/v1/organizations/${ctx.orgId}/stores/${ctx.storeId}/orders${path}`;
+    }
+
+    async function getList(ctx: StoreContext, query = ''): Promise<ListBody> {
+      const res = await app.request(ordersUrl(ctx, query), {
+        headers: { Authorization: bearer(ctx.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: ListBody = await res.json();
+      return body;
+    }
+
+    // An order stamped out of the profit universe (the "excluded" tab), with no statement.
+    async function seedExcludedOrder(orgId: string, storeId: string, orderDate: Date) {
+      const order = await createOrder(orgId, storeId, { orderDate });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
+      });
+      return order;
+    }
+
+    it('lists only completed-day orders', async () => {
+      const ctx = await memberStore();
+      const today = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+      });
+      const yesterday = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+      });
+
+      const body = await getList(ctx);
+      const ids = body.data.map((o) => o.id);
+      expect(ids).toEqual([yesterday.id]);
+      expect(ids).not.toContain(today.id);
+      expect(body.pagination.total).toBe(1);
+    });
+
+    it('tab counts ignore today', async () => {
+      const ctx = await memberStore();
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+      const excludedYesterday = await seedExcludedOrder(
+        ctx.orgId,
+        ctx.storeId,
+        completedBusinessDayInstant(),
+      );
+      await seedExcludedOrder(ctx.orgId, ctx.storeId, openBusinessDayInstant());
+
+      const body = await getList(ctx);
+      expect(body.counts).toEqual({ calculated: 1, excluded: 1 });
+      expect(body.pagination.total).toBe(2);
+
+      const excludedBody = await getList(ctx, '?costStatus=excluded');
+      expect(excludedBody.data.map((o) => o.id)).toEqual([excludedYesterday.id]);
+      expect(excludedBody.counts).toEqual({ calculated: 1, excluded: 1 });
+    });
+
+    it('summary ignores today', async () => {
+      const ctx = await memberStore();
+      // Completed day: sale 240, net 60, margin 25.
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
+      // Today: a loss with its own margin, so every aggregate would move if it leaked.
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        netProfit: '-10.00',
+        saleMarginPct: '-4.17',
+      });
+      // Today, no statement: it would enter the revenue fallback aggregate.
+      await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        saleGross: '55.00',
+      });
+
+      const res = await app.request(ordersUrl(ctx, '/summary'), {
+        headers: { Authorization: bearer(ctx.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: SummaryBody = await res.json();
+      expect(body.totalRevenueGross).toBe('240');
+      expect(body.netProfitGross).toBe('60');
+      expect(body.avgMarginPct).toBe('25');
+      expect(body.lossOrderRate).toMatchObject({ lossCount: 0, totalCount: 1 });
+    });
+
+    it('margin sorts ignore today', async () => {
+      const ctx = await memberStore();
+      // Segment 1 (has a best-known statement) and segment 2 (none) on a completed day.
+      const withStatement = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+      });
+      const statementless = await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+      });
+      // The same two segments today.
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        saleMarginPct: '90.00',
+      });
+      await createOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+
+      for (const sort of ['-marginPct', 'marginPct']) {
+        const body = await getList(ctx, `?sort=${sort}`);
+        expect(body.data.map((o) => o.id)).toEqual([withStatement.id, statementless.id]);
+        expect(body.pagination.total).toBe(2);
+      }
+    });
+
+    it('to = today still hides today', async () => {
+      const ctx = await memberStore();
+      const today = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+      });
+      const yesterday = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+      });
+
+      const body = await getList(ctx, `?to=${getBusinessDate()}`);
+      const ids = body.data.map((o) => o.id);
+      expect(ids).not.toContain(today.id);
+      expect(ids).toContain(yesterday.id);
+    });
+
+    it('from = today returns nothing', async () => {
+      const ctx = await memberStore();
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
+
+      const body = await getList(ctx, `?from=${getBusinessDate()}`);
+      expect(body.data).toEqual([]);
+      expect(body.pagination.total).toBe(0);
+    });
+
+    it('filters still compose', async () => {
+      const ctx = await memberStore();
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'OPEN-DAY-1001',
+      });
+      const yesterday = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+        platformOrderNumber: 'DONE-DAY-2002',
+      });
+
+      const todayBody = await getList(ctx, '?q=OPEN-DAY-1001');
+      expect(todayBody.data).toEqual([]);
+      expect(todayBody.pagination.total).toBe(0);
+
+      // Positive control: the same search finds a completed-day order.
+      const pastBody = await getList(ctx, '?q=DONE-DAY-2002');
+      expect(pastBody.data.map((o) => o.id)).toEqual([yesterday.id]);
+    });
+
+    it('service clock: an order at 23:30 is hidden at 23:50 the same day and listed at 00:10 the next day', async () => {
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+      const edges = businessDayEdges();
+      const order = await seedSimpleOrder(org.id, store.id, { orderDate: edges.lateInDay });
+
+      const sameDayLate = new Date(edges.lateInDay.getTime() + 20 * MINUTE_MS);
+      const listBefore = await listOrders(
+        org.id,
+        store.id,
+        { page: 1, perPage: 10, sort: '-orderDate' },
+        sameDayLate,
+      );
+      expect(listBefore.data).toEqual([]);
+      expect(listBefore.total).toBe(0);
+      const summaryBefore = await getOrdersSummary(org.id, store.id, {}, sameDayLate);
+      expect(summaryBefore.totalRevenueGross).toBe('0');
+
+      const listAfter = await listOrders(
+        org.id,
+        store.id,
+        { page: 1, perPage: 10, sort: '-orderDate' },
+        edges.nextDayEarly,
+      );
+      expect(listAfter.data.map((row) => row.id)).toEqual([order.id]);
+      expect(listAfter.total).toBe(1);
+      const summaryAfter = await getOrdersSummary(org.id, store.id, {}, edges.nextDayEarly);
+      expect(summaryAfter.totalRevenueGross).toBe('240');
+    });
+
+    it('order detail by id is not clamped', async () => {
+      const ctx = await memberStore();
+      const today = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+      });
+
+      const res = await app.request(ordersUrl(ctx, `/${today.id}`), {
+        headers: { Authorization: bearer(ctx.accessToken) },
+      });
+      expect(res.status).toBe(200);
+      const body: { id: string } = await res.json();
+      expect(body.id).toBe(today.id);
     });
   });
 });

@@ -60,12 +60,15 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
   }),
   from: businessDateQueryParam(
     'Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the ' +
-      'start of that business day.',
+      'start of that business day. Clamped to completed business days; today and later are ' +
+      'never returned, so a from of today or later gives an empty result.',
     '2026-04-01',
   ),
   to: businessDateQueryParam(
     'Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose ' +
-      'orderDate is before the end of that business day.',
+      'orderDate is before the end of that business day. Clamped to completed business days; ' +
+      'today and later are never returned, so a to of today or later stops at the last ' +
+      'completed day.',
     '2026-05-23',
   ),
   q: z.string().trim().min(1).max(120).optional().openapi({

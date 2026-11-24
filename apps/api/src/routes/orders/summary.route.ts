@@ -34,7 +34,8 @@ const summaryRoute = createRoute({
     'Aggregates the orders that match the same filters as the list endpoint ' +
     '(status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: ' +
     'total revenue, consumed net profit, average margin, and loss-order rate. ' +
-    'Pagination/sort are not accepted.',
+    'Pagination/sort are not accepted. Like the list, it covers completed Istanbul business ' +
+    "days only: today's orders enter no figure until the day ends.",
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,

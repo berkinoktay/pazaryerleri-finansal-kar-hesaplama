@@ -10436,7 +10436,7 @@
           "Orders"
         ],
         "summary": "List orders for a store",
-        "description": "Returns paginated orders sorted by orderDate desc (default), with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / -marginPct (sale margin column). Designed for the orders table — page + perPage pagination, not cursor.",
+        "description": "Returns paginated orders sorted by orderDate desc (default), with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / -marginPct (sale margin column). Designed for the orders table — page + perPage pagination, not cursor. Only orders of completed Istanbul business days are returned: the rows, the total and both tab counts leave today's orders out until the day ends; those are on the live performance endpoints.",
         "security": [
           {
             "bearerAuth": []
@@ -10525,11 +10525,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
               "example": "2026-04-01"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
             "name": "from",
             "in": "query"
           },
@@ -10537,11 +10537,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
               "example": "2026-05-23"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
             "name": "to",
             "in": "query"
           },
@@ -10712,7 +10712,7 @@
           "Orders"
         ],
         "summary": "Order KPI summary for a store",
-        "description": "Aggregates the orders that match the same filters as the list endpoint (status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: total revenue, consumed net profit, average margin, and loss-order rate. Pagination/sort are not accepted.",
+        "description": "Aggregates the orders that match the same filters as the list endpoint (status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: total revenue, consumed net profit, average margin, and loss-order rate. Pagination/sort are not accepted. Like the list, it covers completed Istanbul business days only: today's orders enter no figure until the day ends.",
         "security": [
           {
             "bearerAuth": []
@@ -10776,11 +10776,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
               "example": "2026-04-01"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
             "name": "from",
             "in": "query"
           },
@@ -10788,11 +10788,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
               "example": "2026-05-23"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
             "name": "to",
             "in": "query"
           },

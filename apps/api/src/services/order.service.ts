@@ -25,8 +25,12 @@ import {
 } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
-import { businessDateRangeFilter } from '../lib/business-date-range';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
+import {
+  completedDaysScope,
+  completedOrderDateFilter,
+  type CompletedDaysScope,
+} from '../lib/completed-days';
 import { NotFoundError } from '../lib/errors';
 import {
   STATEMENT_LIST_SELECT,
@@ -133,10 +137,17 @@ function reconciliationStatusCondition(
   }
 }
 
+/**
+ * The where of the orders list and its summary. Always clamped to completed business
+ * days through `scope`: rows, totals, both tab counts, the margin-sort segments and
+ * every summary aggregate read a where built here, so today's orders never escape
+ * through one of them. One request builds every where from the same scope.
+ */
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
   filters: OrderListFilters,
+  scope: CompletedDaysScope,
 ): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {
     organizationId: orgId,
@@ -147,9 +158,9 @@ function buildOrderListWhere(
 
   if (filters.status !== undefined) where.status = filters.status;
 
-  // from/to are business dates: the range covers their whole business days.
-  const orderDateRange = businessDateRangeFilter(filters);
-  if (orderDateRange !== undefined) where.orderDate = orderDateRange;
+  // from/to are business dates: the range covers their whole business days, clamped
+  // to the completed ones (today's orders stay on live performance).
+  where.orderDate = completedOrderDateFilter(filters, scope);
 
   if (filters.q !== undefined) {
     where.OR = [
@@ -403,15 +414,27 @@ function fetchOrderListRows(
 // whitelist, so a validated ListOrdersQuery is always assignable here.
 type OrderListParams = Omit<ListOrdersQuery, 'perPage'> & { perPage: number };
 
+/**
+ * One page of the orders list, its total and both tab counts, all on completed business
+ * days. `now` is the clock the completed-days boundary is read from; routes never pass
+ * it (tests pin the boundary with it).
+ */
 export async function listOrders(
   orgId: string,
   storeId: string,
   filters: OrderListParams,
+  now: Date = new Date(),
 ): Promise<OrderListResult> {
   await ensureStoreInOrg(orgId, storeId);
 
-  const where = buildOrderListWhere(orgId, storeId, filters);
-  const baseWhere = buildOrderListWhere(orgId, storeId, { ...filters, costStatus: undefined });
+  const scope = completedDaysScope(now);
+  const where = buildOrderListWhere(orgId, storeId, filters, scope);
+  const baseWhere = buildOrderListWhere(
+    orgId,
+    storeId,
+    { ...filters, costStatus: undefined },
+    scope,
+  );
   const skip = (filters.page - 1) * filters.perPage;
 
   const [rows, total, calculatedCount, excludedCount] = await Promise.all([
@@ -444,15 +467,17 @@ function whereAndConditions(where: Prisma.OrderWhereInput): Prisma.OrderWhereInp
  * filters as listOrders (no pagination/sort). Revenue, net profit and the loss
  * rate read the best-known statements (decisions 1 + 4); a non-cancelled order
  * with no best-known statement contributes its own sale_gross as the revenue
- * fallback. Four aggregates run in parallel.
+ * fallback. Four aggregates run in parallel. Like the list, it covers completed
+ * business days only; `now` is the clock that boundary is read from (routes never pass it).
  */
 export async function getOrdersSummary(
   orgId: string,
   storeId: string,
   filters: OrderSummaryQuery,
+  now: Date = new Date(),
 ): Promise<OrderSummaryResult> {
   await ensureStoreInOrg(orgId, storeId);
-  const where = buildOrderListWhere(orgId, storeId, filters);
+  const where = buildOrderListWhere(orgId, storeId, filters, completedDaysScope(now));
 
   const bestKnownStatementWhere: Prisma.OrderProfitStatementWhereInput = {
     view: ProfitStatementView.BEST_KNOWN,

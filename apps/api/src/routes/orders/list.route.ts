@@ -29,7 +29,9 @@ const listOrdersRoute = createRoute({
     'status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) ' +
     'over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / ' +
     '-marginPct (sale margin column). Designed for the orders table — page + perPage ' +
-    'pagination, not cursor.',
+    'pagination, not cursor. Only orders of completed Istanbul business days are returned: ' +
+    "the rows, the total and both tab counts leave today's orders out until the day ends; " +
+    'those are on the live performance endpoints.',
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,

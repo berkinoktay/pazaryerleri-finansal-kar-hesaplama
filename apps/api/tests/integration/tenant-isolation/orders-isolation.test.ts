@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
+import { completedBusinessDayInstant } from '../../helpers/completed-day';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createMembership,
@@ -51,7 +52,7 @@ describe('Orders — tenant isolation', () => {
     await createMembership(orgA.id, user.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    await createOrder(orgB.id, storeB.id);
+    await createOrder(orgB.id, storeB.id, { orderDate: completedBusinessDayInstant() });
 
     const res = await app.request(`/v1/organizations/${orgA.id}/stores/${storeB.id}/orders`, {
       headers: { Authorization: bearer(user.accessToken) },
@@ -81,14 +82,25 @@ describe('Orders — tenant isolation', () => {
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    // orgB carries a sale and a loss-making best-known statement: without the tenant
-    // filter, revenue, net profit, the loss count and its denominator would all pick
-    // them up.
-    const orderB = await createOrder(orgB.id, storeB.id, { saleGross: '999.00' });
+    // orgB carries a sale and a loss-making best-known statement on a completed business
+    // day (the summary shows completed days only, so a today order would be hidden by
+    // the date clamp and the test would pass without the tenant filter): without the
+    // tenant filter, revenue, net profit, the loss count and its denominator would all
+    // pick them up.
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      saleGross: '999.00',
+      orderDate: completedBusinessDayInstant(),
+    });
     await createProfitStatement(orderB.id, orgB.id, storeB.id, {
       view: 'BEST_KNOWN',
       saleGross: '999.00',
       netProfit: '-50.00',
+    });
+    // Positive control: orgA's own completed-day order, with no statement, is counted
+    // through the revenue fallback.
+    await createOrder(orgA.id, storeA.id, {
+      saleGross: '100.00',
+      orderDate: completedBusinessDayInstant(),
     });
 
     const res = await app.request(
@@ -101,10 +113,10 @@ describe('Orders — tenant isolation', () => {
       netProfitGross: string;
       lossOrderRate: { lossCount: number; totalCount: number };
     } = await res.json();
-    expect(body.lossOrderRate.totalCount).toBe(0);
-    expect(body.lossOrderRate.lossCount).toBe(0);
+    // Own order counted, orgB's 999 not.
+    expect(body.totalRevenueGross).toBe('100');
+    expect(body.lossOrderRate).toMatchObject({ lossCount: 0, totalCount: 0 });
     expect(body.netProfitGross).toBe('0');
-    expect(body.totalRevenueGross).toBe('0');
   });
 
   it("GET: returns 404 when caller targets a sibling org's storeId via their own org", async () => {
@@ -113,7 +125,9 @@ describe('Orders — tenant isolation', () => {
     await createMembership(orgA.id, user.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    const orderB = await createOrder(orgB.id, storeB.id);
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
 
     const res = await app.request(
       `/v1/organizations/${orgA.id}/stores/${storeB.id}/orders/${orderB.id}`,
@@ -129,7 +143,9 @@ describe('Orders — tenant isolation', () => {
     const storeA = await createStore(orgA.id);
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
-    const orderB = await createOrder(orgB.id, storeB.id);
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
 
     const res = await app.request(
       `/v1/organizations/${orgA.id}/stores/${storeA.id}/orders/${orderB.id}`,
@@ -147,8 +163,10 @@ describe('Orders — tenant isolation', () => {
 
     const storeA = await createStore(orgA.id);
     const storeB = await createStore(orgB.id);
-    const orderA = await createOrder(orgA.id, storeA.id);
-    await createOrder(orgB.id, storeB.id);
+    const orderA = await createOrder(orgA.id, storeA.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
+    await createOrder(orgB.id, storeB.id, { orderDate: completedBusinessDayInstant() });
 
     const res = await app.request(`/v1/organizations/${orgA.id}/stores/${storeA.id}/orders`, {
       headers: { Authorization: bearer(user.accessToken) },
@@ -169,7 +187,9 @@ describe('Orders — tenant isolation', () => {
     const orgA = await createOrganization();
     await createMembership(orgA.id, userA.id);
     const storeA = await createStore(orgA.id);
-    const orderA = await createOrder(orgA.id, storeA.id);
+    const orderA = await createOrder(orgA.id, storeA.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
     await prisma.orderItem.create({
       data: {
         orderId: orderA.id,
@@ -191,7 +211,9 @@ describe('Orders — tenant isolation', () => {
     const orgB = await createOrganization();
     await createMembership(orgB.id, userB.id);
     const storeB = await createStore(orgB.id);
-    const orderB = await createOrder(orgB.id, storeB.id);
+    const orderB = await createOrder(orgB.id, storeB.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
     await prisma.orderItem.create({
       data: {
         orderId: orderB.id,
@@ -229,8 +251,10 @@ describe('Orders — tenant isolation', () => {
     await createMembership(orgA.id, user.id);
     const storeA = await createStore(orgA.id);
     // Not stamped → "calculated" tab (decision 3 — the stamp is the segment key).
-    await createOrder(orgA.id, storeA.id);
-    const excludedA = await createOrder(orgA.id, storeA.id);
+    await createOrder(orgA.id, storeA.id, { orderDate: completedBusinessDayInstant() });
+    const excludedA = await createOrder(orgA.id, storeA.id, {
+      orderDate: completedBusinessDayInstant(),
+    });
     await prisma.order.update({
       where: { id: excludedA.id },
       data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
@@ -239,7 +263,9 @@ describe('Orders — tenant isolation', () => {
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
     for (let i = 0; i < 5; i += 1) {
-      const excludedB = await createOrder(orgB.id, storeB.id);
+      const excludedB = await createOrder(orgB.id, storeB.id, {
+        orderDate: completedBusinessDayInstant(),
+      });
       await prisma.order.update({
         where: { id: excludedB.id },
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'LATE_UNCOSTED_ARRIVAL' },
@@ -268,10 +294,12 @@ describe('Orders — tenant isolation', () => {
     const storeB = await createStore(orgB.id);
 
     const orderA = await createOrder(orgA.id, storeA.id, {
+      orderDate: completedBusinessDayInstant(),
       status: 'DELIVERED',
       saleGross: '240.00',
     });
     const orderB = await createOrder(orgB.id, storeB.id, {
+      orderDate: completedBusinessDayInstant(),
       status: 'DELIVERED',
       saleGross: '999.00',
     });
@@ -336,10 +364,12 @@ describe('Orders — tenant isolation', () => {
     const storeB = await createStore(orgB.id);
 
     const orderA = await createOrder(orgA.id, storeA.id, {
+      orderDate: completedBusinessDayInstant(),
       status: 'DELIVERED',
       saleGross: '240.00',
     });
     const orderB = await createOrder(orgB.id, storeB.id, {
+      orderDate: completedBusinessDayInstant(),
       status: 'DELIVERED',
       saleGross: '999.00',
     });

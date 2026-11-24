@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
+import { completedBusinessDayInstant } from '../../helpers/completed-day';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
   createMemberStoreAccess,
@@ -36,7 +37,12 @@ describe('Store-access — GET /v1/organizations/:orgId/stores/:storeId/orders',
       createStore(org.id, { name: 'Granted' }),
       createStore(org.id, { name: 'Ungranted' }),
     ]);
-    await Promise.all([createOrder(org.id, granted.id), createOrder(org.id, ungranted.id)]);
+    // Completed-day orders: the orders list shows completed business days only.
+    const orderDate = completedBusinessDayInstant();
+    await Promise.all([
+      createOrder(org.id, granted.id, { orderDate }),
+      createOrder(org.id, ungranted.id, { orderDate }),
+    ]);
     return { org, granted, ungranted };
   }
 

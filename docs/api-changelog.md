@@ -26,6 +26,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Orders list and summary return completed business days only**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`). Both endpoints leave out the
+  orders of the open (today's) Istanbul business day: the rows, `pagination.total`, both tab
+  `counts`, the margin sorts and every summary figure cover completed business days only, and
+  `from`/`to` are clamped to the last completed day (a `to` of today or later stops at the end of
+  the last completed day; a `from` of today or later returns an empty page). Today's orders stay
+  on the live performance endpoints until the day ends; the order detail by id is not clamped. No
+  request or response shape changes, only the route and parameter descriptions. Breaking for a
+  client that expected today's orders in the list or the summary.
 - **Seller cost and desi edits reach the day's stored orders until the day ends**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
   `PATCH .../products/variants/dimensional-weight`,
