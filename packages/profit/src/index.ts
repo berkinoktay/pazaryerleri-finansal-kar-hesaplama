@@ -244,10 +244,12 @@ export {
 // The settled cutoff: database clock plus no open pre-midnight transaction (same-day edit window, PR-1)
 export {
   findTransactionsOpenSince,
+  openWriterLogEntry,
   readDbNow,
   resetSettledCutoffMemo,
   resolveSettledCutoff,
   type OpenWriter,
+  type OpenWriterLogEntry,
   type SettledCutoff,
 } from './persistence/db-clock';
 // Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md

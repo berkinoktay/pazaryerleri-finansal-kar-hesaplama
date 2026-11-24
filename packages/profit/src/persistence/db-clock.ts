@@ -12,6 +12,11 @@
  *      before T + 1 ms. Stamps are `timestamp(3)` and Postgres rounds, so a
  *      transaction that starts within half a millisecond after T stamps exactly T; the
  *      extra millisecond waits for it too.
+ * (2) fails closed: pg_stat_activity hides another session's state, start instant and
+ * backend type from a role that is not a superuser, not a member of pg_read_all_stats
+ * and not that session's role. Such a session may hold a transaction open since
+ * before T, so it counts as an open writer without a start instant (`xactStart` null),
+ * and a role that cannot read the view settles a day only at the cap, forced.
  * When (2) still fails at T + SELLER_INPUT_SETTLE_CAP_MS the cutoff moves anyway and
  * the result is `forced`, carrying the open transactions. The warning
  * (`seller-input.settle-forced`) is logged here, not by the callers: the forced result
@@ -42,11 +47,31 @@ import {
   SELLER_INPUT_SETTLE_MS,
 } from '@pazarsync/utils';
 
-/** One other client backend with an open transaction that began before a day end. */
+/**
+ * One other session of this database that may still write stamps <= a day end: a client
+ * backend whose open transaction began before it, or a session whose activity is hidden
+ * from this role.
+ */
 export interface OpenWriter {
   readonly pid: number;
-  /** The transaction's start instant (pg_stat_activity.xact_start). */
-  readonly xactStart: Date;
+  /**
+   * The transaction's start instant (pg_stat_activity.xact_start), or null when the
+   * session's activity is hidden from this role and it counts as open (fail closed).
+   */
+  readonly xactStart: Date | null;
+}
+
+/** How one open writer is logged: never a session's query text. */
+export type OpenWriterLogEntry =
+  | { readonly pid: number; readonly xactStart: string }
+  | { readonly pid: number; readonly hidden: true };
+
+/** The log entry of one open writer: its start instant, or `hidden` when the role cannot see it. */
+export function openWriterLogEntry(writer: OpenWriter): OpenWriterLogEntry {
+  if (writer.xactStart === null) {
+    return { pid: writer.pid, hidden: true };
+  }
+  return { pid: writer.pid, xactStart: writer.xactStart.toISOString() };
 }
 
 /** The settled cutoff of one tick, read from the database clock. */
@@ -85,10 +110,13 @@ export async function readDbNow(db: Prisma.TransactionClient): Promise<Date> {
   return row.now;
 }
 
-/** True when `value` is one row of the open-writer query: a pid and a start instant. */
+/**
+ * True when `value` is one row of the open-writer query: a pid and a start instant, null
+ * for a hidden session.
+ */
 function isOpenWriterRow(
   value: unknown,
-): value is { readonly pid: number; readonly xact_start: Date } {
+): value is { readonly pid: number; readonly xact_start: Date | null } {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
@@ -96,13 +124,20 @@ function isOpenWriterRow(
     'pid' in value &&
     typeof value.pid === 'number' &&
     'xact_start' in value &&
-    value.xact_start instanceof Date
+    (value.xact_start === null || value.xact_start instanceof Date)
   );
 }
 
 /**
- * The other client backends of this database whose open transaction began before
- * `dayEnd` + 1 ms, oldest first. The caller's own session is never counted.
+ * The other sessions of this database that may still write stamps <= `dayEnd`, oldest
+ * first, hidden ones last. The caller's own session is never counted.
+ *  - Visible: a client backend whose open transaction began before `dayEnd` + 1 ms.
+ *    An idle session (no transaction, `xact_start` null) never counts.
+ *  - Hidden: pg_stat_activity nulls state, xact_start and backend_type of a session
+ *    this role may not see (only datname and pid stay readable), so it cannot be told
+ *    apart from an idle session or proven a client backend. Any such backend of this
+ *    database counts, with a null `xactStart` (fail closed). A visible row has a
+ *    backend type, so a reader that sees every session gets no hidden rows.
  */
 export async function findTransactionsOpenSince(
   db: Prisma.TransactionClient,
@@ -113,11 +148,14 @@ export async function findTransactionsOpenSince(
     SELECT pid, timezone('utc', xact_start) AS xact_start
       FROM pg_stat_activity
      WHERE datname = current_database()
-       AND backend_type = 'client backend'
        AND pid <> pg_backend_pid()
-       AND xact_start IS NOT NULL
-       AND timezone('utc', xact_start) < ${dayEndUtc} + interval '1 millisecond'
-     ORDER BY xact_start, pid`;
+       AND (
+             (backend_type = 'client backend'
+              AND xact_start IS NOT NULL
+              AND timezone('utc', xact_start) < ${dayEndUtc} + interval '1 millisecond')
+          OR (state IS NULL AND backend_type IS NULL)
+           )
+     ORDER BY xact_start NULLS LAST, pid`;
 
   return rows.map((row) => {
     if (!isOpenWriterRow(row)) {
@@ -167,14 +205,11 @@ export async function resolveSettledCutoff(
   }
   settledDayEndMs = latestEndMs;
   // Once per day per process: the memo answers every later call of this day. Only the
-  // pids and start instants are logged, never a session's query text.
+  // pids and start instants (or `hidden`) are logged, never a session's query text.
   syncLog.warn('seller-input.settle-forced', {
     dayEnd: latestEnd.toISOString(),
     dbNow: dbNow.toISOString(),
-    openWriters: openWriters.map((writer) => ({
-      pid: writer.pid,
-      xactStart: writer.xactStart.toISOString(),
-    })),
+    openWriters: openWriters.map(openWriterLogEntry),
   });
   return { dbNow, cutoff: latestEnd, forced: true, openWriters };
 }

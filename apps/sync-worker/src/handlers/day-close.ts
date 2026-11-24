@@ -28,6 +28,7 @@
 import { prisma } from '@pazarsync/db';
 import { finalizeOrderSellerInputs, type FinalizeOutcome } from '@pazarsync/order-sync';
 import {
+  openWriterLogEntry,
   PROFIT_RECOMPUTE_TX_MAX_WAIT_MS,
   PROFIT_RECOMPUTE_TX_TIMEOUT_MS,
   resolveSettledCutoff,
@@ -116,9 +117,10 @@ function recordFailure(orderId: string, now: number): BackoffEntry {
 }
 
 /**
- * Logs, at most once a minute, that open transactions begun before the day end hold the
- * cutoff back. Only pids and start instants are logged, never a session's query text. A
- * forced cutoff is logged once by `resolveSettledCutoff` itself.
+ * Logs, at most once a minute, that open transactions begun before the day end (or
+ * sessions hidden from this role) hold the cutoff back. Only pids and start instants (or
+ * `hidden`) are logged, never a session's query text. A forced cutoff is logged once by
+ * `resolveSettledCutoff` itself.
  */
 function logWaitingForWriters(settle: SettledCutoff): void {
   if (settle.openWriters.length === 0 || settle.forced) {
@@ -132,10 +134,7 @@ function logWaitingForWriters(settle: SettledCutoff): void {
   syncLog.info('day-close.waiting-for-writers', {
     cutoff: settle.cutoff.toISOString(),
     dbNow: settle.dbNow.toISOString(),
-    openWriters: settle.openWriters.map((writer) => ({
-      pid: writer.pid,
-      xactStart: writer.xactStart.toISOString(),
-    })),
+    openWriters: settle.openWriters.map(openWriterLogEntry),
   });
 }
 
@@ -254,7 +253,10 @@ async function runDayClose(opts: {
         orderDate: { lt: settle.cutoff },
         id: { notIn: [...backingOffOrderIds(Date.now()), ...skippedThisTick] },
       },
-      orderBy: [{ orderDate: 'asc' }, { id: 'asc' }],
+      // Leading with the (constant, NULL) marker column lets Postgres walk the
+      // (seller_inputs_final_at, order_date) index in order and stop at the chunk size,
+      // instead of sorting the whole non-final backlog on every chunk.
+      orderBy: [{ sellerInputsFinalAt: 'asc' }, { orderDate: 'asc' }, { id: 'asc' }],
       take: DAY_CLOSE_CHUNK_SIZE,
       select: { id: true, organizationId: true, storeId: true },
     });
