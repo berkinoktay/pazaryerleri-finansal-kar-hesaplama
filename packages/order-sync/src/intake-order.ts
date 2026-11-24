@@ -49,13 +49,13 @@
  * non-cancelled item had a cost in force at the end of the order's business day
  * (Europe/Istanbul midnight). Supply prices drift, so a cost entered after that day
  * may not reflect the day's real price. A past-day order that arrives without a
- * timely cost -- or one whose cost was entered only after its day (hadCostWithinOrderDay
- * false) -- is persisted but PERMANENTLY excluded from profit; its ciro still counts, its
- * net profit never shows. The exclusion reason is derived from whether a live-performance
- * buffer row for the same order is graduated in the persisting transaction: a coexisting
- * buffer row proves the order ARRIVED within its business day (the buffer only holds
- * same-day waiting orders) and merely missed its deadline; with no buffer row we first saw
- * the order after its day had closed.
+ * timely cost -- or one whose cost was entered only after its day (the day-end gate
+ * reports cost_missing) -- is persisted but PERMANENTLY excluded from profit; its ciro
+ * still counts, its net profit never shows. The exclusion reason is derived from whether
+ * a live-performance buffer row for the same order is graduated in the persisting
+ * transaction: a coexisting buffer row proves the order ARRIVED within its business day
+ * (the buffer only holds same-day waiting orders) and merely missed its deadline; with no
+ * buffer row we first saw the order after its day had closed.
  *
  * Same-day edit window (Berkin 2026-11-23, plan PR-1): an order's cost and desi are the
  * values in force at the end of its business day T, and they become final once the day
@@ -100,7 +100,6 @@ import {
 } from '@pazarsync/profit';
 import { getBusinessDate, getBusinessDateAnchor, isDaySettled } from '@pazarsync/utils';
 
-import { hadCostWithinOrderDay } from './cost-window';
 import { type PastDayGap, pastDayGapReason } from './past-day-gap';
 import { decrementVariantStock, incrementVariantStock, isOrderOnBusinessToday } from './stock';
 import { upsertOrderWithSnapshot } from './upsert-order';
@@ -287,15 +286,26 @@ export async function intakeOrder(args: IntakeOrderArgs): Promise<OrderIntakeOut
     return { kind: 'persisted', reason: 'cancelled_audit' };
   }
 
+  // Same-day edit window (Berkin 2026-11-23, plan PR-1): the app clock only routes.
+  // Whether a past-day order's day is settled -- its seller inputs final -- is read
+  // from the database clock (resolveSettledCutoff), only for a past-day order, and
+  // BEFORE the gate read below: once the day is settled every seller-input write
+  // stamped inside it has committed, so the read sees the day's final state.
+  const settle =
+    getBusinessDate(mapped.orderDate) < getBusinessDate()
+      ? await resolveSettledCutoff(prisma, { dbNow: args.dbNow })
+      : null;
+
   // The cost rule judges links at the end of the order's business day (plan PR-3b):
   // the current state for today's order, that day's end for a past-day one.
-  const calcLines = await buildCalcCheckLines(prisma, {
-    organizationId,
-    storeId,
-    lines: mapped.lines,
-    at: costDecisionTime(mapped.orderDate),
-  });
-  const calc = resolveOrderCalculability(calcLines);
+  const calc = resolveOrderCalculability(
+    await buildCalcCheckLines(prisma, {
+      organizationId,
+      storeId,
+      lines: mapped.lines,
+      at: costDecisionTime(mapped.orderDate),
+    }),
+  );
 
   // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22, 2026-11-23). A
   // past-day order's window (its own business day) has already closed, so it enters
@@ -305,35 +315,22 @@ export async function intakeOrder(args: IntakeOrderArgs): Promise<OrderIntakeOut
   // database-stamped seller-input history), never as they stand now. Otherwise it is
   // persisted but PERMANENTLY excluded. The cost is judged first and wins: no cost at
   // all, or a cost entered only after the day (decision 2), is a cost gap; a timely cost
-  // with an item that had no desi at the day end is a desi gap. The exclusion reason is
-  // derived in persistWithBufferGraduation from the gap and from whether a buffer row is
-  // graduated. When the gate already reports a missing cost, the timing query is
-  // skipped. The order is never cancelled here (the CANCELLED branch returned above), so
-  // every line is non-cancelled.
+  // with an item that had no desi at the day end is a desi gap. Both come from the one
+  // gate result: it reports cost_missing exactly when some line had no cost link in
+  // force at the day end, and it checks the cost before the desi. The exclusion reason
+  // is derived in persistWithBufferGraduation from the gap and from whether a buffer row
+  // is graduated. The order is never cancelled here (the CANCELLED branch returned
+  // above), so every line is non-cancelled.
   //
-  // Same-day edit window (Berkin 2026-11-23, plan PR-1): the app clock above only
-  // routes. Whether the order's day is settled -- its seller inputs final -- is read
-  // from the database clock (resolveSettledCutoff), only on this branch. A day that is
-  // not settled yet decides nothing here (intakeUnsettledPastDay); a settled day keeps
-  // the rule above and its order is created final, its exclusion decided at create.
-  if (getBusinessDate(mapped.orderDate) < getBusinessDate()) {
-    const settle = await resolveSettledCutoff(prisma, { dbNow: args.dbNow });
+  // A day that is not settled yet decides nothing here (intakeUnsettledPastDay); a
+  // settled day keeps the rule above and its order is created final, its exclusion
+  // decided at create.
+  if (settle !== null) {
     if (!isDaySettled(mapped.orderDate, settle.cutoff)) {
       return intakeUnsettledPastDay(args, calc.kind === 'calculable');
     }
     const sellerInputsFinalAt = settle.dbNow;
-    const costTimely =
-      !(calc.kind === 'skip' && calc.reason === 'cost_missing') &&
-      (await hadCostWithinOrderDay(prisma, {
-        organizationId,
-        storeId,
-        orderDate: mapped.orderDate,
-        items: calcLines.map((line) => ({
-          productVariantId: line.variantId,
-          isCancelled: false,
-        })),
-      }));
-    if (costTimely && calc.kind === 'calculable') {
+    if (calc.kind === 'calculable') {
       await persistWithBufferGraduation(storeId, organizationId, mapped, { sellerInputsFinalAt });
       return { kind: 'persisted', reason: 'calculable' };
     }
@@ -341,7 +338,7 @@ export async function intakeOrder(args: IntakeOrderArgs): Promise<OrderIntakeOut
     // the persisting transaction (see persistWithBufferGraduation) from whether a
     // coexisting buffer row is graduated, not stamped unconditionally here -- so a buffered
     // order re-delivered after its day settled gets the same reason the day-end flush would.
-    const pastDayGap = costTimely ? 'desi' : 'cost';
+    const pastDayGap = calc.reason === 'cost_missing' ? 'cost' : 'desi';
     await persistWithBufferGraduation(storeId, organizationId, mapped, {
       pastDayGap,
       sellerInputsFinalAt,

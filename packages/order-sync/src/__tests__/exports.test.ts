@@ -13,7 +13,8 @@ describe('@pazarsync/order-sync — public API surface', () => {
   it('exposes exactly the intake + write + cost-window + day-close helpers (public API guard)', () => {
     // The package keeps a small runtime surface of five symbols: the order writer
     // (upsertOrderWithSnapshot), the shared intake routing (intakeOrder), the
-    // cost-window criterion both exclusion writers ask (hadCostWithinOrderDay),
+    // cost-window criterion of stored orders (hadCostWithinOrderDay; the live
+    // intake and buffer writers read it from their day-end gate result instead),
     // the operator backfill that stamps existing orders by the same criterion
     // (stampCostWindowExclusions), and the day-close finaliser of one order
     // (finalizeOrderSellerInputs). OrderIntakeOutcome and FinalizeOutcome are type-only

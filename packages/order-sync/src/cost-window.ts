@@ -5,12 +5,16 @@
  * version by then is not archived (PR-3b; the shared rule is isCostLinkInForce in
  * @pazarsync/profit). Supply prices drift, so a cost entered after that day may not
  * reflect the day's real price -- an order that misses the window is permanently
- * excluded from profit (ciro still counts). This module answers the single
- * question the two exclusion writers ask: did the cost arrive in time?
+ * excluded from profit (ciro still counts). This module answers that question --
+ * did the cost arrive in time? -- for stored orders.
  *
  * See docs/plans/2026-11-03-profit-engine-faz-3e-plan.md (decision 1) and the root
- * CLAUDE.md money/tenant rules. Callers: intake-order (past-day route) and the
- * sync-worker buffer day-end graduation.
+ * CLAUDE.md money/tenant rules. Caller: the operator backfill below
+ * (`stampCostWindowExclusions`). The two live exclusion writers -- intake-order's
+ * past-day route and the sync-worker buffer graduation -- take the same answer from
+ * the day-end gate result they already hold (`resolveOrderCalculability` reports
+ * cost_missing exactly when this returns false for the same lines and day end), so
+ * they read the cost links once.
  *
  * This module asks ONLY about cost timing. The product desi is required too (plan
  * PR-2c), but that gate lives in `resolveOrderCalculability` (`@pazarsync/profit`),

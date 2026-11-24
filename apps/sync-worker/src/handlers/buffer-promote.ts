@@ -2,16 +2,14 @@ import { prisma } from '@pazarsync/db';
 import type {
   BufferEntryStatus,
   LivePerformanceBuffer,
-  Prisma,
   ProfitExclusionReason,
 } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { hadCostWithinOrderDay, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import {
   buildCalcCheckLines,
+  type CalcResult,
   costDecisionTime,
-  hasMissingDesi,
-  type OrderLineForCalcCheck,
   resolveOrderCalculability,
   resolveSettledCutoff,
 } from '@pazarsync/profit';
@@ -73,21 +71,22 @@ async function resolveGraduationWindow(dbNow: Date | undefined): Promise<Graduat
  *     flush owns an entry once its day is settled.
  *   - a CANCELLED order: it carries no payout and is never excluded.
  *
- * The decision reads the attach/version timestamps against the entry's OWN business
- * day end (via hadCostWithinOrderDay), so a cost attached before that end still
- * counts even when this tick runs after midnight. Tenant-scoped via the entry's
- * organization + store. The caller's already-built calc lines are reused (no
- * rebuild) for both the cost timing and the desi check. A buffer snapshot carries no
- * per-line cancel flag, so every line is treated as non-cancelled (the order-level
- * CANCELLED check owns the cancelled case).
+ * The decision is the caller's gate result (`resolveOrderCalculability` over calc lines
+ * built at the entry's OWN business day end, `costDecisionTime(entry.orderDate)`), so a
+ * cost attached before that end still counts even when this tick runs after midnight,
+ * and the cost and the desi are read once. The gate reports cost_missing exactly when
+ * some line had no cost link in force at that day end, and it checks the cost before
+ * the desi, so the cost reason wins. Tenant-scoped via the entry's organization +
+ * store (the calc lines' reads). A buffer snapshot carries no per-line cancel flag, so
+ * every line is treated as non-cancelled (the order-level CANCELLED check owns the
+ * cancelled case).
  */
-async function resolvePastDayGraduationExclusion(
-  tx: Prisma.TransactionClient,
+function resolvePastDayGraduationExclusion(
   entry: LivePerformanceBuffer,
   mapped: MappedOrder,
-  calcLines: readonly OrderLineForCalcCheck[],
+  calc: CalcResult,
   settledAnchor: Date,
-): Promise<{ readonly reason: ProfitExclusionReason } | undefined> {
+): { readonly reason: ProfitExclusionReason } | undefined {
   // Settled guard: an entry whose day is not settled is never excluded here. Keeps
   // the name honest (settled PAST-DAY graduations only).
   if (entry.orderDate.getTime() >= settledAnchor.getTime()) {
@@ -96,19 +95,19 @@ async function resolvePastDayGraduationExclusion(
   if (mapped.status === 'CANCELLED') {
     return undefined;
   }
-  const hasTimelyCost = await hadCostWithinOrderDay(tx, {
-    organizationId: entry.organizationId,
-    storeId: entry.storeId,
-    orderDate: entry.orderDate,
-    items: calcLines.map((line) => ({ productVariantId: line.variantId, isCancelled: false })),
-  });
-  if (!hasTimelyCost) {
-    return { reason: 'COST_DEADLINE_MISSED' };
+  if (calc.kind === 'calculable') {
+    return undefined;
   }
-  if (hasMissingDesi(calcLines)) {
-    return { reason: 'DESI_DEADLINE_MISSED' };
+  switch (calc.reason) {
+    case 'cost_missing':
+      return { reason: 'COST_DEADLINE_MISSED' };
+    case 'desi_missing':
+      return { reason: 'DESI_DEADLINE_MISSED' };
+    default: {
+      const _exhaustive: never = calc.reason;
+      throw new Error(`Unhandled calculability reason: ${_exhaustive}`);
+    }
   }
-  return undefined;
 }
 
 /**
@@ -230,10 +229,10 @@ async function promoteOne(id: string, now: Date, window: GraduationWindow): Prom
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
           at: costDecisionTime(entry.orderDate),
         });
-        const isCalculable = resolveOrderCalculability(calcLines).kind === 'calculable';
+        const calc = resolveOrderCalculability(calcLines);
 
         // Not settled here means today: an unsettled past day returned above.
-        if (!isCalculable && !windowClosed) {
+        if (calc.kind !== 'calculable' && !windowClosed) {
           // Same day, cost or desi still missing: the window is still open, so return
           // the entry to PENDING; the missing value arriving during the day re-promotes
           // it via the entry-triggered flip.
@@ -253,21 +252,21 @@ async function promoteOne(id: string, now: Date, window: GraduationWindow): Prom
         // graduation (Berkin 2026-11-03, 2026-11-22): resolvePastDayGraduationExclusion
         // excludes a settled PAST-DAY entry whose cost missed the order's business day
         // (COST_DEADLINE_MISSED) or whose product had no desi (DESI_DEADLINE_MISSED),
-        // and no-ops for a same-day or cancelled entry. So a past-day entry that is
-        // calculable ONLY because a late cost was attached is still excluded (the
-        // BLOCKER this fixes: the calculable branch used to skip the check), while a
-        // same-day calculable promote is not. The already-built calc lines are reused.
+        // and no-ops for a same-day or cancelled entry. The gate above is judged at the
+        // entry's day end, so a past-day entry whose cost was attached only after that
+        // day reports cost_missing and is still excluded, while a same-day calculable
+        // promote is not. The gate result above is reused (no second read of the cost
+        // links).
         // Same tx -> order write + buffer delete commit atomically; marked as a buffer
         // graduation so the realtime toast suppresses a duplicate ding for an order the
         // seller already saw as a waiting buffer entry. profitExclusion and the
         // seller-input marker are written CREATE-only inside upsertOrderWithSnapshot: a
         // settled past-day entry is created final with its exclusion decided now, a
         // same-day entry is created non-final and follows its day.
-        const profitExclusion = await resolvePastDayGraduationExclusion(
-          tx,
+        const profitExclusion = resolvePastDayGraduationExclusion(
           entry,
           mapped,
-          calcLines,
+          calc,
           window.settledAnchor,
         );
         syncLog.info('buffer.promote-graduation', {
@@ -477,22 +476,24 @@ async function flushOne(id: string, window: GraduationWindow): Promise<string | 
       // end is excluded with DESI_DEADLINE_MISSED (Berkin 2026-11-22). A cancelled entry
       // (or one costed in time with a desi -- e.g. a cost attached just before midnight
       // while the attach-flip had not yet fired) graduates as a normal order. The flush
-      // path graduates unconditionally (no calculability re-check), so the calc lines
-      // are built here solely to feed the single cost-window + desi decision point. Same
-      // tx -> order write + buffer delete commit atomically. profitExclusion and the
-      // seller-input marker are written CREATE-only inside upsertOrderWithSnapshot: the
-      // day is settled, so the order is created final.
-      const calcLines = await buildCalcCheckLines(tx, {
-        organizationId: entry.organizationId,
-        storeId: entry.storeId,
-        lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
-        at: costDecisionTime(entry.orderDate),
-      });
-      const profitExclusion = await resolvePastDayGraduationExclusion(
-        tx,
+      // path graduates unconditionally (no calculability re-check), so the gate is
+      // resolved here solely to feed the single cost-window + desi decision point (one
+      // read of the cost links and the desi at the day end). Same tx -> order write +
+      // buffer delete commit atomically. profitExclusion and the seller-input marker are
+      // written CREATE-only inside upsertOrderWithSnapshot: the day is settled, so the
+      // order is created final.
+      const calc = resolveOrderCalculability(
+        await buildCalcCheckLines(tx, {
+          organizationId: entry.organizationId,
+          storeId: entry.storeId,
+          lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+          at: costDecisionTime(entry.orderDate),
+        }),
+      );
+      const profitExclusion = resolvePastDayGraduationExclusion(
         entry,
         mapped,
-        calcLines,
+        calc,
         window.settledAnchor,
       );
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {

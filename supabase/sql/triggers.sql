@@ -147,6 +147,35 @@ CREATE TRIGGER trg_reject_automatic_exclusion_change
 -- policy on product_variant_cost_profiles or product_variants, so it can never
 -- fire them.
 
+-- One-shot final-marker backfill for a database that got this schema without
+-- the migration's own backfill (20261123175419_seller_input_history): `pnpm
+-- db:push`, or `prisma migrate resolve --applied`. Orders dated before today's
+-- Istanbul start had their link detaches and desi edits logged by nobody, so they
+-- must be final, or the day-close pass would re-derive (and possibly stamp) the
+-- whole history. It runs only while trg_log_cost_link_removal does not exist yet,
+-- i.e. once, on the run that first installs the history triggers below, and it
+-- only touches non-final orders: on the db:deploy path the migration already
+-- marked them, so it changes no row. The boundary and the stamp are the
+-- migration's own expressions (order_date is a UTC wall clock: Istanbul local
+-- midnight -> the instant -> its UTC wall clock); neither follows the session
+-- time zone. Must stay before the DROP TRIGGER of trg_log_cost_link_removal.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_trigger
+     WHERE tgname = 'trg_log_cost_link_removal'
+       AND tgrelid = 'public.product_variant_cost_profiles'::regclass
+  ) THEN
+    UPDATE public.orders
+       SET seller_inputs_final_at = timezone('utc'::text, now())
+     WHERE order_date < ((date_trunc('day', now() AT TIME ZONE 'Europe/Istanbul')
+                          AT TIME ZONE 'Europe/Istanbul') AT TIME ZONE 'UTC')
+       AND seller_inputs_final_at IS NULL;
+  END IF;
+END
+$$;
+
 -- log_cost_link_removal: one cost_link_removals row per DIRECT delete of a cost
 -- link (a detach or the delete half of a replace). The removed link's own
 -- attached_at is kept, so the link can be rebuilt for any day end between its
