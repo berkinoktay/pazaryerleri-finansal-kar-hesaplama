@@ -777,12 +777,16 @@
               "excluded"
             ],
             "description": "Profit-universe segment totals. Honor the sibling filters (status/recon/date/q) but ignore costStatus, so each tab shows its true count regardless of the active segment."
+          },
+          "openDay": {
+            "$ref": "#/components/schemas/OrderListOpenDay"
           }
         },
         "required": [
           "data",
           "pagination",
-          "counts"
+          "counts",
+          "openDay"
         ]
       },
       "OrderListItem": {
@@ -1050,6 +1054,84 @@
           "total",
           "totalPages"
         ]
+      },
+      "OrderListOpenDay": {
+        "type": "object",
+        "properties": {
+          "businessDate": {
+            "type": "string",
+            "format": "date",
+            "description": "The open (today's) Istanbul business date (YYYY-MM-DD). Its orders are not in the list until the day ends; they are on the live performance endpoints.",
+            "example": "2026-05-24"
+          },
+          "lastCompletedBusinessDate": {
+            "type": "string",
+            "format": "date",
+            "description": "The last completed Istanbul business date (YYYY-MM-DD): the latest day the list can show, so the latest a date filter can usefully name.",
+            "example": "2026-05-23"
+          },
+          "finalizing": {
+            "type": "boolean",
+            "description": "True while a business day before today is still being closed for this store: an order of a completed day whose seller inputs are not final yet, a buffer entry of a completed day still waiting to become an order (not one that failed permanently), a queued day-close profit recompute, or a queued first recompute of a final completed-day order that has no figures yet (a queue row that keeps failing stops counting after a few attempts). Profit figures of the completed days can still change while it is true. Describes the store, so it ignores every list filter.",
+            "example": false
+          },
+          "todayOrderCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Today's orders of the store that the list leaves out: stored orders of the open business day, cancelled ones included (live performance lists those on its cancelled tab), plus buffer entries of the open business day. Ignores every list filter.",
+            "example": 4
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderListOpenDayMatch"
+            },
+            "description": "Today's orders and buffer entries matching q, which the list does not return as rows: a short list capped by the server, stored orders first (newest first), then buffer entries. Only q applies; the other list filters do not. Empty without q."
+          }
+        },
+        "required": [
+          "businessDate",
+          "lastCompletedBusinessDate",
+          "finalizing",
+          "todayOrderCount",
+          "matches"
+        ],
+        "description": "The open (today's) business day of the store, which the orders list leaves out: its dates, whether a completed day is still being closed, how many orders today has so far, and the search matches among them."
+      },
+      "OrderListOpenDayMatch": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "orders",
+              "buffer"
+            ],
+            "description": "Where the match lives: 'orders' = a stored order (id is the order id); 'buffer' = a live performance buffer entry still waiting to become an order (id is the buffer entry's id).",
+            "example": "orders"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "description": "The marketplace order number, or the platform order id when it has none.",
+            "example": "TY-987654"
+          },
+          "cancelled": {
+            "type": "boolean",
+            "description": "True only for a stored order whose status is CANCELLED; always false for a buffer entry.",
+            "example": false
+          }
+        },
+        "required": [
+          "source",
+          "id",
+          "orderNumber",
+          "cancelled"
+        ],
+        "description": "One of today's orders or buffer entries matching the list search (q)."
       },
       "OrderSummaryResponse": {
         "type": "object",
@@ -2378,14 +2460,14 @@
                     "string",
                     "null"
                   ],
-                  "description": "Net profit (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
+                  "description": "Net profit (decimal string); null for buffer rows, for cancelled orders and for orders whose estimate profit statement is not yet computed."
                 },
                 "margin": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "description": "Sale margin % (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
+                  "description": "Sale margin % (decimal string); null for buffer rows, for cancelled orders and for orders whose estimate profit statement is not yet computed."
                 },
                 "promotionDisplays": {
                   "type": [
@@ -2436,7 +2518,8 @@
             "properties": {
               "all": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "description": "calculated + pending; cancelled orders are not counted"
               },
               "calculated": {
                 "type": "integer",
@@ -2445,12 +2528,18 @@
               "pending": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "cancelled": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Today's cancelled orders of the store"
               }
             },
             "required": [
               "all",
               "calculated",
-              "pending"
+              "pending",
+              "cancelled"
             ]
           }
         },
@@ -10436,7 +10525,7 @@
           "Orders"
         ],
         "summary": "List orders for a store",
-        "description": "Returns paginated orders sorted by orderDate desc (default), with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / -marginPct (sale margin column). Designed for the orders table — page + perPage pagination, not cursor.",
+        "description": "Returns paginated orders sorted by orderDate desc (default), with composable filters: status, reconciliationStatus, date range (from/to on orderDate), and a substring search (q) over platformOrderNumber and platformOrderId. The `sort` param also supports marginPct / -marginPct (sale margin column). Designed for the orders table — page + perPage pagination, not cursor. Only orders of completed Istanbul business days are returned: the rows, the total and both tab counts leave today's orders out until the day ends; those are on the live performance endpoints. `openDay` describes the open day the list leaves out: its dates, whether a completed day is still being closed (`finalizing`), today's order count and the search matches among today's orders.",
         "security": [
           {
             "bearerAuth": []
@@ -10525,11 +10614,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
               "example": "2026-04-01"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
             "name": "from",
             "in": "query"
           },
@@ -10537,11 +10626,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
               "example": "2026-05-23"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
             "name": "to",
             "in": "query"
           },
@@ -10712,7 +10801,7 @@
           "Orders"
         ],
         "summary": "Order KPI summary for a store",
-        "description": "Aggregates the orders that match the same filters as the list endpoint (status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: total revenue, consumed net profit, average margin, and loss-order rate. Pagination/sort are not accepted.",
+        "description": "Aggregates the orders that match the same filters as the list endpoint (status, reconciliationStatus, date range, q, costStatus, lossOnly) into headline KPIs: total revenue, consumed net profit, average margin, and loss-order rate. Pagination/sort are not accepted. Like the list, it covers completed Istanbul business days only: today's orders enter no figure until the day ends.",
         "security": [
           {
             "bearerAuth": []
@@ -10776,11 +10865,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
               "example": "2026-04-01"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the start of that business day. Clamped to completed business days; today and later are never returned, so a from of today or later gives an empty result.",
             "name": "from",
             "in": "query"
           },
@@ -10788,11 +10877,11 @@
             "schema": {
               "type": "string",
               "format": "date",
-              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+              "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
               "example": "2026-05-23"
             },
             "required": false,
-            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day.",
+            "description": "Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose orderDate is before the end of that business day. Clamped to completed business days; today and later are never returned, so a to of today or later stops at the last completed day.",
             "name": "to",
             "in": "query"
           },
@@ -11807,7 +11896,7 @@
           "Live Performance"
         ],
         "summary": "Today’s orders (calculated + cost-missing buffer)",
-        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders whose estimate is computed, stored or in the request), or pending (buffer rows and orders whose estimate is not computed). `counts` always reports every tab’s total. Money values are Decimal strings; pending rows have null profit/margin.",
+        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders whose estimate is computed, stored or in the request), pending (buffer rows and orders whose estimate is not computed), or cancelled (today’s cancelled orders of the store; all, calculated, pending and `counts.all` never include them). `counts` always reports every tab’s total. Money values are Decimal strings; pending and cancelled rows have null profit/margin.",
         "security": [
           {
             "bearerAuth": []
@@ -11838,12 +11927,13 @@
               "enum": [
                 "all",
                 "calculated",
-                "pending"
+                "pending",
+                "cancelled"
               ],
-              "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)"
+              "description": "Tab filter — all (default), calculated (orders whose estimate is computed), pending (buffer + orders whose estimate is not computed), or cancelled (today's cancelled orders, which all, calculated and pending never include)"
             },
             "required": false,
-            "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)",
+            "description": "Tab filter — all (default), calculated (orders whose estimate is computed), pending (buffer + orders whose estimate is not computed), or cancelled (today's cancelled orders, which all, calculated and pending never include)",
             "name": "filter",
             "in": "query"
           }

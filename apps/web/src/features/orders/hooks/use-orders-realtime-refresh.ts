@@ -2,28 +2,39 @@
 
 import * as React from 'react';
 
-import { subscribeRecentOrders } from '@/lib/recent-orders-bus';
+import { subscribeCompletedDayOrders } from '@/lib/recent-orders-bus';
 
 /**
- * Coalesce window for list refetches driven by Realtime order inserts. A sync
- * backfilling several of today's orders publishes a burst of ids back-to-back;
- * collapsing them into ONE list + KPI refetch avoids a refetch-per-row storm.
- * Separate from the #424 notifier's OWN toast coalesce — this is list-only.
+ * Quiet period of the trailing debounce for list refetches driven by Realtime
+ * order inserts: the refetch runs once no id has arrived for this long. Longer
+ * than the sync worker's buffer-promote tick (5 s, one chunk of rows per tick),
+ * so a midnight graduation that inserts a day of orders tick after tick folds
+ * into one refetch instead of one per tick. Separate from the notifier's OWN
+ * toast coalesce: this is list-only.
  */
-export const ORDERS_REALTIME_REFRESH_DEBOUNCE_MS = 1_500;
+export const ORDERS_REALTIME_REFRESH_DEBOUNCE_MS = 7_000;
 
 /**
- * Refetch the orders list + KPI summary when new orders arrive over Realtime.
- * The live-performance notifier publishes each genuinely-new order id onto the
- * recent-orders bus (#424/#467); without this the new row never enters the list
- * — the row stays invisible and its highlight arms against a row that was never
- * fetched. Subscribing to an external pub/sub is exactly what `useEffect` is for.
+ * The longest a stream of ids can hold the refetch back: a stream that never
+ * goes quiet (a long backfill) still refreshes the list at most once per this
+ * period, so the page does not stay stale until the stream ends.
+ */
+export const ORDERS_REALTIME_REFRESH_MAX_WAIT_MS = 30_000;
+
+/**
+ * Refetch the orders list + KPI summary when orders of a completed business day
+ * arrive over Realtime (a midnight buffer graduation, a late arrival). The
+ * live-performance notifier publishes each such id onto the recent-orders bus;
+ * today's inserts are never published, because the list hides them until the
+ * day ends. Subscribing to an external pub/sub is exactly what `useEffect` is for.
  *
  * `onRefresh` is the SAME invalidation the page runs on `onFlowsSettled`
- * (useRefreshOrders) — passed in and reused, never duplicated. Debounced so a
- * burst of ids coalesces into a single refetch; a ref keeps the subscription
- * stable across the callback's changing identity, so the channel is never torn
- * down and rebuilt on an unrelated re-render.
+ * (useRefreshOrders) — passed in and reused, never duplicated. A trailing
+ * debounce with a maximum wait: each id restarts the quiet period, the first id
+ * of a burst arms the max-wait timer, and whichever fires first refetches and
+ * clears both. A ref keeps the subscription stable across the callback's
+ * changing identity, so the channel is never torn down and rebuilt on an
+ * unrelated re-render.
  */
 export function useOrdersRealtimeRefresh(onRefresh: () => void): void {
   const onRefreshRef = React.useRef(onRefresh);
@@ -32,22 +43,30 @@ export function useOrdersRealtimeRefresh(onRefresh: () => void): void {
   }, [onRefresh]);
 
   React.useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let quietTimer: ReturnType<typeof setTimeout> | null = null;
+    let maxWaitTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const unsubscribe = subscribeRecentOrders(() => {
-      // Leading-guard coalesce: the first id opens a single window; ids that land
-      // inside it fold into the one trailing refetch instead of scheduling their
-      // own. Mirrors the notifier's scheduleInvalidate debounce.
-      if (timer !== null) return;
-      timer = setTimeout(() => {
-        timer = null;
-        onRefreshRef.current();
-      }, ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+    const clearTimers = (): void => {
+      if (quietTimer !== null) clearTimeout(quietTimer);
+      if (maxWaitTimer !== null) clearTimeout(maxWaitTimer);
+      quietTimer = null;
+      maxWaitTimer = null;
+    };
+
+    const fire = (): void => {
+      clearTimers();
+      onRefreshRef.current();
+    };
+
+    const unsubscribe = subscribeCompletedDayOrders(() => {
+      if (quietTimer !== null) clearTimeout(quietTimer);
+      quietTimer = setTimeout(fire, ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+      maxWaitTimer ??= setTimeout(fire, ORDERS_REALTIME_REFRESH_MAX_WAIT_MS);
     });
 
     return () => {
       unsubscribe();
-      if (timer !== null) clearTimeout(timer);
+      clearTimers();
     };
   }, []);
 }

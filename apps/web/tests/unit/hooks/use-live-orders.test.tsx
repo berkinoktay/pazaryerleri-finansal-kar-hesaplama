@@ -40,7 +40,7 @@ const ordersResponse = {
     },
   ],
   total: 2,
-  counts: { all: 2, calculated: 1, pending: 1 },
+  counts: { all: 2, calculated: 1, pending: 1, cancelled: 1 },
 };
 
 describe('useLiveOrders', () => {
@@ -49,7 +49,12 @@ describe('useLiveOrders', () => {
 
     const { result } = renderHook(() => useLiveOrders(ORG_ID, STORE_ID, 'all'), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.counts).toEqual({ all: 2, calculated: 1, pending: 1 });
+    expect(result.current.data?.counts).toEqual({
+      all: 2,
+      calculated: 1,
+      pending: 1,
+      cancelled: 1,
+    });
     expect(result.current.data?.data[1]?.source).toBe('buffer');
     expect(result.current.data?.data[1]?.profit).toBeNull();
   });
@@ -66,6 +71,23 @@ describe('useLiveOrders', () => {
     const { result } = renderHook(() => useLiveOrders(ORG_ID, STORE_ID, 'pending'), { wrapper });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(capturedUrl).toContain('filter=pending');
+  });
+
+  it('forwards filter=cancelled and returns counts.cancelled', async () => {
+    let seenFilter: string | null = null;
+    server.use(
+      http.get(URL, ({ request }) => {
+        seenFilter = new globalThis.URL(request.url).searchParams.get('filter');
+        return HttpResponse.json(ordersResponse, { status: 200 });
+      }),
+    );
+
+    const { result } = renderHook(() => useLiveOrders(ORG_ID, STORE_ID, 'cancelled'), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(seenFilter).toBe('cancelled');
+    expect(result.current.data?.counts.cancelled).toBe(1);
   });
 
   it('does not fire when org/store is null', () => {

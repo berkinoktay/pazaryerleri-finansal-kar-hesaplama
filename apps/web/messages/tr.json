@@ -2225,7 +2225,17 @@
       "noOrders": {
         "title": "Henüz sipariş yok",
         "description": "Bağlı mağazadan ilk sipariş senkronlandığında burada görünecek."
-      }
+      },
+      "openDayOnly": "Biten günlere ait sipariş henüz yok"
+    },
+    "openDay": {
+      "finalizing": "Biten günlerin bazı siparişleri kesinleşiyor. Rakamlar bu sırada değişebilir.",
+      "matchesTitle": "{count, plural, one {Aramana uyan bugünkü sipariş:} other {Aramana uyan bugünkü siparişler:}}",
+      "matchStored": "{orderNumber} numaralı siparişi Canlı Performans'ta aç",
+      "matchPending": "{orderNumber} numaralı sipariş Canlı Performans'ta bekliyor",
+      "matchCancelled": "{orderNumber} numaralı sipariş bugünün iptallerinde",
+      "todayNotice": "Bugünün siparişleri gün bitene kadar Canlı Performans sayfasında.",
+      "todayLink": "Canlı Performans'ı aç"
     },
     "excludedList": {
       "label": "Kâr hesabı dışı",
@@ -3853,7 +3863,8 @@
       "tabs": {
         "all": "Tümü",
         "calculated": "Hesaplanmış",
-        "pending": "Bekliyor"
+        "pending": "Bekliyor",
+        "cancelled": "İptal edilen"
       },
       "columns": {
         "orderNumber": "Sipariş No",
@@ -3865,7 +3876,9 @@
       },
       "statusCalculated": "Hesaplandı",
       "statusPending": "Bekliyor",
-      "emptyTitle": "Bugün henüz sipariş yok"
+      "statusCancelled": "İptal",
+      "emptyTitle": "Bugün henüz sipariş yok",
+      "emptyCancelledTitle": "Bugün iptal edilen sipariş yok"
     },
     "orderDetail": {
       "sheetTitle": "Sipariş ayrıntısı",

@@ -300,6 +300,10 @@ return c.json({ orderDate: '15/04/2026' });
 return c.json({ orderDate: '2026-04-15T14:30:00.000Z' });
 ```
 
+### Completed business days
+
+The orders list and its summary show only orders of completed Istanbul business days; today's orders stay on live performance until the day ends. Any endpoint that lists or aggregates orders or order profit (except live performance and order detail by id) builds its order-date filter with `completedOrderDateFilter` from `src/lib/completed-days.ts`, using one `completedDaysScope()` per request and passing that same scope to every where of the request (rows, totals, tab counts, aggregates). The boundary itself is `getCompletedDaysCutoff` in `@pazarsync/utils`. Never bucket `order_date` with SQL `AT TIME ZONE`: the cutoff is a bound JS `Date`. A new such endpoint ships a test where a today order is absent while a completed-day order is present (date fixtures with `tests/helpers/completed-day.ts`).
+
 ## Marketplace Adapters (Strategy Pattern)
 
 Adapters live in **`@pazarsync/marketplace`** (`packages/marketplace`), not in this app — they're shared with `apps/sync-worker`. Each marketplace implements a common interface; new marketplaces are added by implementing it and registering the platform in the package registry:

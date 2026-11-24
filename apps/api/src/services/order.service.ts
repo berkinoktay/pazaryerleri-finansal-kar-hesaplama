@@ -1,7 +1,9 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
 import {
+  BufferEntryStatus,
   OrderStatus,
+  ProfitRecomputeReason,
   ProfitStatementView,
   ProfitStatus,
   ReconciliationStatus,
@@ -25,8 +27,13 @@ import {
 } from '@pazarsync/profit';
 import { Decimal } from 'decimal.js';
 
-import { businessDateRangeFilter } from '../lib/business-date-range';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
+import {
+  completedDaysScope,
+  completedOrderDateFilter,
+  FINALIZING_MAX_RECOMPUTE_ATTEMPTS,
+  type CompletedDaysScope,
+} from '../lib/completed-days';
 import { NotFoundError } from '../lib/errors';
 import {
   STATEMENT_LIST_SELECT,
@@ -39,6 +46,8 @@ import { profitBlockers, storedProfitBlockers, type ProfitBlocker } from '../lib
 import { toPromotionDisplays } from '../lib/promotion-displays';
 import type {
   ListOrdersQuery,
+  OpenDayMatchResponse,
+  OpenDayResponse,
   OrderDetailResponse,
   OrderListItemResponse,
   OrderListSort,
@@ -54,7 +63,22 @@ interface OrderListResult {
   data: OrderListItemResponse[];
   total: number;
   counts: { calculated: number; excluded: number };
+  openDay: OpenDayResponse;
 }
+
+/**
+ * Buffer statuses of an entry still on its way to the orders table: a completed-day entry
+ * in one of them means its day is not closed yet. PERMANENT_FAILED is left out on purpose:
+ * such an entry can stay for days and would keep `finalizing` true all that time.
+ */
+export const FINALIZING_BUFFER_STATUSES: readonly BufferEntryStatus[] = [
+  BufferEntryStatus.PENDING,
+  BufferEntryStatus.PROMOTING,
+  BufferEntryStatus.FAILED,
+];
+
+/** The most open-day search matches the list returns (`openDay.matches`). */
+export const OPEN_DAY_MATCH_LIMIT = 3;
 
 interface OrderSummaryResult {
   totalRevenueGross: string;
@@ -133,10 +157,25 @@ function reconciliationStatusCondition(
   }
 }
 
+/** The list search (q): a case-insensitive substring of the order number or platform id. */
+function orderSearchConditions(q: string): Prisma.OrderWhereInput[] {
+  return [
+    { platformOrderNumber: { contains: q, mode: 'insensitive' } },
+    { platformOrderId: { contains: q, mode: 'insensitive' } },
+  ];
+}
+
+/**
+ * The where of the orders list and its summary. Always clamped to completed business
+ * days through `scope`: rows, totals, both tab counts, the margin-sort segments and
+ * every summary aggregate read a where built here, so today's orders never escape
+ * through one of them. One request builds every where from the same scope.
+ */
 function buildOrderListWhere(
   orgId: string,
   storeId: string,
   filters: OrderListFilters,
+  scope: CompletedDaysScope,
 ): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {
     organizationId: orgId,
@@ -147,15 +186,12 @@ function buildOrderListWhere(
 
   if (filters.status !== undefined) where.status = filters.status;
 
-  // from/to are business dates: the range covers their whole business days.
-  const orderDateRange = businessDateRangeFilter(filters);
-  if (orderDateRange !== undefined) where.orderDate = orderDateRange;
+  // from/to are business dates: the range covers their whole business days, clamped
+  // to the completed ones (today's orders stay on live performance).
+  where.orderDate = completedOrderDateFilter(filters, scope);
 
   if (filters.q !== undefined) {
-    where.OR = [
-      { platformOrderNumber: { contains: filters.q, mode: 'insensitive' } },
-      { platformOrderId: { contains: filters.q, mode: 'insensitive' } },
-    ];
+    where.OR = orderSearchConditions(filters.q);
   }
 
   if (filters.reconciliationStatus !== undefined) {
@@ -398,29 +434,234 @@ function fetchOrderListRows(
   }
 }
 
+/**
+ * True while a business day before the open one is still being closed for the store.
+ * Four sources, each scoped by organization and store and blind to the list filters (the
+ * flag describes the store, not the current view):
+ * - an order of a completed day whose seller inputs are not final yet (the day-close pass
+ *   has not reached it);
+ * - a completed-day buffer entry still on its way to the orders table;
+ * - a queued DAY_CLOSE profit recompute: the day-close pass marks an order final and only
+ *   enqueues its recompute, so the order's statements hold the pre-close profit until the
+ *   worker drains that row;
+ * - a queued recompute of a final completed-day order that has no best-known statement
+ *   yet: an order taken in after its day settled is final from birth and its first
+ *   recompute carries the intake's reason, not DAY_CLOSE. Any other queued row is left
+ *   out on purpose: settlement, claim and cargo recomputes run all day for orders that
+ *   already have figures.
+ * A queue row that has failed FINALIZING_MAX_RECOMPUTE_ATTEMPTS times stops counting, so
+ * one order whose recompute keeps throwing cannot hold the flag for good.
+ */
+async function isStoreFinalizing(
+  orgId: string,
+  storeId: string,
+  scope: CompletedDaysScope,
+): Promise<boolean> {
+  const [nonFinalOrder, waitingBufferEntry, dayCloseRecompute, firstRecompute] = await Promise.all([
+    prisma.order.findFirst({
+      where: {
+        organizationId: orgId,
+        storeId,
+        sellerInputsFinalAt: null,
+        orderDate: { lt: scope.cutoff },
+      },
+      select: { id: true },
+    }),
+    prisma.livePerformanceBuffer.findFirst({
+      where: {
+        organizationId: orgId,
+        storeId,
+        // A @db.Date column: compared with the open day's anchor, never the instant cutoff.
+        orderDate: { lt: scope.openDayAnchor },
+        status: { in: [...FINALIZING_BUFFER_STATUSES] },
+      },
+      select: { id: true },
+    }),
+    prisma.profitRecomputeRequest.findFirst({
+      where: {
+        organizationId: orgId,
+        storeId,
+        reason: ProfitRecomputeReason.DAY_CLOSE,
+        attempts: { lt: FINALIZING_MAX_RECOMPUTE_ATTEMPTS },
+      },
+      select: { id: true },
+    }),
+    // A born-final order's first recompute, whatever its reason (see the doc comment).
+    prisma.profitRecomputeRequest.findFirst({
+      where: {
+        organizationId: orgId,
+        storeId,
+        attempts: { lt: FINALIZING_MAX_RECOMPUTE_ATTEMPTS },
+        order: {
+          organizationId: orgId,
+          storeId,
+          orderDate: { lt: scope.cutoff },
+          sellerInputsFinalAt: { not: null },
+          profitStatements: {
+            none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
+          },
+        },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return (
+    nonFinalOrder !== null ||
+    waitingBufferEntry !== null ||
+    dayCloseRecompute !== null ||
+    firstRecompute !== null
+  );
+}
+
+/**
+ * How many of today's orders the list leaves out: the store's stored orders of the open
+ * business day, cancelled ones included (live performance lists those on its cancelled
+ * tab), plus its buffer entries of the open day, bounded by the request's scope. Blind to
+ * the list filters.
+ */
+async function countOpenDayOrders(
+  orgId: string,
+  storeId: string,
+  scope: CompletedDaysScope,
+): Promise<number> {
+  const [storedCount, bufferedCount] = await Promise.all([
+    prisma.order.count({
+      where: {
+        organizationId: orgId,
+        storeId,
+        orderDate: { gte: scope.cutoff },
+      },
+    }),
+    prisma.livePerformanceBuffer.count({
+      where: { organizationId: orgId, storeId, orderDate: { gte: scope.openDayAnchor } },
+    }),
+  ]);
+  return storedCount + bufferedCount;
+}
+
+/**
+ * Today's orders and buffer entries matching the list search, which the list does not
+ * return as rows: at most OPEN_DAY_MATCH_LIMIT, stored orders first (newest first), then
+ * buffer entries (newest first). Only `q` applies (any status); without it nothing is
+ * queried. A cancellation is always a stored order (intake purges its buffer entry), so a
+ * buffer match is never cancelled.
+ */
+async function findOpenDayMatches(
+  orgId: string,
+  storeId: string,
+  q: string | undefined,
+  scope: CompletedDaysScope,
+): Promise<OpenDayMatchResponse[]> {
+  if (q === undefined) return [];
+
+  const [orders, bufferEntries] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        organizationId: orgId,
+        storeId,
+        orderDate: { gte: scope.cutoff },
+        OR: orderSearchConditions(q),
+      },
+      orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
+      take: OPEN_DAY_MATCH_LIMIT,
+      select: { id: true, platformOrderId: true, platformOrderNumber: true, status: true },
+    }),
+    prisma.livePerformanceBuffer.findMany({
+      where: {
+        organizationId: orgId,
+        storeId,
+        // A @db.Date column: compared with the open day's anchor, never the instant cutoff.
+        orderDate: { gte: scope.openDayAnchor },
+        OR: [
+          { platformOrderNumber: { contains: q, mode: 'insensitive' } },
+          { platformOrderId: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: OPEN_DAY_MATCH_LIMIT,
+      select: { id: true, platformOrderNumber: true },
+    }),
+  ]);
+
+  const matches: OpenDayMatchResponse[] = [
+    ...orders.map(
+      (order): OpenDayMatchResponse => ({
+        source: 'orders',
+        id: order.id,
+        orderNumber: order.platformOrderNumber ?? order.platformOrderId,
+        cancelled: order.status === OrderStatus.CANCELLED,
+      }),
+    ),
+    ...bufferEntries.map(
+      (entry): OpenDayMatchResponse => ({
+        source: 'buffer',
+        id: entry.id,
+        orderNumber: entry.platformOrderNumber,
+        cancelled: false,
+      }),
+    ),
+  ];
+  return matches.slice(0, OPEN_DAY_MATCH_LIMIT);
+}
+
+/** The open business day the list leaves out, read with the request's scope. */
+async function loadOpenDay(
+  orgId: string,
+  storeId: string,
+  q: string | undefined,
+  scope: CompletedDaysScope,
+): Promise<OpenDayResponse> {
+  const [finalizing, todayOrderCount, matches] = await Promise.all([
+    isStoreFinalizing(orgId, storeId, scope),
+    countOpenDayOrders(orgId, storeId, scope),
+    findOpenDayMatches(orgId, storeId, q, scope),
+  ]);
+  return {
+    businessDate: scope.openBusinessDate,
+    lastCompletedBusinessDate: scope.lastCompletedBusinessDate,
+    finalizing,
+    todayOrderCount,
+    matches,
+  };
+}
+
 // The list service accepts any positive page size for internal paging; the
 // route's Zod schema (TABLE_PER_PAGE_OPTIONS) is the wire-level perPage
 // whitelist, so a validated ListOrdersQuery is always assignable here.
 type OrderListParams = Omit<ListOrdersQuery, 'perPage'> & { perPage: number };
 
+/**
+ * One page of the orders list, its total and both tab counts, all on completed business
+ * days, plus the open day those leave out (`openDay`, read with the same scope). `now` is
+ * the clock the completed-days boundary is read from; routes never pass it (tests pin the
+ * boundary with it).
+ */
 export async function listOrders(
   orgId: string,
   storeId: string,
   filters: OrderListParams,
+  now: Date = new Date(),
 ): Promise<OrderListResult> {
   await ensureStoreInOrg(orgId, storeId);
 
-  const where = buildOrderListWhere(orgId, storeId, filters);
-  const baseWhere = buildOrderListWhere(orgId, storeId, { ...filters, costStatus: undefined });
+  const scope = completedDaysScope(now);
+  const where = buildOrderListWhere(orgId, storeId, filters, scope);
+  const baseWhere = buildOrderListWhere(
+    orgId,
+    storeId,
+    { ...filters, costStatus: undefined },
+    scope,
+  );
   const skip = (filters.page - 1) * filters.perPage;
 
-  const [rows, total, calculatedCount, excludedCount] = await Promise.all([
+  const [rows, total, calculatedCount, excludedCount, openDay] = await Promise.all([
     fetchOrderListRows(orgId, storeId, where, filters.sort, skip, filters.perPage),
     prisma.order.count({ where }),
     // Tabs count from the exclusion stamp (decision 3): calculated = not stamped,
     // excluded = stamped — honoring the sibling filters but ignoring costStatus.
     prisma.order.count({ where: { ...baseWhere, profitExcludedAt: null } }),
     prisma.order.count({ where: { ...baseWhere, profitExcludedAt: { not: null } } }),
+    loadOpenDay(orgId, storeId, filters.q, scope),
   ]);
 
   // A row whose stored issues cannot be read keeps the page up; the request logs its
@@ -429,7 +670,12 @@ export async function listOrders(
   const data: OrderListItemResponse[] = rows.map((row) => toOrderListItem(row, failures));
   failures.flush();
 
-  return { data, total, counts: { calculated: calculatedCount, excluded: excludedCount } };
+  return {
+    data,
+    total,
+    counts: { calculated: calculatedCount, excluded: excludedCount },
+    openDay,
+  };
 }
 
 /** The existing AND conditions of a where, normalized to an array to extend. */
@@ -444,15 +690,17 @@ function whereAndConditions(where: Prisma.OrderWhereInput): Prisma.OrderWhereInp
  * filters as listOrders (no pagination/sort). Revenue, net profit and the loss
  * rate read the best-known statements (decisions 1 + 4); a non-cancelled order
  * with no best-known statement contributes its own sale_gross as the revenue
- * fallback. Four aggregates run in parallel.
+ * fallback. Four aggregates run in parallel. Like the list, it covers completed
+ * business days only; `now` is the clock that boundary is read from (routes never pass it).
  */
 export async function getOrdersSummary(
   orgId: string,
   storeId: string,
   filters: OrderSummaryQuery,
+  now: Date = new Date(),
 ): Promise<OrderSummaryResult> {
   await ensureStoreInOrg(orgId, storeId);
-  const where = buildOrderListWhere(orgId, storeId, filters);
+  const where = buildOrderListWhere(orgId, storeId, filters, completedDaysScope(now));
 
   const bestKnownStatementWhere: Prisma.OrderProfitStatementWhereInput = {
     view: ProfitStatementView.BEST_KNOWN,

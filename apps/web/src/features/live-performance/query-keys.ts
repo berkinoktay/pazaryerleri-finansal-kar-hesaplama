@@ -1,9 +1,21 @@
+import { LIVE_ORDERS_CANCELLED_FILTER } from '@/lib/live-performance-links';
+
 // Query key factory for the live-performance feature. Mirrors
 // features/orders/query-keys.ts so React Query invalidation reads consistently
 // across the codebase. All keys are org + store scoped (the page is
 // store-scoped) so switching store never reads another store's cache.
 
-export type LiveOrdersFilter = 'all' | 'calculated' | 'pending';
+/**
+ * The live orders feed's tabs, in display order. `cancelled` lists today's
+ * cancelled orders; the other three (and `counts.all`) never include them.
+ */
+export const LIVE_ORDERS_FILTERS = [
+  'all',
+  'calculated',
+  'pending',
+  LIVE_ORDERS_CANCELLED_FILTER,
+] as const;
+export type LiveOrdersFilter = (typeof LIVE_ORDERS_FILTERS)[number];
 
 /**
  * Stale window for the live queries. Realtime invalidation keeps the data

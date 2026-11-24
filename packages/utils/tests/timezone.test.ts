@@ -7,6 +7,7 @@ import {
   getBusinessDateAnchor,
   getBusinessDayRange,
   getBusinessDayRangeOfDate,
+  getCompletedDaysCutoff,
   toUtcIsoDate,
   getBusinessHour,
 } from '../src/timezone';
@@ -76,6 +77,27 @@ describe('getBusinessDayRange', () => {
   it('spans exactly 24h while the zone observes no DST', () => {
     const { start, end } = getBusinessDayRange(new Date('2026-03-29T12:00:00Z'));
     expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe('getCompletedDaysCutoff', () => {
+  it('is the start of the business day at 23:59:59.999 Istanbul', () => {
+    expect(getCompletedDaysCutoff(new Date('2026-11-23T20:59:59.999Z')).toISOString()).toBe(
+      '2026-11-22T21:00:00.000Z',
+    );
+  });
+
+  it('moves to the new day at 00:00:00.000 Istanbul', () => {
+    expect(getCompletedDaysCutoff(new Date('2026-11-23T21:00:00.000Z')).toISOString()).toBe(
+      '2026-11-23T21:00:00.000Z',
+    );
+  });
+
+  it('equals getBusinessDayRange(at).start', () => {
+    const at = new Date('2026-11-23T09:15:00.000Z'); // 12:15 Istanbul
+    expect(getCompletedDaysCutoff(at).toISOString()).toBe(
+      getBusinessDayRange(at).start.toISOString(),
+    );
   });
 });
 

@@ -30,9 +30,11 @@ const ordersRoute = createRoute({
   description:
     'Today’s order feed combining the calculated orders table with the cost-missing buffer, ' +
     'each row tagged by source. `filter` selects the tab: all (default), calculated (orders ' +
-    'whose estimate is computed, stored or in the request), or pending (buffer rows and ' +
-    'orders whose estimate is not computed). `counts` always reports every tab’s total. ' +
-    'Money values are Decimal strings; pending rows have null profit/margin.',
+    'whose estimate is computed, stored or in the request), pending (buffer rows and ' +
+    'orders whose estimate is not computed), or cancelled (today’s cancelled orders of the ' +
+    'store; all, calculated, pending and `counts.all` never include them). `counts` always ' +
+    'reports every tab’s total. Money values are Decimal strings; pending and cancelled ' +
+    'rows have null profit/margin.',
   security: [{ bearerAuth: [] }],
   request: { params: storeScopeParams, query: liveOrdersQuerySchema },
   responses: {

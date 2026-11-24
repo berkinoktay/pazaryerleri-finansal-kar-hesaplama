@@ -17,6 +17,7 @@ export {
   getBusinessDayRange,
   getBusinessDayRangeOfDate,
   getBusinessHour,
+  getCompletedDaysCutoff,
   toUtcIsoDate,
 } from './timezone';
 export {

@@ -19,6 +19,11 @@ export interface DateRangePickerProps {
   placeholder?: string;
   align?: 'start' | 'center' | 'end';
   className?: string;
+  /**
+   * Days strictly after this LOCAL calendar date cannot be selected. Month
+   * navigation stays free; only selection is blocked.
+   */
+  disabledAfter?: Date;
 }
 
 /**
@@ -38,6 +43,7 @@ export function DateRangePicker({
   placeholder,
   align = 'start',
   className,
+  disabledAfter,
 }: DateRangePickerProps): React.ReactElement {
   const t = useTranslations('common.dateRangePicker');
   const [open, setOpen] = React.useState(false);
@@ -71,6 +77,7 @@ export function DateRangePicker({
           numberOfMonths={2}
           defaultMonth={value?.from}
           selected={value}
+          disabled={disabledAfter !== undefined ? { after: disabledAfter } : undefined}
           onSelect={(next) => {
             onChange?.(next);
             if (next?.from && next?.to) setOpen(false);

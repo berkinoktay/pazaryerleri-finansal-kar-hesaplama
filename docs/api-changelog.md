@@ -26,6 +26,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Orders list and summary return completed business days only**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
+  `GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`). Both endpoints leave out the
+  orders of the open (today's) Istanbul business day: the rows, `pagination.total`, both tab
+  `counts`, the margin sorts and every summary figure cover completed business days only, and
+  `from`/`to` are clamped to the last completed day (a `to` of today or later stops at the end of
+  the last completed day; a `from` of today or later returns an empty page). Today's orders stay
+  on the live performance endpoints until the day ends; the order detail by id is not clamped. No
+  request or response shape changes, only the route and parameter descriptions. Breaking for a
+  client that expected today's orders in the list or the summary.
 - **Seller cost and desi edits reach the day's stored orders until the day ends**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
   `PATCH .../products/variants/dimensional-weight`,
@@ -1311,6 +1321,30 @@ section "Versioning" for details.
 
 ### Added
 
+- **`openDay` on the orders list response** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`).
+  The list now leaves out the open (today's) business day, and `openDay`, the new
+  `OrderListOpenDay` component schema, describes that day: `businessDate` (today's Istanbul
+  business date, `YYYY-MM-DD`), `lastCompletedBusinessDate` (the latest day the list can show),
+  `finalizing` (true while a business day before today is still being closed for the store: an
+  order of a completed day whose seller inputs are not final yet, a completed-day live
+  performance buffer entry still waiting to become an order (not a permanently failed one), a
+  queued day-close profit recompute, or a queued first recompute of a final completed-day order
+  that has no figures yet; a queue row that keeps failing stops counting after a few attempts),
+  `todayOrderCount` (the store's stored orders of today, cancelled ones included, plus its buffer
+  entries of today) and `matches` (an array of the new
+  `OrderListOpenDayMatch` component schema: today's orders and buffer entries matching `q`, each
+  with `source` (`orders` or `buffer`), `id`, `orderNumber` (the platform order id when the
+  order has no number) and `cancelled`; a short server-capped list, stored orders first; empty
+  without `q`). `finalizing`, `todayOrderCount` and `matches` describe the store, so the other
+  list filters do not change them (`matches` follows `q` only). Additive.
+- **`filter=cancelled` and `counts.cancelled` on the live-performance orders feed**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/orders`). The new `cancelled`
+  value of `filter` lists the store's cancelled orders of today's Istanbul business day (newest
+  first, `source` `orders`, `profit` and `margin` always null: a cancellation is not an
+  earning), and `counts` gains the required `cancelled` field, reported on every tab. `all`,
+  `calculated`, `pending`, `counts.all` (still `calculated` + `pending`) and the live
+  performance KPIs keep leaving cancelled orders out. Additive for requests; a client that
+  validates `counts` strictly sees one new key.
 - **Why an order's profit is not computable** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET .../orders/{orderId}`). Each orders list row and the order detail gain `profitBlockers`, an
   array of the new `ProfitBlocker` component schema (`code`, a `ProfitIssueCode`; `detail`, the

@@ -108,6 +108,16 @@ export function getBusinessDayRange(at: Date = new Date()): { start: Date; end: 
   return { start, end };
 }
 
+/**
+ * The completed-days boundary: the start of the business day that contains `at`.
+ * Every order with `orderDate < cutoff` belongs to a completed business day. Every
+ * order and profit report except live performance and the order detail uses it,
+ * so today's orders stay on live performance until the business day ends.
+ */
+export function getCompletedDaysCutoff(at: Date = new Date()): Date {
+  return getBusinessDayRange(at).start;
+}
+
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**

@@ -3,9 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ORDERS_REALTIME_REFRESH_DEBOUNCE_MS,
+  ORDERS_REALTIME_REFRESH_MAX_WAIT_MS,
   useOrdersRealtimeRefresh,
 } from '@/features/orders/hooks/use-orders-realtime-refresh';
-import { publishRecentOrder } from '@/lib/recent-orders-bus';
+import { publishCompletedDayOrder } from '@/lib/recent-orders-bus';
+
+// The sync worker's buffer-promote tick (BUFFER_PROMOTE_INTERVAL_MS in
+// apps/sync-worker/src/index.ts): the midnight flush inserts one chunk of rows
+// per tick, so a day's graduation reaches the bus as bursts this far apart.
+const BUFFER_PROMOTE_TICK_MS = 5_000;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -16,18 +22,24 @@ afterEach(() => {
 });
 
 describe('useOrdersRealtimeRefresh', () => {
-  it('invalidates once after a published order id, but only when the window elapses', () => {
+  it('invalidates once after a published order id, but only when the quiet period elapses', () => {
     const refresh = vi.fn();
     renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     // The publish schedules the refetch — nothing fires synchronously.
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     expect(refresh).not.toHaveBeenCalled();
 
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // The refresh cancels the max-wait timer too: nothing fires later on its own.
+    act(() => {
+      vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_MAX_WAIT_MS);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -37,9 +49,9 @@ describe('useOrdersRealtimeRefresh', () => {
     renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     act(() => {
-      publishRecentOrder('o1');
-      publishRecentOrder('o2');
-      publishRecentOrder('o3');
+      publishCompletedDayOrder('o1');
+      publishCompletedDayOrder('o2');
+      publishCompletedDayOrder('o3');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -48,24 +60,83 @@ describe('useOrdersRealtimeRefresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('opens a fresh window for ids that arrive after the previous one fired', () => {
+  it('an id inside the quiet period restarts it; an id after a refresh starts a new one', () => {
     const refresh = vi.fn();
     renderHook(() => useOrdersRealtimeRefresh(refresh));
+    const early = ORDERS_REALTIME_REFRESH_DEBOUNCE_MS - 1_000;
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     act(() => {
-      vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+      vi.advanceTimersByTime(early);
+    });
+    act(() => {
+      publishCompletedDayOrder('o2');
+    });
+    // o1's quiet period would have ended here; o2 restarted it.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS - 1_000);
     });
     expect(refresh).toHaveBeenCalledTimes(1);
 
     act(() => {
-      publishRecentOrder('o2');
+      publishCompletedDayOrder('o3');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
     });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('a burst refreshes once after the quiet period', () => {
+    // Premise: one flush tick to the next is quiet for less than the quiet period.
+    expect(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS).toBeGreaterThan(BUFFER_PROMOTE_TICK_MS);
+    const refresh = vi.fn();
+    renderHook(() => useOrdersRealtimeRefresh(refresh));
+
+    // Three flush ticks of a midnight graduation, one tick apart.
+    for (let tick = 0; tick < 3; tick += 1) {
+      act(() => {
+        publishCompletedDayOrder(`tick-${tick}-a`);
+        publishCompletedDayOrder(`tick-${tick}-b`);
+      });
+      act(() => {
+        vi.advanceTimersByTime(BUFFER_PROMOTE_TICK_MS);
+      });
+    }
+    expect(refresh).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS - BUFFER_PROMOTE_TICK_MS);
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('a continuous stream refreshes at most once per max wait', () => {
+    const refresh = vi.fn();
+    renderHook(() => useOrdersRealtimeRefresh(refresh));
+    const ticksPerMaxWait = ORDERS_REALTIME_REFRESH_MAX_WAIT_MS / BUFFER_PROMOTE_TICK_MS;
+
+    // One id every flush tick, for two max waits: the quiet period never ends.
+    for (let tick = 0; tick < 2 * ticksPerMaxWait; tick += 1) {
+      act(() => {
+        publishCompletedDayOrder(`o${tick}`);
+      });
+      act(() => {
+        vi.advanceTimersByTime(BUFFER_PROMOTE_TICK_MS);
+      });
+      if (tick === ticksPerMaxWait - 2) {
+        // Just before the first max wait ends: nothing has refreshed yet.
+        expect(refresh).not.toHaveBeenCalled();
+      }
+    }
+
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
@@ -79,7 +150,7 @@ describe('useOrdersRealtimeRefresh', () => {
     rerender({ cb: second });
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -94,7 +165,7 @@ describe('useOrdersRealtimeRefresh', () => {
     const { unmount } = renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     unmount();
     act(() => {

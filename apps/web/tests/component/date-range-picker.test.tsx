@@ -1,6 +1,8 @@
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 import { NextIntlClientProvider } from 'next-intl';
 import * as React from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
 
@@ -75,6 +77,49 @@ describe('<DateRangePicker>', () => {
         .getAllByRole('button')
         .filter((btn) => /^\d+$/.test(btn.textContent ?? ''));
       expect(dayButtons.length).toBeGreaterThan(40);
+    });
+  });
+
+  describe('disabledAfter', () => {
+    // Fixed past dates are fine here: the bound is a prop, nothing reads the clock.
+    const RANGE_FROM = new Date(2026, 4, 10);
+    const DISABLED_AFTER = new Date(2026, 4, 14);
+
+    // The day buttons are named by react-day-picker's `PPPP` label in the
+    // calendar's locale; build the name the same way instead of hard-coding it.
+    function dayButton(day: number): HTMLElement {
+      const name = format(new Date(2026, 4, day), 'PPPP', { locale: tr });
+      return screen.getByRole('button', { name });
+    }
+
+    it('disables only the days strictly after the given date', async () => {
+      const { user } = renderWithIntl(
+        <DateRangePicker value={{ from: RANGE_FROM }} disabledAfter={DISABLED_AFTER} />,
+      );
+      await user.click(screen.getByRole('button'));
+
+      expect(dayButton(15)).toBeDisabled();
+      expect(dayButton(14)).toBeEnabled();
+      expect(dayButton(13)).toBeEnabled();
+    });
+
+    it('does not select a disabled day, while an enabled day still selects', async () => {
+      const onChange = vi.fn();
+      const { user } = renderWithIntl(
+        <DateRangePicker
+          value={{ from: RANGE_FROM }}
+          onChange={onChange}
+          disabledAfter={DISABLED_AFTER}
+        />,
+      );
+      await user.click(screen.getByRole('button'));
+
+      await user.click(dayButton(15));
+      expect(onChange).not.toHaveBeenCalled();
+
+      // Positive control: the click path works in this environment.
+      await user.click(dayButton(14));
+      expect(onChange).toHaveBeenCalledTimes(1);
     });
   });
 });

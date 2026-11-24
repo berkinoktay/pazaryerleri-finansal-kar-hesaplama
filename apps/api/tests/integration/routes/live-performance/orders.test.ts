@@ -1,3 +1,4 @@
+import { OrderStatus } from '@pazarsync/db/enums';
 import { computeParcelProfit, roundPercent } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -6,6 +7,7 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { seedCalculableTrendyolOrder } from '../../../helpers/calculable-order';
+import { completedBusinessDayInstant } from '../../../helpers/completed-day';
 import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
 import {
   createBufferEntry,
@@ -32,7 +34,8 @@ interface OrdersBody {
     margin: string | null;
   }[];
   total: number;
-  counts: { all: number; calculated: number; pending: number };
+  // `cancelled` is optional so a missing field fails on the assertion, not on the read.
+  counts: { all: number; calculated: number; pending: number; cancelled?: number };
 }
 
 async function seed(): Promise<{
@@ -80,6 +83,29 @@ async function seed(): Promise<{
   };
 }
 
+// `seed()` plus a cancelled order of today (CAN-1). It carries a computed ESTIMATE
+// statement so a served null profit proves the feed does not read it for a cancel.
+async function seedWithTodayCancel(): Promise<
+  Awaited<ReturnType<typeof seed>> & { cancelledOrderId: string }
+> {
+  const seeded = await seed();
+  const cancelled = await createOrder(seeded.orgId, seeded.storeId, {
+    orderDate: todayAt(9),
+    platformOrderId: 'CAN-1',
+    status: OrderStatus.CANCELLED,
+    saleGross: '80.00',
+  });
+  await createProfitStatement(cancelled.id, seeded.orgId, seeded.storeId, {
+    view: 'ESTIMATE',
+    status: 'ESTIMATED',
+    netProfit: '15.00',
+    saleMarginPct: '18.75',
+  });
+  return { ...seeded, cancelledOrderId: cancelled.id };
+}
+
+const LIVE_FILTERS = ['all', 'calculated', 'pending', 'cancelled'] as const;
+
 describe('GET /v1/.../live-performance/orders', () => {
   const app = createApp();
 
@@ -102,7 +128,7 @@ describe('GET /v1/.../live-performance/orders', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as OrdersBody;
     expect(body.total).toBe(2);
-    expect(body.counts).toEqual({ all: 2, calculated: 1, pending: 1 });
+    expect(body.counts).toEqual({ all: 2, calculated: 1, pending: 1, cancelled: 0 });
 
     const calculated = body.data.find((row) => row.source === 'orders');
     const pending = body.data.find((row) => row.source === 'buffer');
@@ -136,7 +162,7 @@ describe('GET /v1/.../live-performance/orders', () => {
     const body = (await res.json()) as OrdersBody;
     expect(body.data).toHaveLength(1);
     expect(body.data[0]?.source).toBe('orders');
-    expect(body.counts).toEqual({ all: 2, calculated: 1, pending: 1 });
+    expect(body.counts).toEqual({ all: 2, calculated: 1, pending: 1, cancelled: 0 });
   });
 
   it('filter=pending returns only buffer rows', async () => {
@@ -177,7 +203,7 @@ describe('GET /v1/.../live-performance/orders', () => {
     );
     expect(pendingRes.status).toBe(200);
     const pendingBody = (await pendingRes.json()) as OrdersBody;
-    expect(pendingBody.counts).toEqual({ all: 1, calculated: 0, pending: 1 });
+    expect(pendingBody.counts).toEqual({ all: 1, calculated: 0, pending: 1, cancelled: 0 });
     expect(pendingBody.data).toHaveLength(1);
     expect(pendingBody.data[0]).toMatchObject({
       source: 'orders',
@@ -223,7 +249,7 @@ describe('GET /v1/.../live-performance/orders', () => {
     if (netProfit === null || saleMarginPct === null) {
       throw new Error('estimate net profit or margin unexpectedly null');
     }
-    expect(body.counts).toEqual({ all: 1, calculated: 1, pending: 0 });
+    expect(body.counts).toEqual({ all: 1, calculated: 1, pending: 0, cancelled: 0 });
     expect(body.data).toHaveLength(1);
     expect(body.data[0]).toMatchObject({
       source: 'orders',
@@ -234,5 +260,86 @@ describe('GET /v1/.../live-performance/orders', () => {
 
     // The request wrote nothing: no statement row exists afterwards.
     expect(await prisma.orderProfitStatement.count({ where: { orderId } })).toBe(0);
+  });
+
+  // --- the cancelled tab: today's cancelled orders, never part of the earnings feed ---
+
+  it("filter=cancelled lists only today's cancelled orders", async () => {
+    const { orgId, storeId, token, cancelledOrderId } = await seedWithTodayCancel();
+
+    const res = await app.request(
+      `/v1/organizations/${orgId}/stores/${storeId}/live-performance/orders?filter=cancelled`,
+      { headers: { Authorization: bearer(token) } },
+    );
+
+    expect(res.status).toBe(200);
+    const body: OrdersBody = await res.json();
+    expect(body.total).toBe(1);
+    expect(body.data).toHaveLength(1);
+    // A cancellation is not an earning: its stored estimate is never served.
+    expect(body.data[0]).toEqual({
+      source: 'orders',
+      platformOrderId: 'CAN-1',
+      platformOrderNumber: null,
+      orderId: cancelledOrderId,
+      bufferId: null,
+      orderDate: todayAt(9).toISOString(),
+      status: OrderStatus.CANCELLED,
+      revenue: '80.00',
+      profit: null,
+      margin: null,
+      promotionDisplays: null,
+    });
+  });
+
+  it('counts.cancelled is reported on every tab and the other tabs exclude cancels', async () => {
+    const { orgId, storeId, token } = await seedWithTodayCancel();
+
+    for (const filter of LIVE_FILTERS) {
+      const res = await app.request(
+        `/v1/organizations/${orgId}/stores/${storeId}/live-performance/orders?filter=${filter}`,
+        { headers: { Authorization: bearer(token) } },
+      );
+      expect(res.status, filter).toBe(200);
+      const body: OrdersBody = await res.json();
+      // all = calculated + pending: the cancel is counted only in its own tab.
+      expect(body.counts, filter).toEqual({ all: 2, calculated: 1, pending: 1, cancelled: 1 });
+      if (filter !== 'cancelled') {
+        expect(
+          body.data.map((row) => row.platformOrderId),
+          filter,
+        ).not.toContain('CAN-1');
+      }
+    }
+  });
+
+  it('a cancelled order of yesterday is not in the tab', async () => {
+    const { orgId, storeId, token } = await seed();
+    await createOrder(orgId, storeId, {
+      orderDate: completedBusinessDayInstant(),
+      platformOrderId: 'CAN-YESTERDAY',
+      status: OrderStatus.CANCELLED,
+      saleGross: '60.00',
+    });
+    const url = `/v1/organizations/${orgId}/stores/${storeId}/live-performance/orders?filter=cancelled`;
+
+    const before = await app.request(url, { headers: { Authorization: bearer(token) } });
+    expect(before.status).toBe(200);
+    const beforeBody: OrdersBody = await before.json();
+    expect(beforeBody.counts.cancelled).toBe(0);
+    expect(beforeBody.data).toEqual([]);
+
+    // Control: a cancel of today is listed.
+    await createOrder(orgId, storeId, {
+      orderDate: todayAt(9),
+      platformOrderId: 'CAN-TODAY',
+      status: OrderStatus.CANCELLED,
+      saleGross: '70.00',
+    });
+    const after = await app.request(url, { headers: { Authorization: bearer(token) } });
+    expect(after.status).toBe(200);
+    const afterBody: OrdersBody = await after.json();
+    expect(afterBody.counts.cancelled).toBe(1);
+    expect(afterBody.data.map((row) => row.platformOrderId)).toEqual(['CAN-TODAY']);
   });
 });

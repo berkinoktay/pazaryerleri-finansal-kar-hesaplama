@@ -8,13 +8,25 @@ import {
   type OrdersSummaryArgs,
 } from '../api/get-orders-summary.api';
 import { orderKeys } from '../query-keys';
+import type { FinalizingPoll } from './use-finalizing-poll';
+
+export interface UseOrdersSummaryOptions {
+  /**
+   * The summary half of the page's finalizing poll: the same decision and cap
+   * as the list's. Without it the summary does not poll.
+   */
+  pollInterval?: FinalizingPoll['forSummary'];
+}
 
 /**
  * Filter-aware KPI summary for the orders page. Disabled when args is null
  * (no active org/store resolved yet). Keyed by the same filter shape as the
  * list so the two refetch in lockstep when a filter changes.
  */
-export function useOrdersSummary(args: OrdersSummaryArgs | null): UseQueryResult<OrderSummary> {
+export function useOrdersSummary(
+  args: OrdersSummaryArgs | null,
+  options?: UseOrdersSummaryOptions,
+): UseQueryResult<OrderSummary> {
   return useQuery<OrderSummary>({
     queryKey:
       args !== null
@@ -33,5 +45,6 @@ export function useOrdersSummary(args: OrdersSummaryArgs | null): UseQueryResult
       return getOrdersSummary(args);
     },
     enabled: args !== null,
+    refetchInterval: options?.pollInterval ?? false,
   });
 }

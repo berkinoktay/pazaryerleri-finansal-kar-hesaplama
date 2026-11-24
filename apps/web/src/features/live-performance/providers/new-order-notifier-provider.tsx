@@ -9,7 +9,7 @@ import { formatCurrency } from '@pazarsync/utils';
 
 import { toast } from '@/components/ui/sonner';
 import { useRouter } from '@/i18n/navigation';
-import { publishRecentOrder } from '@/lib/recent-orders-bus';
+import { publishCompletedDayOrder } from '@/lib/recent-orders-bus';
 import { subscribeToLivePerformance, type RealtimeHealth } from '@/lib/supabase/realtime';
 import { useOrderSoundPref } from '@/lib/use-order-sound-pref';
 import { useCurrentScope } from '@/providers/current-scope';
@@ -352,7 +352,13 @@ export function NewOrderNotifierProvider({
       // Deliberately NOT filtered: a store's first sync of the day backfills
       // today's orders — those are genuinely today's new orders and should toast.
       if (cancelled) return;
-      if (!isBusinessToday(event.orderDate, new Date())) return;
+      if (!isBusinessToday(event.orderDate, new Date())) {
+        // A past-day `orders` row belongs to a completed business day, which is
+        // what the orders page lists: announce it so that page refetches. Buffer
+        // rows never appear there. Still no toast, sound or badge.
+        if (event.table === 'orders') publishCompletedDayOrder(event.id);
+        return;
+      }
       // Dedup against the shared knownIds set (also written by the catch-up diff):
       // an order shown live must not re-toast on the next tab-return diff, and one
       // already surfaced by catch-up must not double-toast when its (late) INSERT
@@ -360,11 +366,6 @@ export function NewOrderNotifierProvider({
       const key = knownOrderKey(event.table, event.id);
       if (knownIds.has(key)) return;
       knownIds.add(key);
-      // Flag the new row for the orders-table live highlight (#467). Only
-      // `orders`-table inserts map to an orders-list row id; buffer rows do not
-      // appear in that list. Fire-and-forget — additive to the #424 toast/sound
-      // pipeline below, whose semantics are untouched.
-      if (event.table === 'orders') publishRecentOrder(event.id);
       pending.push(event);
       if (coalesceTimer === null) {
         coalesceTimer = setTimeout(() => {

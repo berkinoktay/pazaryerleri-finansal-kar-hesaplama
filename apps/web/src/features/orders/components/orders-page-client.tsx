@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import * as React from 'react';
 
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
@@ -10,18 +11,25 @@ import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer
 import { StaleDataBanner } from '@/features/sync/components/stale-data-banner';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
-import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
+import {
+  businessDateToPickerDate,
+  dateRangeFromParams,
+  dateRangeToParams,
+} from '@/lib/date-range-params';
+import { useBusinessDayRollover } from '@/lib/use-business-day-rollover';
 
+import { useFinalizingPoll } from '../hooks/use-finalizing-poll';
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersRealtimeRefresh } from '../hooks/use-orders-realtime-refresh';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
-import { RecentOrderIdsProvider } from '../hooks/use-recent-order-ids';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
+import { orderKeys } from '../query-keys';
 
 import { OrderDetailSheet, type OrderDetailSelection } from './order-detail-sheet';
 import { OrdersEmptyState } from './orders-empty-state';
 import { OrdersKpiStrip } from './orders-kpi-strip';
+import { OrdersOpenDayNotice } from './orders-open-day-notice';
 import { OrdersTable } from './orders-table';
 
 interface OrdersPageClientProps {
@@ -46,6 +54,12 @@ interface OrdersPageClientProps {
  * onFlowsSettled). The summary is omitted only on a summary-query error with NO
  * previously-cached data — a stale-but-present summary keeps rendering; the
  * failure still surfaces via the global QueryCache toast.
+ *
+ * The list shows completed business days only; the server says which day is
+ * open in the list response's `openDay`. The page never decides visibility with
+ * the client clock: it uses the clock only to schedule a refetch at the day
+ * boundary, and while a completed day is still being finalised it polls (one
+ * shared decision and cap for the list and the KPI summary).
  */
 export function OrdersPageClient({
   orgId,
@@ -59,6 +73,10 @@ export function OrdersPageClient({
 
   const noStoreSelected = orgId === null || storeId === null;
 
+  // One poll decision for both queries: the list records what each response
+  // says about `finalizing`, the summary follows it and stops at the same cap.
+  // Scoped to the store: the page stays mounted across a store switch.
+  const poll = useFinalizingPoll(storeId);
   const ordersQuery = useOrders(
     noStoreSelected
       ? null
@@ -76,6 +94,7 @@ export function OrdersPageClient({
           page: filters.page,
           perPage: filters.perPage,
         },
+    { pollInterval: poll.fromList },
   );
   const summaryQuery = useOrdersSummary(
     noStoreSelected
@@ -91,17 +110,91 @@ export function OrdersPageClient({
           from: filters.from.length > 0 ? filters.from : undefined,
           to: filters.to.length > 0 ? filters.to : undefined,
         },
+    { pollInterval: poll.forSummary },
   );
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const refresh = useRefreshOrders(orgId, storeId);
+  const queryClient = useQueryClient();
+  const openDay = ordersQuery.data?.openDay;
+  const finalizing = openDay?.finalizing;
 
-  // Realtime new-order inserts (#467): when the live notifier announces a new
-  // order over the recent-orders bus, refetch the list + KPI so the new row
-  // actually appears (and its row highlight paints against a fetched row rather
-  // than arming for nothing). Reuses the page's own refresh — the SAME
-  // invalidation the header control runs on onFlowsSettled — and coalesces a
-  // burst of ids into one refetch.
+  // Completed-day order inserts over Realtime (a midnight buffer graduation, a
+  // late arrival): the live notifier publishes their ids on the recent-orders
+  // bus, so refetch the list + KPI to bring them in. Today's inserts are not
+  // published; the list hides them until the day ends. Reuses the page's own
+  // refresh (the SAME invalidation the header control runs on onFlowsSettled)
+  // and coalesces a burst of ids into one refetch.
   useOrdersRealtimeRefresh(() => refresh.mutate());
+
+  // At the end of the open business day its orders join the list: refetch both
+  // queries, and keep asking until the server's open date moves on.
+  useBusinessDayRollover(openDay?.businessDate, () => refresh.mutate());
+
+  // The trailing summary refetch. When the list first reports that finalising
+  // is over, the re-render cancels the summary's pending poll, so whatever was
+  // finalised since its previous poll would never reach the KPI strip. It fires
+  // on the store's last KNOWN state going true -> false. A filter, sort or page
+  // change keeps the previous page as the list's placeholder, so finalising that
+  // ends during the swap reads as a direct true -> false. A store switch starts
+  // from nothing known, like a first load: another store's state says nothing
+  // about this one, and nothing known -> false does not fire. The list was just
+  // fetched, so only the summary is invalidated. (The placeholder carries the
+  // data only: the poll window survives the swap because the list feeds the
+  // poll from its own responses alone, see useOrders.)
+  const lastKnownFinalizingRef = React.useRef<{
+    storeId: string | null;
+    finalizing: boolean | undefined;
+  }>({ storeId, finalizing });
+  React.useEffect(() => {
+    if (finalizing === undefined) return;
+    const last = lastKnownFinalizingRef.current;
+    const previous = last.storeId === storeId ? last.finalizing : undefined;
+    lastKnownFinalizingRef.current = { storeId, finalizing };
+    if (previous !== true || finalizing !== false) return;
+    if (orgId === null || storeId === null) return;
+    void queryClient.invalidateQueries({ queryKey: orderKeys.summaries(orgId, storeId) });
+  }, [finalizing, orgId, storeId, queryClient]);
+
+  const hasAnyFilter =
+    filters.q.length > 0 ||
+    filters.status !== null ||
+    filters.reconciliationStatus !== null ||
+    filters.lossOnly ||
+    filters.from.length > 0 ||
+    filters.to.length > 0;
+
+  // Whether the store has no completed-day orders at all: zero counts with no
+  // filter active. Decided only from the current key's own response. While the
+  // previous page stands in as a placeholder its counts belong to its own
+  // filters (a search with no hits), so the last settled decision is kept
+  // instead (React's "store information from previous renders" pattern): a tab,
+  // sort or page change cannot make the store less empty, and neither the empty
+  // state nor the today line above the table blinks during the swap.
+  const ownListData = ordersQuery.isPlaceholderData ? undefined : ordersQuery.data;
+  const settledStoreIsEmpty =
+    ownListData === undefined
+      ? undefined
+      : !hasAnyFilter && ownListData.counts.calculated === 0 && ownListData.counts.excluded === 0;
+  const [lastStoreIsEmpty, setLastStoreIsEmpty] = React.useState(false);
+  if (settledStoreIsEmpty !== undefined && settledStoreIsEmpty !== lastStoreIsEmpty) {
+    setLastStoreIsEmpty(settledStoreIsEmpty);
+  }
+  const storeIsEmpty = ordersQuery.isPlaceholderData
+    ? lastStoreIsEmpty && !hasAnyFilter
+    : (settledStoreIsEmpty ?? false);
+
+  // Today's search matches belong to the search that produced them. The
+  // placeholder carries the previous response's matches, so while a new search
+  // loads they are hidden rather than offered as matches of the new one; a
+  // sort, tab or page change under the same search keeps them.
+  const [settledQ, setSettledQ] = React.useState(filters.q);
+  if (ownListData !== undefined && settledQ !== filters.q) {
+    setSettledQ(filters.q);
+  }
+  const noticeOpenDay =
+    openDay !== undefined && ordersQuery.isPlaceholderData && settledQ !== filters.q
+      ? { ...openDay, matches: [] }
+      : openDay;
 
   if (noStoreSelected) {
     return (
@@ -120,15 +213,6 @@ export function OrdersPageClient({
     totalPages: 0,
   };
   const counts = ordersQuery.data?.counts ?? { calculated: 0, excluded: 0 };
-  const noOrdersAtAll = counts.calculated === 0 && counts.excluded === 0;
-
-  const hasAnyFilter =
-    filters.q.length > 0 ||
-    filters.status !== null ||
-    filters.reconciliationStatus !== null ||
-    filters.lossOnly ||
-    filters.from.length > 0 ||
-    filters.to.length > 0;
 
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
@@ -147,23 +231,38 @@ export function OrdersPageClient({
   // orderDate range as a page-scope filter — it recomputes the summary + list,
   // so it lives in the header's `filters` slot (left of the action cluster),
   // bound to the same nuqs from/to state via the shared conversion helpers.
+  // Days after the last completed business day cannot be picked; until the
+  // first response names that day the server's clamp alone applies.
   const headerFilters = (
     <DateRangePicker
       value={dateRangeFromParams(filters.from, filters.to)}
       onChange={(next) => setFilters(dateRangeToParams(next))}
+      disabledAfter={businessDateToPickerDate(openDay?.lastCompletedBusinessDate ?? '')}
     />
   );
 
   // The genuinely-empty store (zero rows, no filter active) shows a welcoming
   // "no orders yet" body INSIDE the table chrome rather than a full-page
   // takeover — the table keeps its toolbar + headers + pagination so the page
-  // shape stays stable. With a filter active this is left undefined so the
+  // shape stays stable. A store whose only orders are today's gets a pointer to
+  // live performance instead. With a filter active this is left undefined so the
   // DataTable's "clear filters" no-results affordance surfaces instead.
-  const ordersEmptyBody =
-    !hasAnyFilter && noOrdersAtAll ? <OrdersEmptyState variant="no-orders" embedded /> : undefined;
+  const ordersEmptyBody = storeIsEmpty ? (
+    <OrdersEmptyState
+      variant={(openDay?.todayOrderCount ?? 0) > 0 ? 'open-day-only' : 'no-orders'}
+      embedded
+    />
+  ) : undefined;
+
+  // A placeholder with no rows says nothing about the next page's rows (a
+  // cleared search would keep its "no results" body), so the table shows its
+  // skeleton until the response lands, unless the store-level empty state stands.
+  const tableLoading =
+    ordersQuery.isLoading ||
+    (ordersQuery.isPlaceholderData && rows.length === 0 && ordersEmptyBody === undefined);
 
   return (
-    <RecentOrderIdsProvider>
+    <>
       <div className="gap-lg flex flex-col">
         <PageHeader
           variant="framed"
@@ -182,9 +281,15 @@ export function OrdersPageClient({
         />
         {/* Aged-data warning strip (in content flow, between header and table). */}
         <StaleDataBanner pageKey="orders" />
+        {/* The open (today's) day the list leaves out: finalising note, today's
+            pointer to live performance, today's search matches. */}
+        <OrdersOpenDayNotice
+          openDay={noticeOpenDay}
+          hideTodayNotice={ordersEmptyBody !== undefined}
+        />
         <OrdersTable
           rows={rows}
-          loading={ordersQuery.isLoading}
+          loading={tableLoading}
           empty={ordersEmptyBody}
           paginationLeading={<PageSyncFooterTrace pageKey="orders" />}
           pagination={pagination}
@@ -246,6 +351,6 @@ export function OrdersPageClient({
         logs={syncCenterLogs}
         triggers={[]}
       />
-    </RecentOrderIdsProvider>
+    </>
   );
 }

@@ -60,12 +60,15 @@ export const listOrdersQuerySchema = TablePaginationQuerySchema.extend({
   }),
   from: businessDateQueryParam(
     'Istanbul business date (YYYY-MM-DD): lists orders whose orderDate is at or after the ' +
-      'start of that business day.',
+      'start of that business day. Clamped to completed business days; today and later are ' +
+      'never returned, so a from of today or later gives an empty result.',
     '2026-04-01',
   ),
   to: businessDateQueryParam(
     'Istanbul business date (YYYY-MM-DD), inclusive of that whole day: lists orders whose ' +
-      'orderDate is before the end of that business day.',
+      'orderDate is before the end of that business day. Clamped to completed business days; ' +
+      'today and later are never returned, so a to of today or later stops at the last ' +
+      'completed day.',
     '2026-05-23',
   ),
   q: z.string().trim().min(1).max(120).optional().openapi({
@@ -301,6 +304,87 @@ export const OrderListItemSchema = z
 
 export type OrderListItemResponse = z.infer<typeof OrderListItemSchema>;
 
+// ─── Open day ──────────────────────────────────────────────────────────────
+
+const OpenDayMatchSchema = z
+  .object({
+    source: z.enum(['orders', 'buffer']).openapi({
+      description:
+        "Where the match lives: 'orders' = a stored order (id is the order id); 'buffer' = a " +
+        'live performance buffer entry still waiting to become an order (id is the buffer ' +
+        "entry's id).",
+      example: 'orders',
+    }),
+    id: z.string().uuid(),
+    orderNumber: z.string().openapi({
+      description: 'The marketplace order number, or the platform order id when it has none.',
+      example: 'TY-987654',
+    }),
+    cancelled: z.boolean().openapi({
+      description:
+        'True only for a stored order whose status is CANCELLED; always false for a buffer entry.',
+      example: false,
+    }),
+  })
+  .openapi('OrderListOpenDayMatch', {
+    description: "One of today's orders or buffer entries matching the list search (q).",
+  });
+
+export type OpenDayMatchResponse = z.infer<typeof OpenDayMatchSchema>;
+
+export const OpenDaySchema = z
+  .object({
+    businessDate: z.iso.date().openapi({
+      description:
+        "The open (today's) Istanbul business date (YYYY-MM-DD). Its orders are not in the " +
+        'list until the day ends; they are on the live performance endpoints.',
+      example: '2026-05-24',
+    }),
+    lastCompletedBusinessDate: z.iso.date().openapi({
+      description:
+        'The last completed Istanbul business date (YYYY-MM-DD): the latest day the list can ' +
+        'show, so the latest a date filter can usefully name.',
+      example: '2026-05-23',
+    }),
+    finalizing: z.boolean().openapi({
+      description:
+        'True while a business day before today is still being closed for this store: an ' +
+        'order of a completed day whose seller inputs are not final yet, a buffer entry of a ' +
+        'completed day still waiting to become an order (not one that failed permanently), a ' +
+        'queued day-close profit recompute, or a queued first recompute of a final completed-day ' +
+        'order that has no figures yet (a queue row that keeps failing stops counting after a ' +
+        'few attempts). Profit figures of the completed days can still ' +
+        'change while it is true. Describes the store, so it ignores every list filter.',
+      example: false,
+    }),
+    todayOrderCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .openapi({
+        description:
+          "Today's orders of the store that the list leaves out: stored orders of the open " +
+          'business day, cancelled ones included (live performance lists those on its ' +
+          'cancelled tab), plus buffer entries of the open business day. Ignores every list ' +
+          'filter.',
+        example: 4,
+      }),
+    matches: z.array(OpenDayMatchSchema).openapi({
+      description:
+        "Today's orders and buffer entries matching q, which the list does not return as " +
+        'rows: a short list capped by the server, stored orders first (newest first), then ' +
+        'buffer entries. Only q applies; the other list filters do not. Empty without q.',
+    }),
+  })
+  .openapi('OrderListOpenDay', {
+    description:
+      "The open (today's) business day of the store, which the orders list leaves out: its " +
+      'dates, whether a completed day is still being closed, how many orders today has so ' +
+      'far, and the search matches among them.',
+  });
+
+export type OpenDayResponse = z.infer<typeof OpenDaySchema>;
+
 export const ListOrdersResponseSchema = z
   .object({
     data: z.array(OrderListItemSchema),
@@ -319,6 +403,7 @@ export const ListOrdersResponseSchema = z
           'Profit-universe segment totals. Honor the sibling filters (status/recon/date/q) but ' +
           'ignore costStatus, so each tab shows its true count regardless of the active segment.',
       }),
+    openDay: OpenDaySchema,
   })
   .openapi('ListOrdersResponse');
 
