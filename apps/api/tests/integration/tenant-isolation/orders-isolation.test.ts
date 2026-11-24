@@ -1,17 +1,31 @@
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../../src/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
-import { completedBusinessDayInstant } from '../../helpers/completed-day';
+import { completedBusinessDayInstant, openBusinessDayInstant } from '../../helpers/completed-day';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createBufferEntry,
   createMembership,
   createOrder,
   createOrganization,
   createProfitStatement,
   createStore,
 } from '../../helpers/factories';
+
+interface OpenDayBody {
+  finalizing: boolean;
+  todayOrderCount: number;
+  matches: { source: string; id: string; orderNumber: string; cancelled: boolean }[];
+}
+
+// Optional so a missing field fails on the assertion, not on the read.
+interface ListBodyWithOpenDay {
+  openDay?: OpenDayBody;
+}
 
 /**
  * Multi-tenancy invariant: an authenticated member of org A MUST NOT see orders
@@ -395,5 +409,146 @@ describe('Orders — tenant isolation', () => {
     // Falls back to the order's own sale and a null margin, never the foreign 999/99.
     expect(row?.saleGross).toBe('240');
     expect(row?.saleMarginPct).toBeNull();
+  });
+
+  // --- openDay: every source is read for the queried organization and store only ---
+
+  async function openDayOf(
+    accessToken: string,
+    orgId: string,
+    storeId: string,
+    query = '',
+  ): Promise<OpenDayBody | undefined> {
+    const res = await app.request(`/v1/organizations/${orgId}/stores/${storeId}/orders${query}`, {
+      headers: { Authorization: bearer(accessToken) },
+    });
+    expect(res.status).toBe(200);
+    const body: ListBodyWithOpenDay = await res.json();
+    return body.openDay;
+  }
+
+  // A final completed-day order with a queued DAY_CLOSE recompute (no factory for the queue).
+  async function queueDayCloseRecompute(orgId: string, storeId: string, orderId: string) {
+    await prisma.profitRecomputeRequest.create({
+      data: { organizationId: orgId, storeId, orderId, reason: ProfitRecomputeReason.DAY_CLOSE },
+    });
+  }
+
+  async function createFinalOrder(orgId: string, storeId: string) {
+    return createOrder(orgId, storeId, {
+      orderDate: completedBusinessDayInstant(),
+      sellerInputsFinalAt: new Date(),
+    });
+  }
+
+  // Every source of `finalizing` for one store: a non-final completed-day order, a past-day
+  // buffer row waiting for graduation and a queued DAY_CLOSE recompute of a final order.
+  async function seedFinalizingSources(orgId: string, storeId: string): Promise<void> {
+    await createOrder(orgId, storeId, { orderDate: completedBusinessDayInstant() });
+    await createBufferEntry(orgId, storeId, {
+      orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
+    });
+    const finalOrder = await createFinalOrder(orgId, storeId);
+    await queueDayCloseRecompute(orgId, storeId, finalOrder.id);
+  }
+
+  it('LIST: finalizing reflects only the queried store', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    // Each source would set store A1's flag without its tenant and store filters.
+    await seedFinalizingSources(orgB.id, storeB.id);
+    await seedFinalizingSources(orgA.id, storeA2.id);
+    // Store A1 itself has only a final order and nothing queued.
+    const finalA1 = await createFinalOrder(orgA.id, storeA1.id);
+
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(false);
+
+    // Positive controls, one source at a time, each seeded for store A1 itself.
+    const ownBuffer = await createBufferEntry(orgA.id, storeA1.id, {
+      orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
+    });
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
+    await prisma.livePerformanceBuffer.delete({ where: { id: ownBuffer.id } });
+
+    await queueDayCloseRecompute(orgA.id, storeA1.id, finalA1.id);
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
+    await prisma.profitRecomputeRequest.delete({ where: { orderId: finalA1.id } });
+
+    await createOrder(orgA.id, storeA1.id, { orderDate: completedBusinessDayInstant() });
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
+  });
+
+  it('LIST: todayOrderCount counts only the queried store', async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    // Today's stored order and buffer row in org B and in store A2 of org A.
+    for (const scope of [
+      { orgId: orgB.id, storeId: storeB.id },
+      { orgId: orgA.id, storeId: storeA2.id },
+    ]) {
+      await createOrder(scope.orgId, scope.storeId, { orderDate: openBusinessDayInstant() });
+      await createBufferEntry(scope.orgId, scope.storeId, { orderDate: getBusinessDateAnchor() });
+    }
+
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.todayOrderCount).toBe(0);
+
+    // Positive control: store A1's own order and buffer row of today are counted.
+    await createOrder(orgA.id, storeA1.id, { orderDate: openBusinessDayInstant() });
+    await createBufferEntry(orgA.id, storeA1.id, { orderDate: getBusinessDateAnchor() });
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.todayOrderCount).toBe(2);
+  });
+
+  it("LIST: search never returns another tenant's open-day match", async () => {
+    const user = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, user.id);
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+    const storeB = await createStore(orgB.id);
+
+    // Today's order and buffer entry with the searched number, in org B and in store A2.
+    for (const scope of [
+      { orgId: orgB.id, storeId: storeB.id },
+      { orgId: orgA.id, storeId: storeA2.id },
+    ]) {
+      await createOrder(scope.orgId, scope.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'SHARED-123',
+      });
+      await createBufferEntry(scope.orgId, scope.storeId, {
+        orderDate: getBusinessDateAnchor(),
+        platformOrderNumber: 'SHARED-123',
+      });
+    }
+
+    const query = '?q=SHARED-123';
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id, query))?.matches).toEqual([]);
+
+    // Positive control: store A1's own order and buffer entry of today match.
+    const ownOrder = await createOrder(orgA.id, storeA1.id, {
+      orderDate: openBusinessDayInstant(),
+      platformOrderNumber: 'SHARED-123-A',
+    });
+    const ownBuffer = await createBufferEntry(orgA.id, storeA1.id, {
+      orderDate: getBusinessDateAnchor(),
+      platformOrderNumber: 'SHARED-123-B',
+    });
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id, query))?.matches).toEqual([
+      { source: 'orders', id: ownOrder.id, orderNumber: 'SHARED-123-A', cancelled: false },
+      { source: 'buffer', id: ownBuffer.id, orderNumber: 'SHARED-123-B', cancelled: false },
+    ]);
   });
 });

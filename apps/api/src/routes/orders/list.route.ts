@@ -31,7 +31,9 @@ const listOrdersRoute = createRoute({
     '-marginPct (sale margin column). Designed for the orders table — page + perPage ' +
     'pagination, not cursor. Only orders of completed Istanbul business days are returned: ' +
     "the rows, the total and both tab counts leave today's orders out until the day ends; " +
-    'those are on the live performance endpoints.',
+    'those are on the live performance endpoints. `openDay` describes the open day the list ' +
+    'leaves out: its dates, whether a completed day is still being closed (`finalizing`), ' +
+    "today's order count and the search matches among today's orders.",
   security: [{ bearerAuth: [] }],
   request: {
     params: storeScopeParams,
@@ -69,7 +71,7 @@ app.openapi(listOrdersRoute, async (c) => {
   const filters = c.req.valid('query');
   await requireStoreAccess(userId, orgId, storeId);
 
-  const { data, total, counts } = await orderService.listOrders(orgId, storeId, filters);
+  const { data, total, counts, openDay } = await orderService.listOrders(orgId, storeId, filters);
 
   const totalPages = total === 0 ? 0 : Math.ceil(total / filters.perPage);
 
@@ -83,6 +85,7 @@ app.openapi(listOrdersRoute, async (c) => {
         totalPages,
       },
       counts,
+      openDay,
     },
     200,
   );

@@ -3,22 +3,28 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { BufferEntryStatus, OrderStatus, ProfitRecomputeReason } from '@pazarsync/db/enums';
 import {
   buildStatementBreakdown,
   computeParcelProfit,
   recomputeParcelProfit,
   statementTotalsFromStatement,
 } from '@pazarsync/profit';
-import { getBusinessDate } from '@pazarsync/utils';
+import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { createApp } from '../../../src/app';
-import { getOrdersSummary, listOrders } from '../../../src/services/order.service';
+import {
+  OPEN_DAY_MATCH_LIMIT,
+  getOrdersSummary,
+  listOrders,
+} from '../../../src/services/order.service';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { businessDayEdges } from '../../helpers/business-day-edges';
 import { seedCalculableTrendyolOrder } from '../../helpers/calculable-order';
 import { completedBusinessDayInstant, openBusinessDayInstant } from '../../helpers/completed-day';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createBufferEntry,
   createMembership,
   createOrder,
   createOrderClaim,
@@ -2773,10 +2779,25 @@ describe('Order routes', () => {
       storeId: string;
     }
 
+    interface OpenDayMatchBody {
+      source: string;
+      id: string;
+      orderNumber: string;
+      cancelled: boolean;
+    }
+
     interface ListBody {
       data: { id: string }[];
       pagination: { total: number };
       counts: { calculated: number; excluded: number };
+      // Optional so a missing field fails on the assertion, not on the read.
+      openDay?: {
+        businessDate: string;
+        lastCompletedBusinessDate: string;
+        finalizing: boolean;
+        todayOrderCount: number;
+        matches: OpenDayMatchBody[];
+      };
     }
 
     interface SummaryBody {
@@ -2815,6 +2836,30 @@ describe('Order routes', () => {
         data: { profitExcludedAt: new Date(), profitExclusionReason: 'COST_DEADLINE_MISSED' },
       });
       return order;
+    }
+
+    // A completed-day order the day-close pass has already made final.
+    async function seedFinalOrder(ctx: StoreContext) {
+      return createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+        sellerInputsFinalAt: new Date(),
+      });
+    }
+
+    // One queued profit recompute for an order (the queue model has no factory).
+    async function queueRecompute(
+      ctx: StoreContext,
+      orderId: string,
+      reason: ProfitRecomputeReason,
+    ): Promise<void> {
+      await prisma.profitRecomputeRequest.create({
+        data: { organizationId: ctx.orgId, storeId: ctx.storeId, orderId, reason },
+      });
+    }
+
+    async function getOpenDay(ctx: StoreContext, query = ''): Promise<ListBody['openDay']> {
+      const body = await getList(ctx, query);
+      return body.openDay;
     }
 
     it('lists only completed-day orders', async () => {
@@ -2990,6 +3035,286 @@ describe('Order routes', () => {
       expect(res.status).toBe(200);
       const body: { id: string } = await res.json();
       expect(body.id).toBe(today.id);
+    });
+
+    // --- openDay: the open day's dates, finalizing and today's order count ---
+
+    it('openDay names the open and last completed business dates', async () => {
+      const ctx = await memberStore();
+
+      const openDay = await getOpenDay(ctx);
+      expect(openDay).toMatchObject({
+        businessDate: getBusinessDate(),
+        lastCompletedBusinessDate: getBusinessDate(completedBusinessDayInstant()),
+      });
+    });
+
+    it('finalizing is true while a completed-day order is not final', async () => {
+      const ctx = await memberStore();
+      // The factory leaves the seller-input marker NULL: the day-close pass has not run.
+      const order = await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+
+      // Control: once the day-close pass marks it final, the store is no longer finalizing.
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { sellerInputsFinalAt: new Date() },
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it('a non-final order of today does not set finalizing', async () => {
+      const ctx = await memberStore();
+      await createOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it.each([BufferEntryStatus.PENDING, BufferEntryStatus.PROMOTING, BufferEntryStatus.FAILED])(
+      'finalizing is true while a past-day %s buffer row waits for graduation',
+      async (status) => {
+        const ctx = await memberStore();
+        await seedFinalOrder(ctx);
+        await createBufferEntry(ctx.orgId, ctx.storeId, {
+          orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
+          status,
+        });
+
+        expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+      },
+    );
+
+    it('a PERMANENT_FAILED past-day buffer row does not set finalizing', async () => {
+      const ctx = await memberStore();
+      const pastAnchor = getBusinessDateAnchor(completedBusinessDayInstant());
+      await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: pastAnchor,
+        status: BufferEntryStatus.PERMANENT_FAILED,
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+
+      // Control: a PENDING row of the same day does set it.
+      await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: pastAnchor,
+        status: BufferEntryStatus.PENDING,
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+    });
+
+    it('a buffer row of today does not set finalizing', async () => {
+      const ctx = await memberStore();
+      await createBufferEntry(ctx.orgId, ctx.storeId, { orderDate: getBusinessDateAnchor() });
+
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it('a queued DAY_CLOSE recompute keeps finalizing true', async () => {
+      const ctx = await memberStore();
+      // Already final, empty buffer: only the queued recompute is left of the day close.
+      const order = await seedFinalOrder(ctx);
+      await queueRecompute(ctx, order.id, ProfitRecomputeReason.DAY_CLOSE);
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+
+      // Control: once the worker drains the row, the store is no longer finalizing.
+      await prisma.profitRecomputeRequest.delete({ where: { orderId: order.id } });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it('a queued recompute with another reason does not set finalizing', async () => {
+      const ctx = await memberStore();
+      const order = await seedFinalOrder(ctx);
+      await queueRecompute(ctx, order.id, ProfitRecomputeReason.COST_CHANGED);
+
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it('finalizing ignores the list filters', async () => {
+      const ctx = await memberStore();
+      await createOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
+
+      const body = await getList(ctx, '?status=CANCELLED&q=zzz');
+      expect(body.data).toEqual([]);
+      expect(body.openDay?.finalizing).toBe(true);
+    });
+
+    it('openDay.matches is empty without q', async () => {
+      const ctx = await memberStore();
+      await seedSimpleOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+
+      expect((await getOpenDay(ctx))?.matches).toEqual([]);
+    });
+
+    it("todayOrderCount counts today's stored non-cancelled orders and buffer rows", async () => {
+      const ctx = await memberStore();
+      await createOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
+      await createBufferEntry(ctx.orgId, ctx.storeId, { orderDate: getBusinessDateAnchor() });
+      // Not counted: a cancellation of today, a completed-day order, a past-day buffer row.
+      await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        status: OrderStatus.CANCELLED,
+      });
+      await createOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
+      await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
+      });
+
+      expect((await getOpenDay(ctx))?.todayOrderCount).toBe(2);
+      // It describes the store, not the current view: the list filters do not change it.
+      expect((await getOpenDay(ctx, '?status=CANCELLED&q=zzz'))?.todayOrderCount).toBe(2);
+    });
+
+    it('service clock: openDay reads the same clock as the clamp', async () => {
+      const org = await createOrganization();
+      const store = await createStore(org.id);
+      const edges = businessDayEdges();
+      // A non-final order at 23:30 and a buffer row of the same business day.
+      await createOrder(org.id, store.id, { orderDate: edges.lateInDay });
+      await createBufferEntry(org.id, store.id, {
+        orderDate: getBusinessDateAnchor(edges.lateInDay),
+      });
+
+      // 23:50 the same day: both are today's; nothing is being finalised yet.
+      const sameDayLate = new Date(edges.lateInDay.getTime() + 20 * MINUTE_MS);
+      const before = await listOrders(
+        org.id,
+        store.id,
+        { page: 1, perPage: 10, sort: '-orderDate' },
+        sameDayLate,
+      );
+      expect(before.openDay).toMatchObject({
+        businessDate: edges.day,
+        finalizing: false,
+        todayOrderCount: 2,
+      });
+
+      // 00:10 the next day: the day is completed and still being closed.
+      const after = await listOrders(
+        org.id,
+        store.id,
+        { page: 1, perPage: 10, sort: '-orderDate' },
+        edges.nextDayEarly,
+      );
+      expect(after.openDay).toMatchObject({
+        businessDate: getBusinessDate(edges.nextDayEarly),
+        lastCompletedBusinessDate: edges.day,
+        finalizing: true,
+        todayOrderCount: 0,
+      });
+    });
+
+    // --- openDay.matches: today's orders and buffer entries matching the search ---
+
+    it('q matching a today order returns it in matches, not in rows', async () => {
+      const ctx = await memberStore();
+      const today = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'ON-TODAY-1',
+      });
+
+      const body = await getList(ctx, '?q=ON-TODAY-1');
+      expect(body.data).toEqual([]);
+      expect(body.openDay?.matches).toEqual([
+        { source: 'orders', id: today.id, orderNumber: 'ON-TODAY-1', cancelled: false },
+      ]);
+    });
+
+    it('a cancelled today order is flagged', async () => {
+      const ctx = await memberStore();
+      const cancelled = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'ON-TODAY-CAN',
+        status: OrderStatus.CANCELLED,
+      });
+
+      expect((await getOpenDay(ctx, '?q=ON-TODAY-CAN'))?.matches).toEqual([
+        { source: 'orders', id: cancelled.id, orderNumber: 'ON-TODAY-CAN', cancelled: true },
+      ]);
+    });
+
+    it('a today buffer entry matches by number', async () => {
+      const ctx = await memberStore();
+      const buffer = await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: getBusinessDateAnchor(),
+        platformOrderNumber: 'BUF-TODAY-1',
+      });
+
+      expect((await getOpenDay(ctx, '?q=BUF-TODAY-1'))?.matches).toEqual([
+        { source: 'buffer', id: buffer.id, orderNumber: 'BUF-TODAY-1', cancelled: false },
+      ]);
+    });
+
+    it('a today order without a number matches by its platform id', async () => {
+      const ctx = await memberStore();
+      const order = await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderId: 'PKG-TODAY-77',
+        platformOrderNumber: null,
+      });
+
+      expect((await getOpenDay(ctx, '?q=PKG-TODAY-77'))?.matches).toEqual([
+        { source: 'orders', id: order.id, orderNumber: 'PKG-TODAY-77', cancelled: false },
+      ]);
+    });
+
+    it('returns at most OPEN_DAY_MATCH_LIMIT matches, stored first', async () => {
+      const ctx = await memberStore();
+      for (let i = 0; i < OPEN_DAY_MATCH_LIMIT; i += 1) {
+        await createOrder(ctx.orgId, ctx.storeId, {
+          orderDate: openBusinessDayInstant(),
+          platformOrderNumber: `MANY-ORD-${i}`,
+        });
+      }
+      for (let i = 0; i < 2; i += 1) {
+        await createBufferEntry(ctx.orgId, ctx.storeId, {
+          orderDate: getBusinessDateAnchor(),
+          platformOrderNumber: `MANY-BUF-${i}`,
+        });
+      }
+
+      const matches = (await getOpenDay(ctx, '?q=MANY-'))?.matches ?? [];
+      expect(matches).toHaveLength(OPEN_DAY_MATCH_LIMIT);
+      expect(matches.map((match) => match.source)).toEqual(
+        Array.from({ length: OPEN_DAY_MATCH_LIMIT }, () => 'orders'),
+      );
+    });
+
+    it('a completed-day order matching q is a row, not a match', async () => {
+      const ctx = await memberStore();
+      const done = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: completedBusinessDayInstant(),
+        platformOrderNumber: 'ON-BOUND-DONE',
+      });
+      // A completed-day buffer entry is not a match either.
+      await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
+        platformOrderNumber: 'ON-BOUND-PAST-BUF',
+      });
+      // Control: today's order with the same prefix is the only match.
+      const today = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'ON-BOUND-TODAY',
+      });
+
+      const body = await getList(ctx, '?q=ON-BOUND-');
+      expect(body.data.map((o) => o.id)).toEqual([done.id]);
+      expect(body.openDay?.matches).toEqual([
+        { source: 'orders', id: today.id, orderNumber: 'ON-BOUND-TODAY', cancelled: false },
+      ]);
+    });
+
+    it('matches ignore the other filters', async () => {
+      const ctx = await memberStore();
+      const pending = await seedSimpleOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderNumber: 'ON-PENDING-1',
+        status: OrderStatus.PENDING,
+      });
+
+      expect((await getOpenDay(ctx, '?status=DELIVERED&q=ON-PENDING-1'))?.matches).toEqual([
+        { source: 'orders', id: pending.id, orderNumber: 'ON-PENDING-1', cancelled: false },
+      ]);
     });
   });
 });

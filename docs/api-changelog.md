@@ -1321,6 +1321,20 @@ section "Versioning" for details.
 
 ### Added
 
+- **`openDay` on the orders list response** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`).
+  The list now leaves out the open (today's) business day, and `openDay`, the new
+  `OrderListOpenDay` component schema, describes that day: `businessDate` (today's Istanbul
+  business date, `YYYY-MM-DD`), `lastCompletedBusinessDate` (the latest day the list can show),
+  `finalizing` (true while a business day before today is still being closed for the store: an
+  order of a completed day whose seller inputs are not final yet, a completed-day live
+  performance buffer entry still waiting to become an order (not a permanently failed one), or a
+  queued day-close profit recompute), `todayOrderCount` (the store's stored orders of today that
+  are not cancelled, plus its buffer entries of today) and `matches` (an array of the new
+  `OrderListOpenDayMatch` component schema: today's orders and buffer entries matching `q`, each
+  with `source` (`orders` or `buffer`), `id`, `orderNumber` (the platform order id when the
+  order has no number) and `cancelled`; a short server-capped list, stored orders first; empty
+  without `q`). `finalizing`, `todayOrderCount` and `matches` describe the store, so the other
+  list filters do not change them (`matches` follows `q` only). Additive.
 - **Why an order's profit is not computable** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET .../orders/{orderId}`). Each orders list row and the order detail gain `profitBlockers`, an
   array of the new `ProfitBlocker` component schema (`code`, a `ProfitIssueCode`; `detail`, the
