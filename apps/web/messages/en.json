@@ -2225,7 +2225,17 @@
       "noOrders": {
         "title": "No orders yet",
         "description": "Once the first order syncs from the connected store, it will land here."
-      }
+      },
+      "openDayOnly": "No orders from completed days yet"
+    },
+    "openDay": {
+      "finalizing": "Yesterday's orders are being finalised. Figures can still change for a few minutes.",
+      "matchesTitle": "{count, plural, one {# order from today matches} other {# orders from today match}} your search. Today's orders are on Live Performance until midnight.",
+      "matchStored": "Open order {orderNumber} on Live Performance",
+      "matchPending": "Order {orderNumber} is waiting on Live Performance",
+      "matchCancelled": "Order {orderNumber} is in today's cancelled orders",
+      "todayNotice": "Today's orders stay on Live Performance until the day ends.",
+      "todayLink": "Open Live Performance"
     },
     "excludedList": {
       "label": "Outside profit",

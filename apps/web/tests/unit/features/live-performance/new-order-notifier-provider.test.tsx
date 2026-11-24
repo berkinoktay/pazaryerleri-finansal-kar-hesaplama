@@ -9,6 +9,7 @@ import { formatCurrency } from '@pazarsync/utils';
 import type { LivePerformanceOrders } from '@/features/live-performance/api/get-live-orders.api';
 import type { NotificationSummaryLike } from '@/features/live-performance/lib/new-order-notification-core';
 import { LIVE_POLL_INTERVAL_MS, liveKeys } from '@/features/live-performance/query-keys';
+import { subscribeCompletedDayOrders } from '@/lib/recent-orders-bus';
 import type { RealtimeHealth } from '@/lib/supabase/realtime';
 import {
   NewOrderNotifierProvider,
@@ -248,6 +249,85 @@ describe('NewOrderNotifierProvider', () => {
       await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
     });
     expect(getNotificationSummaryMock).toHaveBeenCalledTimes(1);
+  });
+
+  describe('completed-day bus', () => {
+    // 2026-07-08 15:00 Istanbul: a mid-day now, away from any midnight boundary.
+    const MID_DAY_NOW = new Date('2026-07-08T12:00:00Z');
+    // The bus is a module singleton: every test unsubscribes its listener so it
+    // never leaks into a later case.
+    let unsubscribeBus: () => void = () => {};
+
+    afterEach(() => {
+      unsubscribeBus();
+      unsubscribeBus = () => {};
+    });
+
+    function listenToBus(): ReturnType<typeof vi.fn<(orderId: string) => void>> {
+      const listener = vi.fn<(orderId: string) => void>();
+      unsubscribeBus = subscribeCompletedDayOrders(listener);
+      return listener;
+    }
+
+    it('publishes a past-day orders INSERT for the orders page and does not toast it', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(MID_DAY_NOW);
+      const listener = listenToBus();
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'past-1', orderDate: '2026-07-06T13:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+
+      expect(listener).toHaveBeenCalledWith('past-1');
+      expect(listener).toHaveBeenCalledTimes(1);
+      // The toast path never starts for a past-day insert: no summary fetch.
+      expect(getNotificationSummaryMock).not.toHaveBeenCalled();
+    });
+
+    it('does not publish a today orders INSERT on the completed-day bus', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(MID_DAY_NOW);
+      getNotificationSummaryMock.mockResolvedValue(SUMMARY_B);
+      const listener = listenToBus();
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'B', orderDate: '2026-07-08T09:00:00' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+
+      expect(listener).not.toHaveBeenCalled();
+      // Control: the today insert still runs the toast path.
+      expect(getNotificationSummaryMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('never publishes a buffer INSERT', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(MID_DAY_NOW);
+      const listener = listenToBus();
+      renderHook(() => useNewOrderNotifier(), { wrapper });
+
+      act(() => {
+        capturedOnNewOrder({ table: 'buffer', id: 'buf-past', orderDate: '2026-07-06' });
+        capturedOnNewOrder({ table: 'buffer', id: 'buf-today', orderDate: '2026-07-08' });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS + 100);
+      });
+      expect(listener).not.toHaveBeenCalled();
+
+      // Positive control: a past-day orders INSERT on the same mount does publish.
+      act(() => {
+        capturedOnNewOrder({ table: 'orders', id: 'past-2', orderDate: '2026-07-06T13:00:00' });
+      });
+      expect(listener).toHaveBeenCalledWith('past-2');
+    });
   });
 
   it('cleans up the subscription on unmount', () => {

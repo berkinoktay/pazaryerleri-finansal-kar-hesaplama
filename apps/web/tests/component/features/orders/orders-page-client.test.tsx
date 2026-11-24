@@ -1,0 +1,366 @@
+import type { QueryClient } from '@tanstack/react-query';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
+import { createTranslator } from 'next-intl';
+import * as React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { formatCurrency, getBusinessDate, getBusinessDayRangeOfDate } from '@pazarsync/utils';
+
+import type { OrderSummary } from '@/features/orders/api/get-orders-summary.api';
+import type {
+  ListOrdersResponse,
+  OpenDayMatch,
+  OrderListOpenDay,
+} from '@/features/orders/api/list-orders.api';
+import { OrdersPageClient } from '@/features/orders/components/orders-page-client';
+import { ORDERS_REALTIME_REFRESH_DEBOUNCE_MS } from '@/features/orders/hooks/use-orders-realtime-refresh';
+import { FINALIZING_POLL_MAX_MS, FINALIZING_POLL_MS } from '@/features/orders/lib/finalizing-poll';
+import { publishCompletedDayOrder } from '@/lib/recent-orders-bus';
+import { ROLLOVER_GRACE_MS } from '@/lib/use-business-day-rollover';
+import { COUNT_UP_DURATION_MS } from '@/lib/use-count-up';
+
+import trMessages from '../../../../messages/tr.json';
+import { HttpResponse, http, server } from '../../../helpers/msw';
+import { NuqsTestHarness } from '../../../helpers/nuqs';
+import {
+  act,
+  AllProviders,
+  createTestQueryClient,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '../../../helpers/render';
+
+vi.mock('@/i18n/navigation', () => ({
+  Link: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+// The sync chrome reads the org-wide sync provider and Realtime; it has its own
+// tests. Stub it so this test stays pinned to the page's orders wiring.
+vi.mock('@/features/sync/components/page-sync-control', () => ({ PageSyncControl: () => null }));
+vi.mock('@/features/sync/components/page-sync-footer-trace', () => ({
+  PageSyncFooterTrace: () => null,
+}));
+vi.mock('@/features/sync/components/stale-data-banner', () => ({ StaleDataBanner: () => null }));
+vi.mock('@/features/sync/hooks/use-store-syncs', () => ({
+  useStoreSyncs: () => ({ activeSyncs: [], recentSyncs: [] }),
+}));
+vi.mock('@/components/patterns/sync-center', () => ({ SyncCenter: () => null }));
+vi.mock('@/features/orders/components/order-detail-sheet', () => ({
+  OrderDetailSheet: () => null,
+}));
+
+const ORG_ID = '00000000-0000-0000-0000-000000000001';
+const STORE_ID = '00000000-0000-0000-0000-000000000002';
+const LIST_URL = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${STORE_ID}/orders`;
+const SUMMARY_URL = `${LIST_URL}/summary`;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+// One poll tick plus a margin: an observer re-arms its interval when each
+// response lands, so a tick is due slightly after FINALIZING_POLL_MS.
+const POLL_STEP_MS = FINALIZING_POLL_MS + 500;
+
+// Copy comes from the catalog, never a literal: the Turkish values will change.
+const tOpenDay = createTranslator({
+  locale: 'tr',
+  messages: trMessages,
+  namespace: 'ordersPage.openDay',
+});
+
+const PRE_CLOSE_PROFIT = '1234.00';
+const POST_CLOSE_PROFIT = '4321.00';
+
+/**
+ * A list response whose open day defaults to the business date of the clock the
+ * test runs under (read when the handler runs, so a fake clock moves it too):
+ * the page arms its day-rollover timer from `businessDate`, and a past date
+ * would fire it at once.
+ */
+function listResponse(
+  over: { openDay?: Partial<OrderListOpenDay>; counts?: ListOrdersResponse['counts'] } = {},
+): ListOrdersResponse {
+  return {
+    data: [],
+    pagination: { page: 1, perPage: 25, total: 0, totalPages: 0 },
+    counts: over.counts ?? { calculated: 0, excluded: 0 },
+    openDay: {
+      businessDate: getBusinessDate(),
+      lastCompletedBusinessDate: getBusinessDate(new Date(Date.now() - DAY_MS)),
+      finalizing: false,
+      todayOrderCount: 0,
+      matches: [],
+      ...over.openDay,
+    },
+  };
+}
+
+function summaryResponse(netProfitGross = PRE_CLOSE_PROFIT): OrderSummary {
+  return {
+    totalRevenueGross: '9999.00',
+    netProfitGross,
+    avgMarginPct: '12.50',
+    lossOrderRate: { lossCount: 0, totalCount: 0, pct: '0.00' },
+  };
+}
+
+interface HandlerCounts {
+  list: number;
+  summary: number;
+}
+
+/** Register list + summary handlers that count calls; the list body comes from `list`. */
+function serve(
+  list: (call: number) => ListOrdersResponse,
+  summary = summaryResponse,
+): HandlerCounts {
+  const counts: HandlerCounts = { list: 0, summary: 0 };
+  server.use(
+    http.get(SUMMARY_URL, () => {
+      counts.summary += 1;
+      return HttpResponse.json(summary());
+    }),
+    http.get(LIST_URL, () => {
+      counts.list += 1;
+      return HttpResponse.json(list(counts.list));
+    }),
+  );
+  return counts;
+}
+
+function makeWrapper(queryClient: QueryClient, initialSearchParams = '') {
+  return function Wrapper({ children }: { children: React.ReactNode }): React.ReactElement {
+    return (
+      <AllProviders queryClient={queryClient}>
+        <NuqsTestHarness initialSearchParams={initialSearchParams}>{children}</NuqsTestHarness>
+      </AllProviders>
+    );
+  };
+}
+
+function renderPage(queryClient: QueryClient, initialSearchParams = '') {
+  return render(
+    <OrdersPageClient
+      orgId={ORG_ID}
+      storeId={STORE_ID}
+      pageTitle="orders-title"
+      pageIntent="orders-intent"
+    />,
+    { wrapper: makeWrapper(queryClient, initialSearchParams) },
+  );
+}
+
+async function waitForIdle(queryClient: QueryClient): Promise<void> {
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+}
+
+describe('OrdersPageClient - open day', () => {
+  it('shows the finalizing note from the list response', async () => {
+    serve(() => listResponse({ openDay: { finalizing: true } }));
+    renderPage(createTestQueryClient());
+
+    expect(await screen.findByText(tOpenDay('finalizing'))).toBeInTheDocument();
+  });
+
+  it('shows a live-performance link for a today match while the table is empty', async () => {
+    const match: OpenDayMatch = {
+      source: 'orders',
+      id: '00000000-0000-0000-0000-0000000000a1',
+      orderNumber: 'TY-TODAY-1',
+      cancelled: false,
+    };
+    serve(() => listResponse({ openDay: { matches: [match] } }));
+    renderPage(createTestQueryClient(), '?q=TY-TODAY-1');
+
+    const link = await screen.findByRole('link', {
+      name: tOpenDay('matchStored', { orderNumber: match.orderNumber }),
+    });
+    expect(link).toHaveAttribute('href', `/live-performance?order=${match.id}`);
+    // The search matched no completed-day row: the table shows its zero-row body.
+    expect(screen.getByText(trMessages.ordersPage.tabs.emptyCalculated)).toBeInTheDocument();
+  });
+
+  it('shows the today notice with a live-performance link when today has orders', async () => {
+    serve(() =>
+      listResponse({ openDay: { todayOrderCount: 2 }, counts: { calculated: 5, excluded: 0 } }),
+    );
+    renderPage(createTestQueryClient());
+
+    expect(await screen.findByText(tOpenDay('todayNotice'))).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: tOpenDay('todayLink') })).toHaveAttribute(
+      'href',
+      '/live-performance',
+    );
+  });
+
+  it("points to live performance from the empty state of a store whose only orders are today's", async () => {
+    serve(() => listResponse({ openDay: { todayOrderCount: 3 } }));
+    renderPage(createTestQueryClient());
+
+    expect(await screen.findByText(trMessages.ordersPage.empty.openDayOnly)).toBeInTheDocument();
+    expect(screen.queryByText(trMessages.ordersPage.empty.noOrders.title)).not.toBeInTheDocument();
+    // The empty state inside the table carries its own pointer...
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('link', { name: tOpenDay('todayLink') })).toHaveAttribute(
+      'href',
+      '/live-performance',
+    );
+    // ...so the notice above the table leaves its own today line out (said once).
+    expect(screen.getAllByRole('link', { name: tOpenDay('todayLink') })).toHaveLength(1);
+  });
+
+  it('today is not selectable in the date picker', async () => {
+    const counts = serve(() =>
+      listResponse({ openDay: { lastCompletedBusinessDate: '2026-05-14' } }),
+    );
+    const queryClient = createTestQueryClient();
+    const { user } = renderPage(queryClient, '?from=2026-05-10');
+    // The bound arrives with the first list response.
+    await waitFor(() => expect(counts.list).toBe(1));
+    await waitForIdle(queryClient);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: format(new Date(2026, 4, 10), 'd MMM yyyy', { locale: tr }),
+      }),
+    );
+
+    const dayButton = (day: number): HTMLElement =>
+      screen.getByRole('button', { name: format(new Date(2026, 4, day), 'PPPP', { locale: tr }) });
+    expect(dayButton(15)).toBeDisabled();
+    expect(dayButton(14)).toBeEnabled();
+  });
+});
+
+describe('OrdersPageClient - refresh triggers', () => {
+  // 2026-07-08 12:00 Istanbul: mid-day, far from the day boundary, so neither
+  // the rollover timer nor a date change can land inside a test.
+  const MID_DAY = new Date('2026-07-08T09:00:00Z');
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(MID_DAY);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function advance(queryClient: QueryClient, ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+    await waitForIdle(queryClient);
+  }
+
+  async function waitForFirstLoad(counts: HandlerCounts, queryClient: QueryClient): Promise<void> {
+    await waitFor(() => {
+      expect(counts.list).toBe(1);
+      expect(counts.summary).toBe(1);
+    });
+    await waitForIdle(queryClient);
+  }
+
+  it('refetches the list when a completed-day order id is published on the bus', async () => {
+    const counts = serve(() => listResponse());
+    const queryClient = createTestQueryClient();
+    renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+    // Control: nothing refetches on its own.
+    await advance(queryClient, ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+    expect(counts.list).toBe(1);
+
+    act(() => publishCompletedDayOrder('order-from-yesterday'));
+    await advance(queryClient, ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
+
+    expect(counts.list).toBe(2);
+  });
+
+  it('refetches list and summary at the day boundary', async () => {
+    const businessDate = getBusinessDate(MID_DAY);
+    const dayEnd = getBusinessDayRangeOfDate(businessDate).end.getTime();
+    vi.setSystemTime(dayEnd - 3_000);
+    // The handler names the business date of the moment it runs, so the refetch
+    // after the boundary brings the next date and the rollover stops retrying.
+    const counts = serve(() => listResponse());
+    const queryClient = createTestQueryClient();
+    renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    await advance(queryClient, 3_000 + ROLLOVER_GRACE_MS + 500);
+
+    expect(counts.list).toBe(2);
+    expect(counts.summary).toBe(2);
+  });
+
+  it('polls the summary while finalizing', async () => {
+    const counts = serve(() => listResponse({ openDay: { finalizing: true } }));
+    const queryClient = createTestQueryClient();
+    renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    await advance(queryClient, POLL_STEP_MS);
+
+    expect(counts.list).toBe(2);
+    expect(counts.summary).toBeGreaterThanOrEqual(2);
+  });
+
+  it('refetches the summary once when finalizing turns false', async () => {
+    let listServedFalse = false;
+    const counts = serve(
+      (call) => {
+        const finalizing = call === 1;
+        if (!finalizing) listServedFalse = true;
+        return listResponse({ openDay: { finalizing } });
+      },
+      // The post-close figures exist only once the list has reported the close.
+      () => summaryResponse(listServedFalse ? POST_CLOSE_PROFIT : PRE_CLOSE_PROFIT),
+    );
+    const queryClient = createTestQueryClient();
+    renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    // The list poll reads finalizing: false.
+    await advance(queryClient, POLL_STEP_MS);
+    expect(listServedFalse).toBe(true);
+
+    // Let the KPI count-up tween settle on its final frame.
+    await advance(queryClient, COUNT_UP_DURATION_MS + 100);
+    await waitFor(() =>
+      expect(screen.getByText(formatCurrency(POST_CLOSE_PROFIT))).toBeInTheDocument(),
+    );
+
+    // Nothing polls any more.
+    const settled = { ...counts };
+    await advance(queryClient, POLL_STEP_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts).toEqual(settled);
+  });
+
+  it('the summary stops polling when the list poll cap is reached', async () => {
+    const counts = serve(() => listResponse({ openDay: { finalizing: true } }));
+    const queryClient = createTestQueryClient();
+    renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    // Control: the summary polls before the cap.
+    await advance(queryClient, POLL_STEP_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts.summary).toBeGreaterThanOrEqual(3);
+
+    // Jump past the cap without firing timers. The cap is read when each
+    // interval callback re-runs, so one more tick of each may still land.
+    vi.setSystemTime(Date.now() + FINALIZING_POLL_MAX_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    const atCap = { ...counts };
+
+    await advance(queryClient, POLL_STEP_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts).toEqual(atCap);
+  });
+});

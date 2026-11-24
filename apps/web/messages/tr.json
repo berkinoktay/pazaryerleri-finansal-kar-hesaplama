@@ -2225,7 +2225,17 @@
       "noOrders": {
         "title": "Henüz sipariş yok",
         "description": "Bağlı mağazadan ilk sipariş senkronlandığında burada görünecek."
-      }
+      },
+      "openDayOnly": "Biten günlere ait sipariş henüz yok"
+    },
+    "openDay": {
+      "finalizing": "Dünün siparişleri kesinleşiyor. Rakamlar birkaç dakika daha değişebilir.",
+      "matchesTitle": "{count, plural, one {Aramana uyan # sipariş bugüne ait} other {Aramana uyan # sipariş bugüne ait}}. Bugünün siparişleri gece yarısına kadar Canlı Performans sayfasında.",
+      "matchStored": "{orderNumber} numaralı siparişi Canlı Performans'ta aç",
+      "matchPending": "{orderNumber} numaralı sipariş Canlı Performans'ta bekliyor",
+      "matchCancelled": "{orderNumber} numaralı sipariş bugünün iptallerinde",
+      "todayNotice": "Bugünün siparişleri gün bitene kadar Canlı Performans sayfasında.",
+      "todayLink": "Canlı Performans'ı aç"
     },
     "excludedList": {
       "label": "Kâr hesabı dışı",

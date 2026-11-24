@@ -5,7 +5,7 @@ import {
   ORDERS_REALTIME_REFRESH_DEBOUNCE_MS,
   useOrdersRealtimeRefresh,
 } from '@/features/orders/hooks/use-orders-realtime-refresh';
-import { publishRecentOrder } from '@/lib/recent-orders-bus';
+import { publishCompletedDayOrder } from '@/lib/recent-orders-bus';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -22,7 +22,7 @@ describe('useOrdersRealtimeRefresh', () => {
 
     // The publish schedules the refetch — nothing fires synchronously.
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     expect(refresh).not.toHaveBeenCalled();
 
@@ -37,9 +37,9 @@ describe('useOrdersRealtimeRefresh', () => {
     renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     act(() => {
-      publishRecentOrder('o1');
-      publishRecentOrder('o2');
-      publishRecentOrder('o3');
+      publishCompletedDayOrder('o1');
+      publishCompletedDayOrder('o2');
+      publishCompletedDayOrder('o3');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -53,7 +53,7 @@ describe('useOrdersRealtimeRefresh', () => {
     renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -61,7 +61,7 @@ describe('useOrdersRealtimeRefresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
 
     act(() => {
-      publishRecentOrder('o2');
+      publishCompletedDayOrder('o2');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -79,7 +79,7 @@ describe('useOrdersRealtimeRefresh', () => {
     rerender({ cb: second });
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     act(() => {
       vi.advanceTimersByTime(ORDERS_REALTIME_REFRESH_DEBOUNCE_MS);
@@ -94,7 +94,7 @@ describe('useOrdersRealtimeRefresh', () => {
     const { unmount } = renderHook(() => useOrdersRealtimeRefresh(refresh));
 
     act(() => {
-      publishRecentOrder('o1');
+      publishCompletedDayOrder('o1');
     });
     unmount();
     act(() => {

@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import * as React from 'react';
 
 import { DateRangePicker } from '@/components/patterns/date-range-picker';
@@ -10,18 +11,25 @@ import { PageSyncFooterTrace } from '@/features/sync/components/page-sync-footer
 import { StaleDataBanner } from '@/features/sync/components/stale-data-banner';
 import { useStoreSyncs } from '@/features/sync/hooks/use-store-syncs';
 import { toSyncCenterLogs } from '@/features/sync/lib/derive-sync-snapshot';
-import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
+import {
+  businessDateToPickerDate,
+  dateRangeFromParams,
+  dateRangeToParams,
+} from '@/lib/date-range-params';
+import { useBusinessDayRollover } from '@/lib/use-business-day-rollover';
 
+import { useFinalizingPoll } from '../hooks/use-finalizing-poll';
 import { useOrders } from '../hooks/use-orders';
 import { useOrdersFilters } from '../hooks/use-orders-filters';
 import { useOrdersRealtimeRefresh } from '../hooks/use-orders-realtime-refresh';
 import { useOrdersSummary } from '../hooks/use-orders-summary';
-import { RecentOrderIdsProvider } from '../hooks/use-recent-order-ids';
 import { useRefreshOrders } from '../hooks/use-refresh-orders';
+import { orderKeys } from '../query-keys';
 
 import { OrderDetailSheet, type OrderDetailSelection } from './order-detail-sheet';
 import { OrdersEmptyState } from './orders-empty-state';
 import { OrdersKpiStrip } from './orders-kpi-strip';
+import { OrdersOpenDayNotice } from './orders-open-day-notice';
 import { OrdersTable } from './orders-table';
 
 interface OrdersPageClientProps {
@@ -46,6 +54,12 @@ interface OrdersPageClientProps {
  * onFlowsSettled). The summary is omitted only on a summary-query error with NO
  * previously-cached data — a stale-but-present summary keeps rendering; the
  * failure still surfaces via the global QueryCache toast.
+ *
+ * The list shows completed business days only; the server says which day is
+ * open in the list response's `openDay`. The page never decides visibility with
+ * the client clock: it uses the clock only to schedule a refetch at the day
+ * boundary, and while a completed day is still being finalised it polls (one
+ * shared decision and cap for the list and the KPI summary).
  */
 export function OrdersPageClient({
   orgId,
@@ -59,6 +73,9 @@ export function OrdersPageClient({
 
   const noStoreSelected = orgId === null || storeId === null;
 
+  // One poll decision for both queries: the list records what each response
+  // says about `finalizing`, the summary follows it and stops at the same cap.
+  const poll = useFinalizingPoll();
   const ordersQuery = useOrders(
     noStoreSelected
       ? null
@@ -76,6 +93,7 @@ export function OrdersPageClient({
           page: filters.page,
           perPage: filters.perPage,
         },
+    { pollInterval: poll.fromList },
   );
   const summaryQuery = useOrdersSummary(
     noStoreSelected
@@ -91,17 +109,43 @@ export function OrdersPageClient({
           from: filters.from.length > 0 ? filters.from : undefined,
           to: filters.to.length > 0 ? filters.to : undefined,
         },
+    { pollInterval: poll.forSummary },
   );
   const { activeSyncs, recentSyncs } = useStoreSyncs(storeId);
   const refresh = useRefreshOrders(orgId, storeId);
+  const queryClient = useQueryClient();
+  const openDay = ordersQuery.data?.openDay;
+  const finalizing = openDay?.finalizing;
 
-  // Realtime new-order inserts (#467): when the live notifier announces a new
-  // order over the recent-orders bus, refetch the list + KPI so the new row
-  // actually appears (and its row highlight paints against a fetched row rather
-  // than arming for nothing). Reuses the page's own refresh — the SAME
-  // invalidation the header control runs on onFlowsSettled — and coalesces a
-  // burst of ids into one refetch.
+  // Completed-day order inserts over Realtime (a midnight buffer graduation, a
+  // late arrival): the live notifier publishes their ids on the recent-orders
+  // bus, so refetch the list + KPI to bring them in. Today's inserts are not
+  // published; the list hides them until the day ends. Reuses the page's own
+  // refresh (the SAME invalidation the header control runs on onFlowsSettled)
+  // and coalesces a burst of ids into one refetch.
   useOrdersRealtimeRefresh(() => refresh.mutate());
+
+  // At the end of the open business day its orders join the list: refetch both
+  // queries, and keep asking until the server's open date moves on.
+  useBusinessDayRollover(openDay?.businessDate, () => refresh.mutate());
+
+  // The trailing summary refetch. When the list first reports that finalising
+  // is over, the re-render cancels the summary's pending poll, so whatever was
+  // finalised since its previous poll would never reach the KPI strip. It fires
+  // on the last KNOWN state going true -> false: an undefined in between (a
+  // filter, sort or page change swapping the list query) keeps the last known
+  // state, so finalising that ends during the swap still refetches; a first load
+  // (nothing known -> false) does not. The list was just fetched, so only the
+  // summary is invalidated.
+  const lastKnownFinalizingRef = React.useRef<boolean | undefined>(finalizing);
+  React.useEffect(() => {
+    if (finalizing === undefined) return;
+    const previous = lastKnownFinalizingRef.current;
+    lastKnownFinalizingRef.current = finalizing;
+    if (previous !== true || finalizing !== false) return;
+    if (orgId === null || storeId === null) return;
+    void queryClient.invalidateQueries({ queryKey: orderKeys.summaries(orgId, storeId) });
+  }, [finalizing, orgId, storeId, queryClient]);
 
   if (noStoreSelected) {
     return (
@@ -147,23 +191,32 @@ export function OrdersPageClient({
   // orderDate range as a page-scope filter — it recomputes the summary + list,
   // so it lives in the header's `filters` slot (left of the action cluster),
   // bound to the same nuqs from/to state via the shared conversion helpers.
+  // Days after the last completed business day cannot be picked; until the
+  // first response names that day the server's clamp alone applies.
   const headerFilters = (
     <DateRangePicker
       value={dateRangeFromParams(filters.from, filters.to)}
       onChange={(next) => setFilters(dateRangeToParams(next))}
+      disabledAfter={businessDateToPickerDate(openDay?.lastCompletedBusinessDate ?? '')}
     />
   );
 
   // The genuinely-empty store (zero rows, no filter active) shows a welcoming
   // "no orders yet" body INSIDE the table chrome rather than a full-page
   // takeover — the table keeps its toolbar + headers + pagination so the page
-  // shape stays stable. With a filter active this is left undefined so the
+  // shape stays stable. A store whose only orders are today's gets a pointer to
+  // live performance instead. With a filter active this is left undefined so the
   // DataTable's "clear filters" no-results affordance surfaces instead.
   const ordersEmptyBody =
-    !hasAnyFilter && noOrdersAtAll ? <OrdersEmptyState variant="no-orders" embedded /> : undefined;
+    !hasAnyFilter && noOrdersAtAll ? (
+      <OrdersEmptyState
+        variant={(openDay?.todayOrderCount ?? 0) > 0 ? 'open-day-only' : 'no-orders'}
+        embedded
+      />
+    ) : undefined;
 
   return (
-    <RecentOrderIdsProvider>
+    <>
       <div className="gap-lg flex flex-col">
         <PageHeader
           variant="framed"
@@ -182,6 +235,9 @@ export function OrdersPageClient({
         />
         {/* Aged-data warning strip (in content flow, between header and table). */}
         <StaleDataBanner pageKey="orders" />
+        {/* The open (today's) day the list leaves out: finalising note, today's
+            pointer to live performance, today's search matches. */}
+        <OrdersOpenDayNotice openDay={openDay} hideTodayNotice={ordersEmptyBody !== undefined} />
         <OrdersTable
           rows={rows}
           loading={ordersQuery.isLoading}
@@ -246,6 +302,6 @@ export function OrdersPageClient({
         logs={syncCenterLogs}
         triggers={[]}
       />
-    </RecentOrderIdsProvider>
+    </>
   );
 }
