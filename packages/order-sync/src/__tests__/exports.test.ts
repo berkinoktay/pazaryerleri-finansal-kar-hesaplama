@@ -10,15 +10,19 @@ describe('@pazarsync/order-sync — public API surface', () => {
     expect(orderSync.upsertOrderWithSnapshot.constructor.name).toBe('AsyncFunction');
   });
 
-  it('exposes exactly the intake + write + cost-window helpers (public API guard)', () => {
-    // The package keeps a small runtime surface of four symbols: the order writer
+  it('exposes exactly the intake + write + cost-window + day-close helpers (public API guard)', () => {
+    // The package keeps a small runtime surface of five symbols: the order writer
     // (upsertOrderWithSnapshot), the shared intake routing (intakeOrder), the
-    // cost-window criterion both exclusion writers ask (hadCostWithinOrderDay),
-    // and the operator backfill that stamps existing orders by the same criterion
-    // (stampCostWindowExclusions). OrderIntakeOutcome is a type-only export and is
-    // invisible at runtime. This test fails if a private helper gets exported by accident.
+    // cost-window criterion of stored orders (hadCostWithinOrderDay; the live
+    // intake and buffer writers read it from their day-end gate result instead),
+    // the operator backfill that stamps existing orders by the same criterion
+    // (stampCostWindowExclusions), and the day-close finaliser of one order
+    // (finalizeOrderSellerInputs). OrderIntakeOutcome and FinalizeOutcome are type-only
+    // exports and are invisible at runtime. This test fails if a private helper gets
+    // exported by accident.
     const keys = Object.keys(orderSync).sort();
     expect(keys).toEqual([
+      'finalizeOrderSellerInputs',
       'hadCostWithinOrderDay',
       'intakeOrder',
       'stampCostWindowExclusions',

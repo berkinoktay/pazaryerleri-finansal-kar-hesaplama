@@ -25,6 +25,9 @@ const TENANT_TABLES = [
   'cost_profiles',
   'cost_profile_versions',
   'product_variant_cost_profiles',
+  // Seller-input history logs (same-day edit window; trigger-written, read-only)
+  'cost_link_removals',
+  'variant_desi_changes',
   // Saved commission tariffs (store-scoped campaign price-band tariffs)
   'commission_tariffs',
   'commission_tariff_periods',

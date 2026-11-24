@@ -20,7 +20,7 @@ function mappedFor(platformOrderId: string, barcode: string): Prisma.InputJsonVa
   return {
     platformOrderId,
     platformOrderNumber: `ord-${platformOrderId}`,
-    orderDate: new Date(Date.now() - ONE_DAY_MS).toISOString(),
+    orderDate: new Date(Date.now() - 2 * ONE_DAY_MS).toISOString(),
     status: 'PROCESSING',
     saleGross: '100.00',
     saleVat: '15.25',
@@ -62,7 +62,9 @@ describe('Tenant isolation — worker buffer flush graduates under the correct o
     const orgB = await createOrganization();
     const storeB = await createStore(orgB.id);
 
-    const pastDay = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    // Two days back: the flush graduates a past day only once it is settled
+    // (about two minutes after midnight), so yesterday could flake right after 00:00.
+    const pastDay = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     await createBufferEntry(orgA.id, storeA.id, {
       orderDate: pastDay,
       platformOrderId: 'iso-a',

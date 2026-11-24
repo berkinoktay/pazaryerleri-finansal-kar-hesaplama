@@ -8,8 +8,12 @@ import {
 } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder } from '@pazarsync/order-sync';
-import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
+import { drainProfitRecomputeQueue, resetSettledCutoffMemo } from '@pazarsync/profit';
+import {
+  getBusinessDateAnchor,
+  getBusinessDayRange,
+  SELLER_INPUT_SETTLE_MS,
+} from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
@@ -20,6 +24,7 @@ import {
   createStore,
 } from '../../helpers/factories';
 import { ensureFeeDefinitions } from '../../helpers/seed-fee-definitions';
+import { clearSellerInputHistory } from '../../helpers/seller-input-history';
 
 // Narrow a buffer row's mappedOrder/rawPayload JSONB so tests can read fields
 // without a type assertion (repo rule: no `as`).
@@ -673,6 +678,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -697,6 +704,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const store = await createStore(org.id);
     await seedVariant(org.id, store.id, BARCODE, false);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -718,6 +727,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     // seedVariant(..., true) attaches the cost at now(), after the order's day.
     await seedVariant(org.id, store.id, BARCODE, true);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -763,6 +774,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
 
     const outcome = await intakeOrder({
       storeId: store.id,
@@ -809,6 +822,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     const orderDate = new Date(Date.now() - PAST_DAY_MS);
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, orderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     await markDigital(store.id, BARCODE);
 
     const outcome = await intakeOrder({
@@ -1666,6 +1681,8 @@ describe('intakeOrder — shared intake routing (Slice 0)', () => {
     // Cost attached in time for the past day, but the product has no desi.
     await seedVariantWithTimelyCost(org.id, store.id, BARCODE, pastOrderDate);
     await clearDesi(store.id, BARCODE);
+    // Fixture setup, not history: the variant had no desi on the order's day.
+    await clearSellerInputHistory(org.id);
     const platformOrderId = 'graduate-past-desiless';
 
     // 1. Same-day intake: costed but desiless -> buffered (PENDING).
@@ -1836,5 +1853,118 @@ describe('intakeOrder — package-pending skip (Awaiting, no package id yet)', (
     const rows = await prisma.livePerformanceBuffer.findMany({ where: { storeId: store.id } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.platformOrderId).toBe('700000123');
+  });
+});
+
+// Same-day edit window (plan PR-1, P1-16): a past-day order whose day is not settled
+// yet by the database clock (resolveSettledCutoff) is never excluded or made final at
+// intake; the day-close pass decides it. Every intake here gets an injected clock.
+describe('intakeOrder: a past-day order before its day is settled', () => {
+  const HOUR_MS = 60 * 60 * 1000;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+    resetSettledCutoffMemo();
+  });
+
+  /** Today's business-day start: the end T of yesterday's orders. */
+  function todayStart(): Date {
+    return getBusinessDayRange(new Date()).start;
+  }
+
+  it('a past-day order arriving 30 s after midnight with no cost and no buffer row is stored non-final and unexcluded', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const dayEnd = todayStart();
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'awaiting-1',
+        orderDate: new Date(dayEnd.getTime() - HOUR_MS),
+      }),
+      dbNow: new Date(dayEnd.getTime() + 30_000),
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'awaiting_day_close' });
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('awaiting-1');
+    expect(order.profitExcludedAt).toBeNull();
+    expect(order.profitExclusionReason).toBeNull();
+    expect(order.sellerInputsFinalAt).toBeNull();
+  });
+
+  it('a re-delivered buffered past-day order before the cutoff only refreshes its buffer row', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const dayEnd = todayStart();
+    const orderDate = new Date(dayEnd.getTime() - HOUR_MS);
+    const newer = new Date(orderDate.getTime() + 10 * 60 * 1000);
+    // The order waited in the buffer during its day.
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'awaiting-buffered',
+      orderDate: getBusinessDateAnchor(orderDate),
+      status: 'PENDING',
+      mappedOrder: {
+        platformOrderId: 'awaiting-buffered',
+        lastModifiedDate: orderDate.toISOString(),
+        status: 'PROCESSING',
+        lines: [],
+      },
+    });
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'awaiting-buffered',
+        orderDate,
+        lastModifiedDate: newer,
+        status: 'SHIPPED',
+      }),
+      dbNow: new Date(dayEnd.getTime() + 30_000),
+    });
+
+    expect(outcome).toEqual({ kind: 'buffered_deduped', refreshed: true });
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    const entry = await prisma.livePerformanceBuffer.findFirstOrThrow({
+      where: { storeId: store.id },
+    });
+    expect(entry.status).toBe('PENDING');
+    const mapped = readBufferJson(entry.mappedOrder);
+    expect(mapped['status']).toBe('SHIPPED');
+    expect(mapped['lastModifiedDate']).toBe(newer.toISOString());
+  });
+
+  it('a late arrival of a settled day is created final', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedVariant(org.id, store.id, BARCODE, false);
+    const dayEnd = todayStart();
+    const dbNow = new Date(dayEnd.getTime() + SELLER_INPUT_SETTLE_MS);
+
+    const outcome = await intakeOrder({
+      storeId: store.id,
+      organizationId: org.id,
+      mapped: buildMapped({
+        platformOrderId: 'settled-late',
+        orderDate: new Date(dayEnd.getTime() - HOUR_MS),
+      }),
+      dbNow,
+    });
+
+    expect(outcome).toEqual({ kind: 'persisted', reason: 'late_uncosted_arrival' });
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExclusionReason).toBe('LATE_UNCOSTED_ARRIVAL');
+    expect(order.sellerInputsFinalAt?.toISOString()).toBe(dbNow.toISOString());
   });
 });

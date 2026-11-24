@@ -9,6 +9,7 @@
     "src/**/*",
     "scripts/enqueue-profit-recompute.ts",
     "scripts/drain-profit-recompute.ts",
+    "scripts/enqueue-non-final-orders.ts",
     "vitest.config.ts",
     "vitest.unit.config.ts"
   ]

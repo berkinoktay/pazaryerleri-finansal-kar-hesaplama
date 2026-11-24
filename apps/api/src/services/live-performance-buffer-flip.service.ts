@@ -178,8 +178,8 @@ export async function flipBufferForVariants(
   const result = await tx.livePerformanceBuffer.updateMany({
     // Same-day guard (cost-window rule): flip only rows whose order day has not
     // ended. A past-day row stays PENDING for the day-end flush to graduate (and
-    // exclude unless its cost was timely and its desi present); a late entry must
-    // not promote it. organizationId and storeId are defense in depth: the
+    // exclude unless it had a cost and a desi in force at its day end); a late entry
+    // must not promote it. organizationId and storeId are defense in depth: the
     // candidate ids already come from a tenant-filtered query, but every buffer
     // write pins the tenant (CLAUDE.md).
     where: {

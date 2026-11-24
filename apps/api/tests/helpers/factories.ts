@@ -144,6 +144,9 @@ export interface CreateOrderOverrides {
   promotedFromBufferAt?: Date | null;
   // Export (cross-border) sale flag; Trendyol micro export orders.
   isExportSale?: boolean;
+  // Seller-input marker: null (default) = the order's cost links and desi still
+  // follow its business day; a date = the day-close pass made them final.
+  sellerInputsFinalAt?: Date | null;
 }
 
 export async function createOrder(
@@ -166,6 +169,7 @@ export async function createOrder(
       promotionDisplays: overrides.promotionDisplays ?? undefined,
       promotedFromBufferAt: overrides.promotedFromBufferAt ?? null,
       isExportSale: overrides.isExportSale ?? false,
+      sellerInputsFinalAt: overrides.sellerInputsFinalAt ?? null,
     },
   });
 }

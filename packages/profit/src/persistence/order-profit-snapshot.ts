@@ -1,31 +1,43 @@
 // Order profit snapshot (plan PR-2, decisions 3 and 4): the undated product and
 // seller inputs an order is priced with, copied onto the order and its items the
-// first time the order enters the profit computation. Afterwards only missing parts
-// are filled: an uncaptured order or item, an item whose variant was matched later,
-// a carrier that was not recognised, an empty cost list, commission inputs none of
-// which gives a rate. The desi is not filled: a captured desi (0 included) is known,
-// and an item captured without one stays so. A known value is never overwritten with
-// a live one. The events that change a filled value are the order's own cargo name
-// changing (the carrier is recognised again) and an item getting a variant that
-// differs from the captured one (the item is captured again, its cost list included).
-// A variant that drops to null (deleted from the catalogue) changes nothing. The
+// first time the order enters the profit computation. Afterwards only missing
+// product parts are filled: an uncaptured order or item, an item whose variant was
+// matched later, a carrier that was not recognised, commission inputs none of which
+// gives a rate. A known product value is never overwritten with a live one. The
+// events that change a filled product value are the order's own cargo name changing
+// (the carrier is recognised again) and an item getting a variant that differs from
+// the captured one (the item is captured again, its seller inputs included). A
+// variant that drops to null (deleted from the catalogue) changes nothing. The
 // order's capture time never moves after the first capture; an item's moves only
-// with a fresh capture, never with a gap fill.
+// with a fresh capture, never with a gap fill or a re-derive.
 //
-// A captured cost list is frozen at capture (plan PR-3b, Berkin 2026-11-23: "frozen
-// the moment it enters profit"): a filled list never changes afterwards, even while
-// the order's business day is still open, so a same-day attach, detach, archive or
-// restore never reaches it. A capture and the fill of an empty cost list pin versions
-// by the shared cost rule (`chooseOrderCostVersion`): only links in force at the end
-// of the order's business day count, each priced by its version at the order time, so
-// a cost linked (or restored) after that day never fills an empty list.
+// The seller inputs (cost list and desi) follow the order's business day (same-day
+// edit window plan PR-1). Owner rule (Berkin 2026-11-23): an order's cost and desi
+// are the values in force at the end of its Istanbul business day; a change during
+// the day reaches all of that day's orders, and at 00:00 the seller inputs become
+// final. They are always read as they stood at that day end, rebuilt by the one
+// day-end loader (`loadSellerInputsAt`) from the live rows and the seller-input
+// history logs, so a link detached or a desi changed after the day end never reaches
+// the order. A capture pins cost versions by the shared cost rule
+// (`chooseOrderCostVersion`): only links in force at the day end count, each priced
+// by its version in force then.
+//
+// While the order's marker `seller_inputs_final_at` is NULL, every call re-derives
+// each captured item's cost list and desi from that day-end state and writes only
+// what differs, so a same-day amount edit, attach, detach, archive, restore or desi
+// change reaches the order. Once the day-close pass has set the marker the order is
+// final: a filled cost list and a captured desi (0 or none included) are frozen, and
+// only an empty cost list is still filled. The marker is read from the order row
+// loaded here; the recompute calls this after taking the order's parcel advisory
+// lock (`recomputeParcelProfit`), so it reads the marker under that lock. No clock is
+// read for any of this: the day end comes from the order date.
 //
 // Dated shared values (tariff versions, fee definitions, micro-export tiers) are not
 // copied; the engine keeps reading them by the order date.
 
 import type { Decimal } from 'decimal.js';
 import type { Prisma } from '@pazarsync/db';
-import { Platform, SnapshotDesiSource } from '@pazarsync/db/enums';
+import { Platform } from '@pazarsync/db/enums';
 import { resolveProfitSettings } from '@pazarsync/utils';
 
 import { compareText } from '../core/compare-text';
@@ -42,10 +54,10 @@ import {
   reportedProviderName,
   resolveOrderCarrier,
 } from './load-trendyol-parcel';
+import { loadSellerInputsAt, resolveDesiAtDayEnd, type SellerInputsAt } from './seller-inputs-at';
 import {
   dec,
   loadCommissionRulesForCategories,
-  loadIdentifiedCostProfilesByVariant,
   type IdentifiedItemCostProfileInput,
 } from './trendyol-reference-loaders';
 
@@ -76,12 +88,14 @@ type LiveVariant = NonNullable<SnapshotOrderItem['productVariant']>;
 
 /**
  * Captures the order's product/seller inputs once; afterwards fills only missing
- * parts (an empty cost list among them). A filled cost list is frozen at capture.
- * Never overwrites a known value with a live one. Writes
- * nothing and returns `{ orderWritten: false, itemsWritten: 0 }` when the order is
- * not this organization's, or its store is not a Trendyol store. Query count does
- * not depend on the item count; writes are at most one order update and one update
- * per written item.
+ * product parts and, while the order's seller inputs are not final, re-derives each
+ * captured item's cost list and desi from the state at the order's business-day end
+ * (written only when it differs). A final order keeps its filled cost list and its
+ * desi; only an empty cost list is filled. Never overwrites a known product value
+ * with a live one. Writes nothing and returns `{ orderWritten: false, itemsWritten:
+ * 0 }` when the order is not this organization's, or its store is not a Trendyol
+ * store. Query count does not depend on the item count; writes are at most one order
+ * update and one update per written item.
  */
 export async function captureOrderProfitSnapshot(
   tx: Prisma.TransactionClient,
@@ -112,6 +126,8 @@ export async function captureOrderProfitSnapshot(
     organizationId,
     orderDate: order.orderDate,
     items: order.items,
+    // Set by the day-close pass: the order's seller inputs no longer follow its day.
+    sellerInputsFinal: order.sellerInputsFinalAt !== null,
     now,
   });
 
@@ -202,12 +218,37 @@ function isEmptyCostList(ids: readonly string[] | null): boolean {
 
 /**
  * True when a captured item's cost list is computed again from its variant's cost
- * links: only while it is empty (a cost in force at the order's day end fills it). A
- * filled list is frozen at capture, whether the order's business day is still open
- * or not.
+ * links at the order's day end: on every call while the order's seller inputs are
+ * not final (the list follows the day), and on a final order only while it is empty
+ * (a cost in force at the day end fills it; a filled list is frozen).
  */
-function needsCostListRefresh(item: SnapshotOrderItem): boolean {
-  return isEmptyCostList(item.snapshotCostProfileVersionIds);
+function needsCostListRefresh(item: SnapshotOrderItem, sellerInputsFinal: boolean): boolean {
+  return !sellerInputsFinal || isEmptyCostList(item.snapshotCostProfileVersionIds);
+}
+
+/** True when the stored cost list holds exactly the given sorted ids, in any order; a null list is empty. */
+function sameCostList(stored: readonly string[] | null, pinned: readonly string[]): boolean {
+  const storedSorted = [...(stored ?? [])].sort(compareText);
+  return (
+    storedSorted.length === pinned.length && storedSorted.every((id, index) => id === pinned[index])
+  );
+}
+
+/** True when two desi values are equal by value; two empty values are equal. */
+function sameDesi(stored: Prisma.Decimal | null, value: Prisma.Decimal | null): boolean {
+  if (stored === null || value === null) {
+    return stored === value;
+  }
+  return stored.equals(value);
+}
+
+/** The day-end seller inputs a capture or fill reads, and whether the order is final. */
+interface SellerInputReference {
+  readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
+  /** The order's business-day end: the cost rule's decision time. */
+  readonly at: Date;
+  /** True once the day-close pass has set the order's seller-input marker. */
+  readonly sellerInputsFinal: boolean;
 }
 
 /** True when a rate input gives a rate: Trendyol's null or zero rate means "not sent". */
@@ -237,8 +278,9 @@ function commissionCategoryId(item: SnapshotOrderItem): bigint | null {
 }
 
 /**
- * Captures or fills every item that needs it. Commission rules and cost profiles
- * are read once for all such items; each written item gets one update.
+ * Captures, fills or re-derives every item that needs it. Commission rules and the
+ * day-end seller inputs are read once for all such items; each written item gets one
+ * update, and an item whose values are unchanged gets none.
  */
 async function captureItems(
   tx: Prisma.TransactionClient,
@@ -246,17 +288,22 @@ async function captureItems(
     readonly organizationId: string;
     readonly orderDate: Date;
     readonly items: readonly SnapshotOrderItem[];
+    readonly sellerInputsFinal: boolean;
     readonly now: Date;
   },
 ): Promise<number> {
-  const { organizationId, orderDate, items, now } = params;
+  const { organizationId, orderDate, items, sellerInputsFinal, now } = params;
   // The cost rule's decision time: the order's business-day end, never the clock.
   const at = costDecisionTime(orderDate);
   const captureList = items.filter(needsFullCapture);
   // Captured items whose variant is still in the catalogue: the only ones a gap fill
-  // reads live values for.
+  // or a re-derive reads values for.
   const fillList = items.filter((item) => !needsFullCapture(item) && item.productVariant !== null);
-  const costFillList = fillList.filter(needsCostListRefresh);
+  // Not final: every such item's seller inputs are read again. Final: only an empty
+  // cost list is.
+  const sellerInputFillList = fillList.filter((item) =>
+    needsCostListRefresh(item, sellerInputsFinal),
+  );
   const commissionFillList = fillList.filter(lacksCommissionRate);
 
   // Platform-global reference data: the category ids are the only scope.
@@ -266,22 +313,25 @@ async function captureItems(
       ...commissionFillList.map(commissionCategoryId),
     ].filter((categoryId): categoryId is bigint => categoryId !== null),
   });
-  const costsByVariant = await loadIdentifiedCostProfilesByVariant(tx, {
+  // The cost links and the desi in force at the order's day end (same-day edit window,
+  // plan PR-1): the one day-end loader every seller-input gate reads.
+  const inputsByVariant = await loadSellerInputsAt(tx, {
     organizationId,
-    variantIds: [...captureList, ...costFillList]
+    variantIds: [...captureList, ...sellerInputFillList]
       .map((item) => item.productVariantId)
       .filter((variantId): variantId is string => variantId !== null),
+    at,
   });
 
   const writes: { readonly id: string; readonly data: Prisma.OrderItemUncheckedUpdateInput }[] = [];
   for (const item of captureList) {
     writes.push({
       id: item.id,
-      data: itemCaptureData(item, { rules, costsByVariant, orderDate, at, now }),
+      data: itemCaptureData(item, { rules, inputsByVariant, at, now }),
     });
   }
   for (const item of fillList) {
-    const data = itemFillData(item, { rules, costsByVariant, orderDate, at });
+    const data = itemFillData(item, { rules, inputsByVariant, at, sellerInputsFinal });
     if (data !== null) {
       writes.push({ id: item.id, data });
     }
@@ -290,6 +340,26 @@ async function captureItems(
   // Item rows are updated in ascending id order: one fixed global order, so another
   // writer of these order_items rows that takes them in id order too can never lock
   // them in the opposite order (no deadlock between the two transactions).
+  //
+  // Lock order (same-day edit window, notes D11). No writer of seller inputs ever locks
+  // or writes order_items; its enqueue only reads them (a plain EXISTS):
+  //   - cost PATCH / archive / restore: cost_profiles row -> version insert -> buffer
+  //     rows (restore only) -> queue rows;
+  //   - attach / detach / replace: link rows (+ removal log insert) -> buffer rows ->
+  //     queue rows;
+  //   - desi write: product_variants row (+ desi change log insert) -> buffer rows ->
+  //     queue rows;
+  //   - catalog sync: product -> variants (+ desi change log insert) -> queue rows.
+  // The order side:
+  //   - recompute and day-close finaliser: order advisory lock -> orders row ->
+  //     order_items in ascending id (here) -> statements -> queue row;
+  //   - order intake update: orders row -> order_items -> product_variants (stock) ->
+  //     queue row;
+  //   - buffer graduation: buffer row -> orders insert -> order_items -> queue row.
+  // Global order: orders / order_items before product_variants before buffer rows
+  // before queue rows. Nobody takes a variant, link or profile lock and then an orders
+  // or order_items lock, and the set-based enqueue takes queue rows in order id order.
+  // Guarded by apps/api/tests/integration/services/seller-input-lock-order.test.ts.
   writes.sort((a, b) => compareText(a.id, b.id));
   for (const write of writes) {
     await tx.orderItem.update({ where: { id: write.id, organizationId }, data: write.data });
@@ -298,21 +368,14 @@ async function captureItems(
 }
 
 /**
- * The missing parts of a captured item, filled from its live variant and product, as
- * one update, or null when nothing changes: the cost list (see
- * `needsCostListRefresh`) and commission inputs none of which gives a rate. Its
- * capture time stays. The desi is never filled: a captured desi (0 included) is a
- * known value, and an item captured without one belongs to an order the desi gate
- * keeps out of profit.
+ * The parts of a captured item to write, from its variant's state at the order's day
+ * end and its live product, as one update, or null when nothing changes: the cost
+ * list and the desi (see `costListFillData`, `desiFillData`) and commission inputs
+ * none of which gives a rate. Its capture time stays.
  */
 function itemFillData(
   item: SnapshotOrderItem,
-  reference: {
-    readonly rules: TrendyolCommissionRules;
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
-    readonly at: Date;
-  },
+  reference: SellerInputReference & { readonly rules: TrendyolCommissionRules },
 ): Prisma.OrderItemUncheckedUpdateInput | null {
   const variant = item.productVariant;
   if (variant === null) {
@@ -320,33 +383,61 @@ function itemFillData(
   }
   const data: Prisma.OrderItemUncheckedUpdateInput = {
     ...costListFillData(item, variant.id, reference),
+    ...desiFillData(item, variant.id, reference),
     ...commissionFillData(item, variant, reference.rules),
   };
   return Object.keys(data).length === 0 ? null : data;
 }
 
 /**
- * The fill of an empty cost list: the versions the cost rule pins at `at`. Nothing
- * when the list is filled (frozen at capture) or no link of the variant is in force
- * at `at`.
+ * The cost list re-derived at the order's day end: the versions the cost rule pins at
+ * `at`, from the variant's links at `at`, when they differ from the stored list (an
+ * emptied list included). On a final order only an empty list is computed again, so
+ * a filled one never changes and an empty one is only ever filled. Nothing when the
+ * variant is not among the loaded ones.
  */
 function costListFillData(
   item: SnapshotOrderItem,
   variantId: string,
-  reference: {
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
-    readonly at: Date;
-  },
+  reference: SellerInputReference,
 ): Prisma.OrderItemUncheckedUpdateInput {
-  if (!needsCostListRefresh(item)) {
+  if (!needsCostListRefresh(item, reference.sellerInputsFinal)) {
     return {};
   }
-  const pinned = pinnedCostVersionIds(reference.costsByVariant.get(variantId), {
-    orderDate: reference.orderDate,
-    at: reference.at,
-  });
-  return pinned.length === 0 ? {} : { snapshotCostProfileVersionIds: pinned };
+  const inputs = reference.inputsByVariant.get(variantId);
+  if (inputs === undefined) {
+    return {};
+  }
+  const pinned = pinnedCostVersionIds(inputs.costProfiles, { at: reference.at });
+  return sameCostList(item.snapshotCostProfileVersionIds, pinned)
+    ? {}
+    : { snapshotCostProfileVersionIds: pinned };
+}
+
+/**
+ * The desi re-derived at the order's day end while the order's seller inputs are not
+ * final: the value and source `resolveDesiAtDayEnd` gives, when either differs from
+ * the stored pair (an emptied desi included). Nothing on a final order: its captured
+ * desi (0 included), or the lack of one, stays; such an order is kept out of profit by
+ * the desi gate. Nothing when the variant is not among the loaded ones.
+ */
+function desiFillData(
+  item: SnapshotOrderItem,
+  variantId: string,
+  reference: SellerInputReference,
+): Pick<Prisma.OrderItemUncheckedUpdateInput, 'snapshotUnitDesi' | 'snapshotDesiSource'> {
+  if (reference.sellerInputsFinal) {
+    return {};
+  }
+  const inputs = reference.inputsByVariant.get(variantId);
+  if (inputs === undefined) {
+    return {};
+  }
+  const { value, source } = resolveDesiAtDayEnd(inputs.desi);
+  if (item.snapshotDesiSource === source && sameDesi(item.snapshotUnitDesi, value)) {
+    return {};
+  }
+  return { snapshotUnitDesi: value, snapshotDesiSource: source };
 }
 
 /**
@@ -402,41 +493,37 @@ function ruleRates(
 }
 
 /**
- * The item's desi and where it came from, as in the engine: the seller's correction
- * wins over the synced value. With neither (Trendyol sent no desi and the seller
- * entered none) both columns stay empty. Any stored value counts, a stored 0
- * included (a seller desi is at least 1).
+ * The item's desi at the order's day end and where it came from, as in the engine:
+ * the seller's correction wins over the synced value (`resolveDesiAtDayEnd`). With
+ * neither (Trendyol sent no desi and the seller entered none by then) both columns
+ * stay empty. Any value counts, a 0 included (a seller desi is at least 1).
  */
 function desiCaptureData(
-  variant: LiveVariant,
+  inputs: SellerInputsAt | undefined,
 ): Pick<Prisma.OrderItemUncheckedUpdateInput, 'snapshotUnitDesi' | 'snapshotDesiSource'> {
-  const override = variant.dimensionalWeightOverride;
-  if (override !== null) {
-    return { snapshotUnitDesi: override, snapshotDesiSource: SnapshotDesiSource.OVERRIDE };
+  if (inputs === undefined) {
+    return { snapshotUnitDesi: null, snapshotDesiSource: null };
   }
-  const synced = variant.syncedDimensionalWeight;
-  if (synced !== null) {
-    return { snapshotUnitDesi: synced, snapshotDesiSource: SnapshotDesiSource.SYNCED };
-  }
-  return { snapshotUnitDesi: null, snapshotDesiSource: null };
+  const { value, source } = resolveDesiAtDayEnd(inputs.desi);
+  return { snapshotUnitDesi: value, snapshotDesiSource: source };
 }
 
 /**
- * Every item snapshot column, taken from the item's current variant, product,
- * commission rules and cost links. An item without a variant is captured with these
- * inputs empty and an empty cost list.
+ * Every item snapshot column, taken from the item's current variant, product and
+ * commission rules, and from the variant's cost links and desi at the order's day
+ * end. An item without a variant is captured with these inputs empty and an empty
+ * cost list.
  */
 function itemCaptureData(
   item: SnapshotOrderItem,
   reference: {
     readonly rules: TrendyolCommissionRules;
-    readonly costsByVariant: ReadonlyMap<string, readonly IdentifiedItemCostProfileInput[]>;
-    readonly orderDate: Date;
+    readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
     readonly at: Date;
     readonly now: Date;
   },
 ): Prisma.OrderItemUncheckedUpdateInput {
-  const { rules, costsByVariant, orderDate, at, now } = reference;
+  const { rules, inputsByVariant, at, now } = reference;
   const variant = item.productVariant;
   if (variant === null) {
     return {
@@ -456,34 +543,32 @@ function itemCaptureData(
 
   const { categoryId, brandId } = variant.product;
   const rates = ruleRates(rules, categoryId, brandId);
+  const inputs = inputsByVariant.get(variant.id);
   return {
     snapshotProductVariantId: item.productVariantId,
-    ...desiCaptureData(variant),
+    ...desiCaptureData(inputs),
     snapshotIsDigital: variant.isDigital,
     snapshotCategoryId: categoryId,
     snapshotBrandId: brandId,
     snapshotSyncedCommissionRatePct: variant.syncedCommissionRate,
     snapshotCategoryRatePct: rates.categoryRatePct,
     snapshotCategoryBrandRatePct: rates.categoryBrandRatePct,
-    snapshotCostProfileVersionIds: pinnedCostVersionIds(costsByVariant.get(variant.id), {
-      orderDate,
-      at,
-    }),
+    snapshotCostProfileVersionIds: pinnedCostVersionIds(inputs?.costProfiles, { at }),
     profitSnapshotAt: now,
   };
 }
 
 /**
  * The ids of the cost profile versions the item is priced with, by the shared cost
- * rule: per linked profile, the version `chooseOrderCostVersion` picks (the version
- * at the order time, else the one in force at `at`). A profile not in force at `at`
- * (linked after it, archived by it, or without versions) contributes nothing, as in
- * the engine's uncaptured-item path. Sorted ascending: the link query has no order,
- * and a stored list must not depend on it.
+ * rule: per linked profile, the version `chooseOrderCostVersion` picks (the one in
+ * force at `at`). A profile not in force at `at` (linked after it, archived by it, or
+ * without versions) contributes nothing, as in the engine's uncaptured-item path.
+ * Sorted ascending: the link query has no order, and a stored list must not depend
+ * on it.
  */
 function pinnedCostVersionIds(
   profiles: readonly IdentifiedItemCostProfileInput[] | undefined,
-  params: { readonly orderDate: Date; readonly at: Date },
+  params: { readonly at: Date },
 ): string[] {
   const ids: string[] = [];
   for (const profile of profiles ?? []) {

@@ -13,12 +13,75 @@
 //     tick and the webhook intake in
 //     packages/webhook-ingest/src/trendyol-webhook-intake.ts.
 
+import { Decimal } from 'decimal.js';
+
 import { prisma } from '@pazarsync/db';
-import type { Store } from '@pazarsync/db';
-import type { MappedProduct } from '@pazarsync/marketplace';
+import type { Prisma, Store } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import type { MappedProduct, MappedProductVariant } from '@pazarsync/marketplace';
+import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import { refreshProductAggregates } from './refresh-product-aggregates';
+
+/** A stored variant's synced desi, read before the batch overwrites it. */
+interface StoredSyncedDesi {
+  readonly id: string;
+  readonly syncedDimensionalWeight: Prisma.Decimal | null;
+}
+
+/**
+ * Reads the stored synced desi of this store's variants that the content names, keyed
+ * by platformVariantId. Runs right after the product upsert, whose row lock serialises
+ * two syncs of one content, so the values read are the ones the variant upserts below
+ * overwrite. Tenant scope: organization and store.
+ */
+async function readStoredSyncedDesi(
+  tx: Prisma.TransactionClient,
+  store: Store,
+  variants: readonly MappedProductVariant[],
+): Promise<Map<bigint, StoredSyncedDesi>> {
+  const rows = await tx.productVariant.findMany({
+    where: {
+      organizationId: store.organizationId,
+      storeId: store.id,
+      platformVariantId: { in: variants.map((variant) => variant.platformVariantId) },
+    },
+    select: { id: true, platformVariantId: true, syncedDimensionalWeight: true },
+  });
+  return new Map(
+    rows.map((row) => [
+      row.platformVariantId,
+      { id: row.id, syncedDimensionalWeight: row.syncedDimensionalWeight },
+    ]),
+  );
+}
+
+/**
+ * The ids of the pre-existing variants whose synced desi this content changes: the
+ * mapped desi is a value and it differs from the stored one (a Decimal comparison, so
+ * 2.00 equals a stored 2; a stored null that gets a value is a change). A null mapped
+ * desi is never a change, because the update keeps the stored synced desi then (owner
+ * rule B2, PR-0b). A variant the content creates is not counted: no captured order
+ * item can reference it yet.
+ */
+function changedSyncedDesiVariantIds(
+  variants: readonly MappedProductVariant[],
+  stored: ReadonlyMap<bigint, StoredSyncedDesi>,
+): string[] {
+  const changed = new Set<string>();
+  for (const variant of variants) {
+    const mapped = variant.syncedDimensionalWeight;
+    const before = stored.get(variant.platformVariantId);
+    if (mapped === null || before === undefined) continue;
+    const storedDesi = before.syncedDimensionalWeight;
+    if (storedDesi === null || !new Decimal(mapped).equals(storedDesi.toString())) {
+      changed.add(before.id);
+    }
+  }
+  return [...changed];
+}
 
 export async function upsertCatalogBatch(
   store: Store,
@@ -34,6 +97,11 @@ export async function upsertCatalogBatch(
   // in the page. The aggregate count of failures becomes a follow-up
   // observability concern; for now `[product-sync] content-upsert
   // failed` shows up in the ops logs with the contentId.
+  //
+  // A content transaction can stamp seller-input history (a synced desi change row,
+  // written by the variant trigger), so it runs with SELLER_INPUT_TX_OPTIONS: its short
+  // timeout keeps a write stamped before a business-day end from committing after that
+  // day is settled (same-day edit window, D6).
   for (const mapped of batch) {
     try {
       await prisma.$transaction(async (tx) => {
@@ -81,9 +149,14 @@ export async function upsertCatalogBatch(
           },
         });
 
-        // A changed synced commission rate or desi reaches only new orders and
-        // the catalog estimate: a stored order keeps the values captured at
-        // intake, so no stored order is queued for a recompute here.
+        // A changed synced commission rate reaches only new orders and the catalog
+        // estimate: a stored order keeps the rate captured at intake. A changed
+        // synced desi also reaches the stored orders whose seller inputs are not
+        // final yet (owner rule, Berkin 2026-11-23: an order's desi is the value in
+        // force at the end of its business day), so the variants it changed are
+        // queued below. The stored values are read before the upserts overwrite them.
+        const storedDesi = await readStoredSyncedDesi(tx, store, mapped.variants);
+
         for (const variant of mapped.variants) {
           await tx.productVariant.upsert({
             where: {
@@ -158,7 +231,19 @@ export async function upsertCatalogBatch(
         // product's in-scope variants (listed and not archived) and stay
         // consistent for the products-list sort + salePrice filter.
         await refreshProductAggregates(tx, store.id, [product.id]);
-      });
+
+        // Once per content, at the end of its transaction: the non-final orders of
+        // the variants whose synced desi this content changed (DESI_CHANGED). The
+        // enqueue is organization-scoped and the ids are this store's own variants.
+        const desiChangedVariantIds = changedSyncedDesiVariantIds(mapped.variants, storedDesi);
+        if (desiChangedVariantIds.length > 0) {
+          await enqueueProfitRecomputeForVariants(tx, {
+            organizationId: store.organizationId,
+            variantIds: desiChangedVariantIds,
+            reason: ProfitRecomputeReason.DESI_CHANGED,
+          });
+        }
+      }, SELLER_INPUT_TX_OPTIONS);
     } catch (err) {
       syncLog.error('content.upsert.failed', {
         ...(syncLogId !== null && { syncLogId }),

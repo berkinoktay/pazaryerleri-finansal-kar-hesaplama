@@ -306,6 +306,31 @@ CREATE POLICY product_variant_cost_profiles_org_member_read ON product_variant_c
   FOR SELECT TO authenticated
   USING (is_org_member(organization_id));
 
+-- ─── Seller-input history logs — read-only, mirror their parent tables ──
+-- cost_link_removals (one row per direct cost-link delete) and
+-- variant_desi_changes (one row per real desi change) are append-only logs
+-- written ONLY by the triggers in triggers.sql (trg_log_cost_link_removal,
+-- trg_log_variant_desi_change). The trigger functions run with the caller's
+-- privileges; the API and the worker write as the service role, which bypasses
+-- RLS, and `authenticated` has no write policy on either parent table, so it
+-- can never fire them. No INSERT/UPDATE/DELETE policy here: default-deny.
+-- Each SELECT policy mirrors its parent: cost links are org-scoped
+-- (is_org_member, like product_variant_cost_profiles), desi is store-scoped
+-- (can_access_store, like product_variants), so a MEMBER without the store
+-- grant reads no desi history of that store. Both helpers are SECURITY DEFINER
+-- STABLE functions (no 42P17 recursion through RLS-protected tables).
+ALTER TABLE cost_link_removals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS cost_link_removals_org_member_read ON cost_link_removals;
+CREATE POLICY cost_link_removals_org_member_read ON cost_link_removals
+  FOR SELECT TO authenticated
+  USING (is_org_member(organization_id));
+
+ALTER TABLE variant_desi_changes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS variant_desi_changes_org_member_read ON variant_desi_changes;
+CREATE POLICY variant_desi_changes_org_member_read ON variant_desi_changes
+  FOR SELECT TO authenticated
+  USING (can_access_store(store_id));
+
 -- marketplace_commission_rate: platform-scoped reference data, NOT tenant-private.
 -- Trendyol/Hepsiburada commission tariff is the same for every seller on the
 -- platform — segment-based overrides conceptually exist, but the marketplaces

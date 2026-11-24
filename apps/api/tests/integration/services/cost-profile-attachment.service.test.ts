@@ -546,7 +546,7 @@ describe('cost-profile-attachment service', () => {
   // ─── profit recompute queueing ────────────────────────────────────────────
 
   describe('profit recompute queueing', () => {
-    it('queues the orders of variants attached, detached or replaced', async () => {
+    it('queues the non-final orders of variants attached, detached or replaced, never a final one', async () => {
       const user = await createUserProfile();
       const org = await createOrganization();
       const store = await createStore(org.id);
@@ -554,28 +554,35 @@ describe('cost-profile-attachment service', () => {
       const profile = await seedProfile(org.id, { storeId: store.id });
       const variant = await seedVariant(org.id, store.id);
 
+      // Seller inputs still follow the order's day: every link change reaches it.
       const order = await createOrder(org.id, store.id);
       await createOrderItem(order.id, org.id, { productVariantId: variant.id });
+      // Same variant, but the day-close pass made the seller inputs final: never queued.
+      const finalOrder = await createOrder(org.id, store.id, { sellerInputsFinalAt: new Date() });
+      await createOrderItem(finalOrder.id, org.id, { productVariantId: variant.id });
 
-      const requestReason = async (): Promise<ProfitRecomputeReason | undefined> =>
-        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId: order.id } }))?.reason;
+      const requestReason = async (orderId: string): Promise<ProfitRecomputeReason | undefined> =>
+        (await prisma.profitRecomputeRequest.findUnique({ where: { orderId } }))?.reason;
       const clearRequest = async (): Promise<void> => {
         await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: order.id } });
       };
 
       // attach → queued
       await attachCostProfiles(org.id, [profile.id], [variant.id], user.id, ALL_STORES);
-      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
 
       // detach → queued again (clear first so each op must re-enqueue on its own)
       await clearRequest();
       await detachCostProfiles(org.id, [profile.id], [variant.id], ALL_STORES);
-      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
 
       // replace → queued again
       await clearRequest();
       await replaceCostProfilesForVariants(org.id, [variant.id], [profile.id], user.id, ALL_STORES);
-      expect(await requestReason()).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(order.id)).toBe(ProfitRecomputeReason.COST_CHANGED);
+      expect(await requestReason(finalOrder.id)).toBeUndefined();
     });
   });
 });

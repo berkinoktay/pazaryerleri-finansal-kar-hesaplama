@@ -1,14 +1,19 @@
 /**
  * Integration tests for captureOrderProfitSnapshot (plan PR-2, Gorev 2): the order's
- * undated product and seller inputs are copied once, afterwards only missing parts
- * are filled (commission inputs none of which gives a rate, an empty cost list), and
- * a known value is never overwritten with a live one. The desi is never filled: a
- * captured desi (0 included) is known, and an item captured without one stays empty
- * (plan PR-2c decision 9). The
- * events that change a filled value are the order's own cargo name changing and an
- * item's variant changing. A filled cost list is frozen at capture (plan PR-3b, Berkin
- * 2026-11-23), even while the order's business day is still open: a same-day attach,
- * detach, archive or restore never reaches it.
+ * undated product inputs are copied once, afterwards only missing parts are filled
+ * (commission inputs none of which gives a rate), and a known value is never
+ * overwritten with a live one. The events that change a filled product value are the
+ * order's own cargo name changing and an item's variant changing.
+ *
+ * The seller inputs (cost list and desi) follow the order's business day (same-day
+ * edit window plan PR-1, P1-09; Berkin 2026-11-23: an order's cost and desi are the
+ * values in force at the end of its Istanbul business day). While the order's
+ * seller-input marker is NULL every capture call re-derives each captured item's cost
+ * list and desi from the state at that day end, so a same-day amount edit, attach,
+ * detach, archive, restore or desi change reaches the order, and a change stamped
+ * after the day end does not. Once the marker is set (the day-close pass made the
+ * order final) a filled cost list and a captured desi are frozen; only an empty cost
+ * list is still filled, and a desi never is.
  *
  * The suite never truncates: shared reference tables (carriers, commission rules) are
  * touched only through this suite's own TEST_-prefixed carriers and its own category
@@ -39,6 +44,8 @@ import {
 } from '../order-profit-snapshot';
 import {
   attachCostProfile,
+  backdateSellerInputHistory,
+  clearSellerInputHistory,
   COST_FIXTURE_EPOCH,
   ensureDbReachable,
   MELONTIK,
@@ -163,6 +170,8 @@ async function seedSnapshotParcel(opts: SeedMelontikOptions = {}): Promise<Melon
     where: { id: parcel.variantA },
     data: { dimensionalWeightOverride: '3.50', syncedCommissionRate: '15.00' },
   });
+  // Fixture setup, not history: item A's variant carried that desi all along.
+  await clearSellerInputHistory(parcel.organizationId);
   return parcel;
 }
 
@@ -204,9 +213,9 @@ function sorted(ids: readonly string[]): string[] {
   return [...ids].sort();
 }
 
-/** A cost version start before the melontik order date (2026-10-28): in force at it. */
+/** A cost version start before the melontik order date (2026-10-28): in force at its day end. */
 const BEFORE_ORDER_DATE = new Date('2026-10-01T00:00:00Z');
-/** A cost version start after the melontik order date: not yet in force at it. */
+/** A cost version start after the melontik order's day end: not yet in force at it. */
 const AFTER_ORDER_DATE = new Date('2026-11-10T00:00:00Z');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -348,6 +357,289 @@ async function productIdOf(productVariantId: string): Promise<string> {
   return variant.productId;
 }
 
+/** A set seller-input marker: the day-close pass has made the order's seller inputs final. */
+const SELLER_INPUTS_FINAL_AT = new Date();
+
+/** The id the map holds for `key`; throws when it holds none (a fixture bug). */
+function requireMapped(ids: ReadonlyMap<string, string>, key: string): string {
+  const id = ids.get(key);
+  if (id === undefined) {
+    throw new Error(`No twin item for order item ${key}`);
+  }
+  return id;
+}
+
+/**
+ * A second order in the parcel's store with the parcel order's date, cargo name and
+ * two items on the same variants: one seller-input change reaches both orders, and
+ * only `sellerInputsFinalAt` tells them apart. Returned in the parcel's shape so
+ * `capture` and `readItemSnapshot` work on it unchanged.
+ */
+async function seedOrderTwin(
+  parcel: MelontikParcel,
+  opts: { readonly sellerInputsFinalAt: Date | null },
+): Promise<MelontikParcel> {
+  const source = await prisma.order.findFirstOrThrow({
+    where: { id: parcel.orderId, organizationId: parcel.organizationId },
+    include: { items: true },
+  });
+  const platformOrderId = `twin-${randomUUID().slice(0, 8)}`;
+  const twin = await prisma.order.create({
+    data: {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      platformOrderId,
+      orderDate: source.orderDate,
+      status: source.status,
+      isExportSale: source.isExportSale,
+      fastDelivery: source.fastDelivery,
+      fastDeliveryType: source.fastDeliveryType,
+      usesSellerCargoAgreement: source.usesSellerCargoAgreement,
+      cargoProviderName: source.cargoProviderName,
+      sellerInputsFinalAt: opts.sellerInputsFinalAt,
+    },
+  });
+  const twinItemIds = new Map<string, string>();
+  for (const item of source.items) {
+    const created = await prisma.orderItem.create({
+      data: {
+        orderId: twin.id,
+        organizationId: parcel.organizationId,
+        productVariantId: item.productVariantId,
+        quantity: item.quantity,
+        barcode: item.barcode,
+        lineListGross: item.lineListGross,
+        lineSaleGross: item.lineSaleGross,
+        lineSellerDiscountGross: item.lineSellerDiscountGross,
+        saleVatRate: item.saleVatRate,
+        orderCommissionRatePct: item.orderCommissionRatePct,
+      },
+    });
+    twinItemIds.set(item.id, created.id);
+  }
+  return {
+    ...parcel,
+    orderId: twin.id,
+    platformOrderId,
+    itemA: requireMapped(twinItemIds, parcel.itemA),
+    itemB: requireMapped(twinItemIds, parcel.itemB),
+  };
+}
+
+/** The profile of the variant's one cost link. */
+async function onlyCostProfileIdOf(
+  parcel: MelontikParcel,
+  productVariantId: string,
+): Promise<string> {
+  const link = await prisma.productVariantCostProfile.findFirstOrThrow({
+    where: { organizationId: parcel.organizationId, productVariantId },
+    select: { profileId: true },
+  });
+  return link.profileId;
+}
+
+/**
+ * Writes the next version of a cost profile as the edit and restore actions do: a
+ * live copy of the latest version with the given amount, starting at the database's
+ * transaction instant (the column default), and the profile row updated to match.
+ * Returns the new version id.
+ */
+async function addLiveCostVersion(
+  organizationId: string,
+  profileId: string,
+  change: { readonly amountGross?: string; readonly changedField: 'amountGross' | 'archivedAt' },
+): Promise<string> {
+  const latest = await prisma.costProfileVersion.findFirstOrThrow({
+    where: { organizationId, profileId },
+    orderBy: { version: 'desc' },
+  });
+  const amountGross = change.amountGross ?? latest.amountGross;
+  await prisma.costProfile.update({
+    where: { id: profileId, organizationId },
+    data: { amountGross, archivedAt: null },
+  });
+  const created = await prisma.costProfileVersion.create({
+    data: {
+      profileId,
+      organizationId,
+      version: latest.version + 1,
+      name: latest.name,
+      type: latest.type,
+      amountGross,
+      vatRate: latest.vatRate,
+      changedFields: [change.changedField],
+      archivedAt: null,
+    },
+  });
+  return created.id;
+}
+
+/** What a seller-input change leaves on the order item it reaches. */
+type ReachedItem =
+  | {
+      readonly kind: 'costList';
+      readonly item: 'itemA' | 'itemB';
+      readonly versionIds: readonly string[];
+    }
+  | {
+      readonly kind: 'desi';
+      readonly item: 'itemA' | 'itemB';
+      readonly desi: string | null;
+      readonly source: SnapshotDesiSource | null;
+    };
+
+/** A seller-input change made after the first capture; reports what the reached item holds then. */
+type SellerInputChange = () => Promise<ReachedItem>;
+
+/**
+ * Arranges the parcel's variants before the first capture and returns the change.
+ * Every write is real and stamped now, on today's business day.
+ */
+type SellerInputChangeCase = (parcel: MelontikParcel) => Promise<SellerInputChange>;
+
+/**
+ * The nine seller-input changes of the same-day edit window (plan PR-1, P1-09). The
+ * parcel is the snapshot parcel: item A's variant has a seller desi of 3.50 over a
+ * synced 1 and one COGS link, item B's variant a synced desi of 1 and one COGS link.
+ */
+const SELLER_INPUT_CHANGES = {
+  // The seller edits the amount of item A's cost: a new version starts now.
+  'amount edit': async (parcel) => async () => {
+    const profileId = await onlyCostProfileIdOf(parcel, parcel.variantA);
+    const versionId = await addLiveCostVersion(parcel.organizationId, profileId, {
+      amountGross: '250.00',
+      changedField: 'amountGross',
+    });
+    return { kind: 'costList', item: 'itemA', versionIds: [versionId] };
+  },
+  // A second profile is linked to item A's variant.
+  attach: async (parcel) => async () => {
+    await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+      attachedAt: new Date(),
+    });
+    return {
+      kind: 'costList',
+      item: 'itemA',
+      versionIds: await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    };
+  },
+  // Item A's only cost link is removed.
+  detach: async (parcel) => async () => {
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+    return { kind: 'costList', item: 'itemA', versionIds: [] };
+  },
+  // Item A's only cost profile is archived.
+  archive: async (parcel) => async () => {
+    const profileId = await onlyCostProfileIdOf(parcel, parcel.variantA);
+    await archiveCostProfileAt(parcel.organizationId, profileId, new Date());
+    return { kind: 'costList', item: 'itemA', versionIds: [] };
+  },
+  // A second profile of item A's variant, archived since before the order, is restored.
+  restore: async (parcel) => {
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    const firstVersionId = randomUUID();
+    await attachCostProfileVersions(parcel, parcel.variantA, [
+      { id: firstVersionId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
+      { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
+    ]);
+    const archived = await prisma.costProfileVersion.findUniqueOrThrow({
+      where: { id: firstVersionId },
+      select: { profileId: true },
+    });
+    return async () => {
+      const restoredId = await addLiveCostVersion(parcel.organizationId, archived.profileId, {
+        changedField: 'archivedAt',
+      });
+      return { kind: 'costList', item: 'itemA', versionIds: [...cogsVersionIds, restoredId] };
+    };
+  },
+  // Item A's variant has no desi at all until the seller enters one.
+  'seller desi set': async (parcel) => {
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null, syncedDimensionalWeight: null },
+    });
+    return async () => {
+      await prisma.productVariant.update({
+        where: { id: parcel.variantA },
+        data: { dimensionalWeightOverride: '5.00' },
+      });
+      return { kind: 'desi', item: 'itemA', desi: '5', source: SnapshotDesiSource.OVERRIDE };
+    };
+  },
+  // The seller changes item A's desi 3.50 -> 7.00.
+  'seller desi changed': async (parcel) => async () => {
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '7.00' },
+    });
+    return { kind: 'desi', item: 'itemA', desi: '7', source: SnapshotDesiSource.OVERRIDE };
+  },
+  // The seller clears item A's desi: the synced 1 applies again.
+  'seller desi cleared': async (parcel) => async () => {
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: null },
+    });
+    return { kind: 'desi', item: 'itemA', desi: '1', source: SnapshotDesiSource.SYNCED };
+  },
+  // Trendyol sends a new desi for item B's variant, which has no seller desi.
+  'synced desi changed': async (parcel) => async () => {
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+    return { kind: 'desi', item: 'itemB', desi: '4', source: SnapshotDesiSource.SYNCED };
+  },
+} satisfies Readonly<Record<string, SellerInputChangeCase>>;
+
+/** SELLER_INPUT_CHANGES as (name, case) pairs, in declaration order. */
+const SELLER_INPUT_CHANGE_LIST: readonly (readonly [string, SellerInputChangeCase])[] =
+  Object.entries(SELLER_INPUT_CHANGES);
+
+/** The item snapshot as `readItemSnapshot` returns it. */
+type ItemSnapshot = Awaited<ReturnType<typeof readItemSnapshot>>;
+
+/**
+ * Asserts that the reached item holds exactly what the change reports and is
+ * otherwise as it was: no other column moved, its capture time included.
+ */
+function expectReached(before: ItemSnapshot, after: ItemSnapshot, reached: ReachedItem): void {
+  switch (reached.kind) {
+    case 'costList':
+      expect(after).toEqual({
+        ...before,
+        snapshotCostProfileVersionIds: sorted(reached.versionIds),
+      });
+      return;
+    case 'desi':
+      expect(after.snapshotUnitDesi?.toString() ?? null).toBe(reached.desi);
+      expect(after.snapshotDesiSource).toBe(reached.source);
+      expect({ ...after, snapshotUnitDesi: null, snapshotDesiSource: null }).toEqual({
+        ...before,
+        snapshotUnitDesi: null,
+        snapshotDesiSource: null,
+      });
+      return;
+    default: {
+      const exhaustive: never = reached;
+      throw new Error(`Unhandled reached item: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
+/** The other item of the parcel: the one a change does not reach. */
+function otherItem(item: 'itemA' | 'itemB'): 'itemA' | 'itemB' {
+  return item === 'itemA' ? 'itemB' : 'itemA';
+}
+
 describe('captureOrderProfitSnapshot', () => {
   beforeAll(async () => {
     await ensureDbReachable();
@@ -432,12 +724,17 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
   });
 
-  it('keeps captured values when the variant desi, synced rate, category rule, cost link and store tariff source change', async () => {
-    const parcel = await seedSnapshotParcel();
+  it('a final order keeps captured values when the variant desi, synced rate, category rule, cost link and store tariff source change; its non-final twin follows only the seller inputs', async () => {
+    const parcel = await seedSnapshotParcel({ sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
+    // Positive control: the same items on the same variants, seller inputs not final.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
     await capture(parcel);
+    await capture(twin);
     const orderBefore = await readOrderSnapshot(parcel.orderId);
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
+    const twinABefore = await readItemSnapshot(twin.itemA);
+    const twinBBefore = await readItemSnapshot(twin.itemB);
 
     // Product card: desi correction, synced desi, synced rate, digital flag, and the
     // product moves to another category (which has its own rule) and brand.
@@ -492,6 +789,9 @@ describe('captureOrderProfitSnapshot', () => {
         profitSettings: { includeStopaj: false, includeNegativeNetVat: false },
       },
     });
+    // Every seller-input change above happened on the order's day: the day-end state
+    // holds the new desi and the new cost link, so only the marker keeps them out.
+    await backdateSellerInputHistory(parcel.organizationId, laterOnOrderDay(1));
 
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
 
@@ -500,6 +800,26 @@ describe('captureOrderProfitSnapshot', () => {
     expect(itemAAfter).toEqual(itemABefore);
     expect(itemAAfter.snapshotCategoryId).toBe(TEST_CATEGORY_ID);
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+
+    // Positive control: the non-final twin takes the day-end desi and cost list, and
+    // nothing else (its product inputs stay as captured).
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const twinAAfter = await readItemSnapshot(twin.itemA);
+    expect(twinAAfter.snapshotUnitDesi?.toString()).toBe('7');
+    expect(twinAAfter).toEqual({
+      ...twinABefore,
+      snapshotUnitDesi: twinAAfter.snapshotUnitDesi,
+      snapshotCostProfileVersionIds: await linkedCostVersionIds(
+        parcel.organizationId,
+        parcel.variantA,
+      ),
+    });
+    expect(twinAAfter.snapshotCostProfileVersionIds).not.toEqual(
+      twinABefore.snapshotCostProfileVersionIds,
+    );
+    const twinBAfter = await readItemSnapshot(twin.itemB);
+    expect(twinBAfter.snapshotUnitDesi?.toString()).toBe('4');
+    expect(twinBAfter).toEqual({ ...twinBBefore, snapshotUnitDesi: twinBAfter.snapshotUnitDesi });
   });
 
   it("re-recognises the carrier when the order's own cargo name changes", async () => {
@@ -580,7 +900,9 @@ describe('captureOrderProfitSnapshot', () => {
   });
 
   it('captures an item whose variant is linked after intake, once', async () => {
-    const parcel = await seedSnapshotParcel();
+    // A final order: a variant matched later is still captured, from the day-end state,
+    // and is frozen afterwards.
+    const parcel = await seedSnapshotParcel({ sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
     // Item B arrives with a barcode not yet matched to a variant.
     await prisma.orderItem.update({
       where: { id: parcel.itemB },
@@ -625,28 +947,48 @@ describe('captureOrderProfitSnapshot', () => {
       await linkedCostVersionIds(parcel.organizationId, parcel.variantB),
     );
 
-    // Once captured, a later variant edit does not reach it.
+    // Positive control for the guard below: the same items, both matched now, on an
+    // order whose seller inputs still follow its day; captured before the edit, so its
+    // next capture is a re-derive.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    expect((await readItemSnapshot(twin.itemB)).snapshotUnitDesi?.toString()).toBe('1');
+
+    // Once captured, a later variant edit does not reach the final order, not even one
+    // stamped on the order's day (the day-end state now holds it).
     await prisma.productVariant.update({
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '6.00' },
     });
+    await backdateSellerInputHistory(parcel.organizationId, laterOnOrderDay(1));
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemB)).toEqual(matched);
+
+    // The non-final twin does take the edit stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('6');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
-  it('fills an empty cost list from a cost linked later the same day, but not a filled one', async () => {
+  it('a cost linked later the same day fills an empty list and reaches a filled one; a final order only gets the empty one filled', async () => {
     const parcel = await seedSnapshotParcel();
     // Item A's variant has no cost at intake; item B's has one.
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    // Fixture setup, not history: item A's variant had no link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
+    const finalTwin = await seedOrderTwin(parcel, { sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
     await capture(parcel);
+    await capture(finalTwin);
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
+    const finalBBefore = await readItemSnapshot(finalTwin.itemB);
     expect(itemABefore.snapshotCostProfileVersionIds).toEqual([]);
     expect(itemBBefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // A cost in force at the order date is linked to both variants later the same day.
+    // A cost is linked to both variants later the same day, before the day end.
     for (const productVariantId of [parcel.variantA, parcel.variantB]) {
       await attachCostProfile({
         organizationId: parcel.organizationId,
@@ -658,8 +1000,8 @@ describe('captureOrderProfitSnapshot', () => {
       });
     }
     // Item A also gets a cost whose only version starts after the order instant but
-    // before the day ended: no version existed at the order time, so the version in
-    // force at the day end is pinned, as the engine would price it.
+    // before the day ended: it is the version in force at the day end, so it is
+    // pinned, as the engine would price it.
     const startsAfterOrderId = randomUUID();
     await attachCostProfileVersions(
       parcel,
@@ -668,7 +1010,8 @@ describe('captureOrderProfitSnapshot', () => {
       { attachedAt: laterOnOrderDay(1) },
     );
 
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    // Not final: both items follow the links in force at the day end.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
     const itemAAfter = await readItemSnapshot(parcel.itemA);
     expect(itemAAfter.snapshotCostProfileVersionIds).toHaveLength(2);
     expect(itemAAfter.snapshotCostProfileVersionIds).toContain(startsAfterOrderId);
@@ -681,7 +1024,22 @@ describe('captureOrderProfitSnapshot', () => {
       ...itemABefore,
       snapshotCostProfileVersionIds: itemAAfter.snapshotCostProfileVersionIds,
     });
-    expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+    const itemBAfter = await readItemSnapshot(parcel.itemB);
+    expect(itemBAfter.snapshotCostProfileVersionIds).toHaveLength(2);
+    expect(itemBAfter).toEqual({
+      ...itemBBefore,
+      snapshotCostProfileVersionIds: await linkedCostVersionIds(
+        parcel.organizationId,
+        parcel.variantB,
+      ),
+    });
+
+    // Final: the empty list is filled, the filled one stays as captured.
+    await expect(capture(finalTwin)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(sorted((await readItemSnapshot(finalTwin.itemA)).snapshotCostProfileVersionIds)).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(await readItemSnapshot(finalTwin.itemB)).toEqual(finalBBefore);
   });
 
   it('fills an empty cost list on an order excluded from profit, which stays excluded', async () => {
@@ -690,6 +1048,8 @@ describe('captureOrderProfitSnapshot', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId },
     });
+    // Fixture setup, not history: neither variant had a link on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
     await prisma.order.update({
       where: { id: parcel.orderId, organizationId: parcel.organizationId },
       data: {
@@ -702,7 +1062,8 @@ describe('captureOrderProfitSnapshot', () => {
     expect((await readItemSnapshot(parcel.itemA)).snapshotCostProfileVersionIds).toEqual([]);
     expect((await readItemSnapshot(parcel.itemB)).snapshotCostProfileVersionIds).toEqual([]);
 
-    // A cost in force at the order date is linked to both variants later.
+    // A cost in force at the day end (the factory backdates the link) is linked to both
+    // variants later.
     for (const productVariantId of [parcel.variantA, parcel.variantB]) {
       await attachCostProfile({
         organizationId: parcel.organizationId,
@@ -731,10 +1092,10 @@ describe('captureOrderProfitSnapshot', () => {
     expect(order.profitExclusionReason).toBe(ProfitExclusionReason.COST_DEADLINE_MISSED);
   });
 
-  it("a same-day replacement of every cost link leaves today's captured order unchanged", async () => {
+  it("a same-day replacement of every cost link moves today's captured order to the new profile", async () => {
     const parcel = await seedSnapshotParcel();
-    // An order placed today: its business day is still open, yet its cost list is
-    // frozen from the moment it entered profit (Berkin 2026-11-23).
+    // An order placed today: its business day is still open, so its cost list follows
+    // the links in force at the day end (Berkin 2026-11-23).
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
     await capture(parcel);
@@ -758,13 +1119,22 @@ describe('captureOrderProfitSnapshot', () => {
       vatRate: '20',
       attachedAt: today(2),
     });
+    const replacementVersionIds = await linkedCostVersionIds(
+      parcel.organizationId,
+      parcel.variantA,
+    );
+    expect(replacementVersionIds).toHaveLength(1);
+    expect(replacementVersionIds).not.toEqual(itemABefore.snapshotCostProfileVersionIds);
 
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: replacementVersionIds,
+    });
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
   });
 
-  it("a same-day archive plus a new attach does not double count today's captured order", async () => {
+  it("a same-day archive plus a new attach moves today's captured order from the archived profile to the new one, never both", async () => {
     const parcel = await seedSnapshotParcel();
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
@@ -787,7 +1157,7 @@ describe('captureOrderProfitSnapshot', () => {
 
     // Later the same day the seller archives A and links a new profile B in its place.
     await archiveCostProfileAt(parcel.organizationId, profileA, today(2));
-    await attachCostProfile({
+    const profileB = await attachCostProfile({
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       productVariantId: parcel.variantA,
@@ -796,13 +1166,22 @@ describe('captureOrderProfitSnapshot', () => {
       effectiveFrom: today(3),
       attachedAt: today(3),
     });
+    const profileBVersions = await prisma.costProfileVersion.findMany({
+      where: { organizationId: parcel.organizationId, profileId: profileB },
+      select: { id: true },
+    });
+    expect(profileBVersions).toHaveLength(1);
 
-    // The order entered profit with A: it keeps A alone, never A and B together.
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    // At the day end A is archived and B is in force: the order is priced by B alone,
+    // never by A and B together.
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: profileBVersions.map((version) => version.id),
+    });
   });
 
-  it("a same-day detach leaves today's captured order unchanged", async () => {
+  it("a same-day detach empties today's captured cost list", async () => {
     const parcel = await seedSnapshotParcel();
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
@@ -815,11 +1194,14 @@ describe('captureOrderProfitSnapshot', () => {
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
 
-    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: [],
+    });
   });
 
-  it('a same-day extra attach does not reach an already captured order', async () => {
+  it("a same-day extra attach reaches today's already captured order", async () => {
     const parcel = await seedSnapshotParcel();
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
@@ -836,9 +1218,157 @@ describe('captureOrderProfitSnapshot', () => {
       vatRate: '20',
       attachedAt: today(2),
     });
+    const bothVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(bothVersionIds).toHaveLength(2);
 
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: bothVersionIds,
+    });
+  });
+
+  // Same-day edit window (plan PR-1, P1-09): while the order's seller-input marker is
+  // NULL, one capture call re-derives a captured item's cost list and desi from the
+  // state at the order's day end. Today's order is dated now (never "a few minutes
+  // ago": just after midnight that would be yesterday), and every change is a real
+  // write stamped now, on its business day.
+  it.each(SELLER_INPUT_CHANGE_LIST)(
+    "the %s change reaches today's non-final order on one capture",
+    async (_name, changeCase) => {
+      const parcel = await seedSnapshotParcel();
+      await setOrderDate(parcel, new Date());
+      const change = await changeCase(parcel);
+      await capture(parcel);
+      const itemABefore = await readItemSnapshot(parcel.itemA);
+      const itemBBefore = await readItemSnapshot(parcel.itemB);
+      const before = { itemA: itemABefore, itemB: itemBBefore };
+
+      const reached = await change();
+
+      await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+      expectReached(before[reached.item], await readItemSnapshot(parcel[reached.item]), reached);
+      const untouched = otherItem(reached.item);
+      expect(await readItemSnapshot(parcel[untouched])).toEqual(before[untouched]);
+    },
+  );
+
+  it('a second identical capture writes 0 items after a change', async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date());
+    await capture(parcel);
+
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '7.00' },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const afterFirst = await readItemSnapshot(parcel.itemA);
+    expect(afterFirst.snapshotUnitDesi?.toString()).toBe('7');
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
-    expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    expect(await readItemSnapshot(parcel.itemA)).toEqual(afterFirst);
+  });
+
+  it("yesterday's non-final order keeps a profile detached after its day end and loses one detached before it", async () => {
+    const parcel = await seedSnapshotParcel();
+    const orderDate = new Date(Date.now() - DAY_MS);
+    await setOrderDate(parcel, orderDate);
+    const dayEnd = costDecisionTime(orderDate);
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    const packagingId = await attachCostProfile({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      productVariantId: parcel.variantA,
+      amountGross: '12.00',
+      vatRate: '20',
+    });
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+    expect(itemABefore.snapshotCostProfileVersionIds).toEqual(
+      await linkedCostVersionIds(parcel.organizationId, parcel.variantA),
+    );
+    expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(2);
+
+    // The second profile was detached an hour before the order's day ended...
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, profileId: packagingId },
+    });
+    await backdateSellerInputHistory(parcel.organizationId, new Date(dayEnd.getTime() - HOUR_MS));
+    // ...while the COGS link is detached now, after the day end.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(parcel.itemA)).toEqual({
+      ...itemABefore,
+      snapshotCostProfileVersionIds: cogsVersionIds,
+    });
+  });
+
+  // The control above, inverted: a final order's items never move with the same
+  // changes. Positive control: its non-final twin (same items on the same variants,
+  // marker NULL) does move in the same test.
+  it.each(SELLER_INPUT_CHANGE_LIST)(
+    'a final order keeps its captured items through the %s change',
+    async (_name, changeCase) => {
+      const parcel = await seedSnapshotParcel();
+      await setOrderDate(parcel, new Date());
+      const finalTwin = await seedOrderTwin(parcel, {
+        sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT,
+      });
+      const change = await changeCase(parcel);
+      await capture(parcel);
+      await capture(finalTwin);
+      const finalABefore = await readItemSnapshot(finalTwin.itemA);
+      const finalBBefore = await readItemSnapshot(finalTwin.itemB);
+      const before = {
+        itemA: await readItemSnapshot(parcel.itemA),
+        itemB: await readItemSnapshot(parcel.itemB),
+      };
+
+      const reached = await change();
+
+      await expect(capture(finalTwin)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
+      expect(await readItemSnapshot(finalTwin.itemA)).toEqual(finalABefore);
+      expect(await readItemSnapshot(finalTwin.itemB)).toEqual(finalBBefore);
+
+      // Positive control: the same change reaches the non-final twin.
+      await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+      expectReached(before[reached.item], await readItemSnapshot(parcel[reached.item]), reached);
+    },
+  );
+
+  it('profitSnapshotAt does not move on a re-derive; a variant change moves it', async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date());
+    await capture(parcel);
+    const itemABefore = await readItemSnapshot(parcel.itemA);
+
+    // A same-day desi change: the item is re-derived (one item written, the new desi),
+    // its capture time stays.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '7.00' },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const rederived = await readItemSnapshot(parcel.itemA);
+    expect(rederived.snapshotUnitDesi?.toString()).toBe('7');
+    expect(rederived.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    expect(rederived.profitSnapshotAt).toEqual(itemABefore.profitSnapshotAt);
+
+    // Positive control: re-matched to another variant, the item is captured afresh.
+    await prisma.orderItem.update({
+      where: { id: parcel.itemA },
+      data: { productVariantId: parcel.variantB },
+    });
+    await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    const recaptured = await readItemSnapshot(parcel.itemA);
+    expect(recaptured.profitSnapshotAt?.getTime()).toBeGreaterThan(
+      itemABefore.profitSnapshotAt?.getTime() ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it('an archived-then-restored profile pinned at capture stays pinned on the next same-day capture', async () => {
@@ -847,8 +1377,8 @@ describe('captureOrderProfitSnapshot', () => {
     await setOrderDate(parcel, today(2));
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived before the order and restored after it, both today: the version at the
-    // order instant is the archive version, so the restore version prices the order.
+    // Archived before the order and restored after it, both today: the restore version
+    // is the one in force at the day end, so it prices the order.
     const restoredId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
@@ -862,19 +1392,20 @@ describe('captureOrderProfitSnapshot', () => {
       sorted([...cogsVersionIds, restoredId]),
     );
 
-    // Nothing changed: the next capture the same day keeps the restore version.
+    // Nothing changed: the next capture the same day re-derives the same list (the
+    // restore version) and writes nothing.
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
   });
 
-  it('a version created after the order and pinned at capture is not replaced by the first version on the next same-day capture', async () => {
+  it('the day-end version pinned at capture is not replaced by the first version on the next same-day capture', async () => {
     const parcel = await seedSnapshotParcel();
     const today = todaysBusinessDay();
     await setOrderDate(parcel, today(1));
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Created after the order instant (100) and edited to 120, both today: no version
-    // existed at the order time, so the version in force at capture prices it.
+    // Created after the order instant (100) and edited to 120, both today: the 120
+    // version is the one in force at the day end, so it prices the order.
     const firstId = randomUUID();
     const inForceId = randomUUID();
     await attachCostProfileVersions(
@@ -893,49 +1424,75 @@ describe('captureOrderProfitSnapshot', () => {
       sorted([...cogsVersionIds, inForceId]),
     );
 
-    // Nothing changed: the next capture the same day keeps the pinned version.
+    // Nothing changed: the next capture the same day re-derives the same pinned version
+    // and writes nothing.
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     const itemAAfter = await readItemSnapshot(parcel.itemA);
     expect(itemAAfter).toEqual(itemABefore);
     expect(itemAAfter.snapshotCostProfileVersionIds).not.toContain(firstId);
   });
 
-  it("keeps a filled cost list frozen after the order's business day has ended", async () => {
-    const parcel = await seedSnapshotParcel();
-    // An order from two days ago: its business day has ended.
-    await setOrderDate(parcel, new Date(Date.now() - 2 * DAY_MS));
+  it('a final order keeps its filled cost list through an added and a replaced link of its day; its non-final twin follows them', async () => {
+    // An order from two days ago whose day the day-close pass has made final.
+    const parcel = await seedSnapshotParcel({ sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
+    const orderDate = new Date(Date.now() - 2 * DAY_MS);
+    await setOrderDate(parcel, orderDate);
+    const onOrderDay = new Date(costDecisionTime(orderDate).getTime() - HOUR_MS);
+    // Positive control: the same items on the same variants, seller inputs not final.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
     await capture(parcel);
+    await capture(twin);
     const itemABefore = await readItemSnapshot(parcel.itemA);
+    const twinABefore = await readItemSnapshot(twin.itemA);
     expect(itemABefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // Added: a second profile linked later does not reach the order.
+    // Added: a second profile linked on the order's day does not reach the final order.
     await attachCostProfile({
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       productVariantId: parcel.variantA,
       amountGross: '12.00',
       vatRate: '20',
+      attachedAt: onOrderDay,
     });
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(twin.itemA)).toEqual({
+      ...twinABefore,
+      snapshotCostProfileVersionIds: await linkedCostVersionIds(
+        parcel.organizationId,
+        parcel.variantA,
+      ),
+    });
 
-    // Replaced: neither does a replacement of every link.
+    // Replaced on the order's day: neither does a replacement of every link.
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    await backdateSellerInputHistory(parcel.organizationId, onOrderDay);
     await attachCostProfile({
       organizationId: parcel.organizationId,
       storeId: parcel.storeId,
       productVariantId: parcel.variantA,
       amountGross: '40.00',
       vatRate: '20',
+      attachedAt: onOrderDay,
     });
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 1 });
+    expect(await readItemSnapshot(twin.itemA)).toEqual({
+      ...twinABefore,
+      snapshotCostProfileVersionIds: await linkedCostVersionIds(
+        parcel.organizationId,
+        parcel.variantA,
+      ),
+    });
   });
 
-  it('captures a variant without any desi (no correction, no Trendyol desi) as an empty desi with no source', async () => {
-    const parcel = await seedSnapshotParcel();
+  it('captures a variant without any desi (no correction, no Trendyol desi) as an empty desi with no source, never filled on a final order', async () => {
+    const parcel = await seedSnapshotParcel({ sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
     // Trendyol sent no desi for either variant and the seller corrected neither.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
@@ -945,9 +1502,15 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: null },
     });
+    // Fixture setup, not history: neither variant had a desi on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
+    // Positive control for the guard below: the same items on an order whose seller
+    // inputs still follow its day, captured (without a desi) before the later entries.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
 
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
-    for (const itemId of [parcel.itemA, parcel.itemB]) {
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
+    for (const itemId of [parcel.itemA, parcel.itemB, twin.itemA, twin.itemB]) {
       const item = await readItemSnapshot(itemId);
       expect(item.snapshotUnitDesi).toBeNull();
       expect(item.snapshotDesiSource).toBeNull();
@@ -960,7 +1523,9 @@ describe('captureOrderProfitSnapshot', () => {
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
 
     // A desi entered later (a seller correction, a Trendyol desi from a later sync) does
-    // not reach the capture: the item captured without a desi stays empty.
+    // not reach the final order's capture, even when the history places it on the
+    // order's day (the day-end state then holds it): the item captured without a desi
+    // stays empty.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '2.50' },
@@ -969,16 +1534,26 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '4.00' },
     });
+    await backdateSellerInputHistory(parcel.organizationId, laterOnOrderDay(1));
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     for (const itemId of [parcel.itemA, parcel.itemB]) {
       const item = await readItemSnapshot(itemId);
       expect(item.snapshotUnitDesi).toBeNull();
       expect(item.snapshotDesiSource).toBeNull();
     }
+
+    // The non-final twin does take both entries stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const twinA = await readItemSnapshot(twin.itemA);
+    expect(twinA.snapshotUnitDesi?.toString()).toBe('2.5');
+    expect(twinA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('4');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
-  it('keeps a stored synced desi of 0 as a known desi: captured as 0 from the synced value and never filled later', async () => {
-    const parcel = await seedSnapshotParcel();
+  it('keeps a stored synced desi of 0 as a known desi: captured as 0 from the synced value and never filled later on a final order', async () => {
+    const parcel = await seedSnapshotParcel({ sellerInputsFinalAt: SELLER_INPUTS_FINAL_AT });
     // Both variants carry a stored synced desi of 0, a real desi (the mapper stores
     // a Trendyol 0 as null, but a stored 0 is a real desi); the seller corrected
     // neither.
@@ -990,16 +1565,28 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '0' },
     });
+    // Fixture setup, not history: both variants had that desi on the order's day.
+    await clearSellerInputHistory(parcel.organizationId);
+    // Positive control for the guard below: the same items on an order whose seller
+    // inputs still follow its day, captured (with the 0) before the later entries.
+    const twin = await seedOrderTwin(parcel, { sellerInputsFinalAt: null });
     await capture(parcel);
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: true, itemsWritten: 2 });
     const itemABefore = await readItemSnapshot(parcel.itemA);
     const itemBBefore = await readItemSnapshot(parcel.itemB);
-    for (const item of [itemABefore, itemBBefore]) {
+    for (const item of [
+      itemABefore,
+      itemBBefore,
+      await readItemSnapshot(twin.itemA),
+      await readItemSnapshot(twin.itemB),
+    ]) {
       expect(item.snapshotUnitDesi?.toString()).toBe('0');
       expect(item.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
     }
 
-    // A later seller correction and a later Trendyol desi do not reach the capture:
-    // 0 is a known desi, not a gap to fill.
+    // A later seller correction and a later Trendyol desi do not reach the final
+    // order's capture, even when the history places them on the order's day: 0 is a
+    // known desi, not a gap to fill.
     await prisma.productVariant.update({
       where: { id: parcel.variantA },
       data: { dimensionalWeightOverride: '2.50' },
@@ -1008,9 +1595,19 @@ describe('captureOrderProfitSnapshot', () => {
       where: { id: parcel.variantB },
       data: { syncedDimensionalWeight: '4.00' },
     });
+    await backdateSellerInputHistory(parcel.organizationId, laterOnOrderDay(1));
     await expect(capture(parcel)).resolves.toEqual({ orderWritten: false, itemsWritten: 0 });
     expect(await readItemSnapshot(parcel.itemA)).toEqual(itemABefore);
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBBefore);
+
+    // The non-final twin does take both entries stamped on the order's day.
+    await expect(capture(twin)).resolves.toEqual({ orderWritten: false, itemsWritten: 2 });
+    const twinA = await readItemSnapshot(twin.itemA);
+    expect(twinA.snapshotUnitDesi?.toString()).toBe('2.5');
+    expect(twinA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const twinB = await readItemSnapshot(twin.itemB);
+    expect(twinB.snapshotUnitDesi?.toString()).toBe('4');
+    expect(twinB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('fills commission inputs that were all missing once a rule or synced rate appears, but never changes captured rates', async () => {
@@ -1117,10 +1714,10 @@ describe('captureOrderProfitSnapshot', () => {
     expect(await readItemSnapshot(parcel.itemB)).toEqual(itemBFilled);
   });
 
-  it('pins the cost version in force at the order date, not the latest', async () => {
+  it("pins the cost version in force at the order's day end, not the latest", async () => {
     const parcel = await seedSnapshotParcel();
     // The melontik COGS profile has a single version, effective (and linked) since
-    // COST_FIXTURE_EPOCH: it is the version at the order date.
+    // COST_FIXTURE_EPOCH: it is the version at the order's day end.
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
     const cogsVersions = await prisma.costProfileVersion.findMany({
@@ -1154,18 +1751,18 @@ describe('captureOrderProfitSnapshot', () => {
     );
   });
 
-  it('skips a cost profile whose version in force at the order date is archived', async () => {
+  it('skips a cost profile whose version in force at the day end is archived', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived at the order date, restored later: the version in force is archived.
+    // Archived at the day end, restored after it: the version in force is archived.
     const archivedInForceId = randomUUID();
     const restoredLaterId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: archivedInForceId, effectiveFrom: BEFORE_ORDER_DATE, archived: true },
       { id: restoredLaterId, effectiveFrom: AFTER_ORDER_DATE, archived: false },
     ]);
-    // Live at the order date, archived later: the version in force is usable.
+    // Live at the day end, archived after it: the version in force is usable.
     const liveInForceId = lowSortingId();
     const archivedLaterId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
@@ -1185,6 +1782,8 @@ describe('captureOrderProfitSnapshot', () => {
     await prisma.productVariantCostProfile.deleteMany({
       where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
     });
+    // Fixture setup, not history: the removed link was not on the variant that day.
+    await clearSellerInputHistory(parcel.organizationId);
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
@@ -1232,6 +1831,48 @@ describe('captureOrderProfitSnapshot', () => {
 
     const itemA = await readItemSnapshot(parcel.itemA);
     expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, atDayEndId]));
+  });
+
+  // Same-day edit window (plan PR-1, P1-08): a capture reads the seller inputs in
+  // force at the order's day end, rebuilt from the history logs, so a write stamped
+  // after that day end does not reach a first capture of the order.
+  it("a past-day first capture pins a link detached after the order's day end", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date(Date.now() - DAY_MS));
+    const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
+    expect(cogsVersionIds).toHaveLength(1);
+    // Detached now, after yesterday's day end.
+    await prisma.productVariantCostProfile.deleteMany({
+      where: { organizationId: parcel.organizationId, productVariantId: parcel.variantA },
+    });
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(cogsVersionIds);
+  });
+
+  it("a past-day first capture takes the desi in force at the order's day end", async () => {
+    const parcel = await seedSnapshotParcel();
+    await setOrderDate(parcel, new Date(Date.now() - DAY_MS));
+    // Changed now, after yesterday's day end: item A's override, item B's synced desi.
+    await prisma.productVariant.update({
+      where: { id: parcel.variantA },
+      data: { dimensionalWeightOverride: '7.00' },
+    });
+    await prisma.productVariant.update({
+      where: { id: parcel.variantB },
+      data: { syncedDimensionalWeight: '4.00' },
+    });
+
+    await capture(parcel);
+
+    const itemA = await readItemSnapshot(parcel.itemA);
+    expect(itemA.snapshotUnitDesi?.toString()).toBe('3.5');
+    expect(itemA.snapshotDesiSource).toBe(SnapshotDesiSource.OVERRIDE);
+    const itemB = await readItemSnapshot(parcel.itemB);
+    expect(itemB.snapshotUnitDesi?.toString()).toBe('1');
+    expect(itemB.snapshotDesiSource).toBe(SnapshotDesiSource.SYNCED);
   });
 
   it('a profile archived before the day end is not pinned, archived after it is pinned', async () => {
@@ -1295,36 +1936,38 @@ describe('captureOrderProfitSnapshot', () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived before the order, restored later the same day: the version at the order
-    // instant is an archive version, so the restore version prices it.
+    // Archived before the order, restored later the same day: the restore version is
+    // the one in force at the day end, so it prices the order.
     const restoredId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: randomUUID(), effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: BEFORE_ORDER_DATE, archived: true },
       { id: restoredId, effectiveFrom: laterOnOrderDay(1), archived: false },
     ]);
-    // Archived after the order and restored before the day end: the version at the
-    // order instant was live, so it prices the order.
+    // Live at the order instant, archived after it and restored before the day end:
+    // the restore version prices the order, not the one live at the order instant.
     const liveAtOrderId = randomUUID();
+    const restoredAfterOrderId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: liveAtOrderId, effectiveFrom: COST_FIXTURE_EPOCH, archived: false },
       { id: randomUUID(), effectiveFrom: laterOnOrderDay(1), archived: true },
-      { id: randomUUID(), effectiveFrom: laterOnOrderDay(2), archived: false },
+      { id: restoredAfterOrderId, effectiveFrom: laterOnOrderDay(2), archived: false },
     ]);
 
     await capture(parcel);
 
     const itemA = await readItemSnapshot(parcel.itemA);
     expect(itemA.snapshotCostProfileVersionIds).toEqual(
-      sorted([...cogsVersionIds, restoredId, liveAtOrderId]),
+      sorted([...cogsVersionIds, restoredId, restoredAfterOrderId]),
     );
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(liveAtOrderId);
   });
 
-  it('the order-time version is pinned even when the amount was edited before capture', async () => {
+  it('the day-end version is pinned when the amount was edited later the same day', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
-    // 100 at the order instant; the seller edits it to 120 later the same day, before
-    // the order enters profit (Berkin 2026-11-23: the amount at the order time).
+    // 100 at the order instant; the seller edits it to 120 later the same day (Berkin
+    // 2026-11-23: the cost in force at the end of the order's business day).
     const orderTimeId = randomUUID();
     const editedId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
@@ -1340,16 +1983,16 @@ describe('captureOrderProfitSnapshot', () => {
     await capture(parcel);
 
     const itemA = await readItemSnapshot(parcel.itemA);
-    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, orderTimeId]));
-    expect(itemA.snapshotCostProfileVersionIds).not.toContain(editedId);
+    expect(itemA.snapshotCostProfileVersionIds).toEqual(sorted([...cogsVersionIds, editedId]));
+    expect(itemA.snapshotCostProfileVersionIds).not.toContain(orderTimeId);
   });
 
-  it('with no version at the order time the version in force at capture is pinned', async () => {
+  it('a profile created after the order instant is pinned with its version in force at the day end', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     // The profile is created after the order instant (100) and edited to 120 before
-    // the day end: no version existed at the order time, so the version in force at
-    // the decision time prices it, not the first one.
+    // the day end: the version in force at the decision time prices it, not the first
+    // one.
     const firstId = randomUUID();
     const inForceId = randomUUID();
     await attachCostProfileVersions(

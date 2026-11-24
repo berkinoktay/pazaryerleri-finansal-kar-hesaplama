@@ -188,6 +188,44 @@ export async function loadIdentifiedCostProfilesByVariant(
   return loadCostProfiles(tx, params, toIdentifiedCostVersion);
 }
 
+/** A cost profile's type and its identified version history, without a link. */
+export interface IdentifiedCostProfileHistory {
+  readonly profileType: CostProfileType;
+  readonly versions: readonly IdentifiedCostProfileVersionInput[];
+}
+
+/**
+ * The given cost profiles by id, org-filtered, each with its full version history in
+ * the same (effectiveFrom, version) order and mapping as
+ * `loadIdentifiedCostProfilesByVariant`. Used for profiles whose link to a variant was
+ * removed (the removal log names the profile, not a live link). A profile with no
+ * version is dropped, as in the link loaders; an id that is not this organization's
+ * is absent from the map.
+ */
+export async function loadIdentifiedCostProfilesById(
+  tx: Prisma.TransactionClient,
+  params: { readonly organizationId: string; readonly profileIds: readonly string[] },
+): Promise<Map<string, IdentifiedCostProfileHistory>> {
+  const profileIds = [...new Set(params.profileIds)];
+  const byId = new Map<string, IdentifiedCostProfileHistory>();
+  if (profileIds.length === 0) {
+    return byId;
+  }
+
+  const profiles = await tx.costProfile.findMany({
+    where: { id: { in: profileIds }, organizationId: params.organizationId },
+    include: { versions: { orderBy: [{ effectiveFrom: 'asc' }, { version: 'asc' }] } },
+  });
+  for (const profile of profiles) {
+    const versions = profile.versions.map(toIdentifiedCostVersion);
+    if (versions.length === 0) {
+      continue; // a profile with no versions cannot be costed and would break indexing
+    }
+    byId.set(profile.id, { profileType: profile.type, versions });
+  }
+  return byId;
+}
+
 /**
  * The cost profile versions a captured order item was pinned to (order profit
  * snapshot), by version id, org-filtered, in a single query. Each becomes a

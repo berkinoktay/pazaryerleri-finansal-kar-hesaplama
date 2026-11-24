@@ -78,6 +78,8 @@ export async function truncateAll(): Promise<void> {
        order_claims,
        order_items,
        orders,
+       cost_link_removals,
+       variant_desi_changes,
        product_variant_cost_profiles,
        cost_profile_versions,
        cost_profiles,
@@ -358,6 +360,11 @@ export interface SeedMelontikOptions {
    * backoff tests.
    */
   readonly lineSellerDiscountGrossA?: string;
+  /**
+   * The order's seller-input marker. Omitted or null = the order's seller inputs
+   * still follow its business day; a date = the day-close pass made them final.
+   */
+  readonly sellerInputsFinalAt?: Date | null;
 }
 
 export interface MelontikParcel {
@@ -414,6 +421,7 @@ export async function seedMelontikParcel(opts: SeedMelontikOptions = {}): Promis
       cargoTrackingNumber: opts.cargoTrackingNumber ?? null,
       snapshotIncludeStopaj: opts.snapshotIncludeStopaj ?? null,
       snapshotIncludeNegativeNetVat: opts.snapshotIncludeNegativeNetVat ?? null,
+      sellerInputsFinalAt: opts.sellerInputsFinalAt ?? null,
     },
   });
 
@@ -801,6 +809,8 @@ export async function seedBareOrder(params: {
   readonly storeId: string;
   readonly orderDate?: Date;
   readonly status?: OrderStatus;
+  /** See SeedMelontikOptions.sellerInputsFinalAt. */
+  readonly sellerInputsFinalAt?: Date | null;
 }): Promise<string> {
   const order = await prisma.order.create({
     data: {
@@ -813,9 +823,37 @@ export async function seedBareOrder(params: {
       fastDelivery: false,
       fastDeliveryType: null,
       usesSellerCargoAgreement: false,
+      sellerInputsFinalAt: params.sellerInputsFinalAt ?? null,
     },
   });
   return order.id;
+}
+
+/**
+ * Deletes the organization's rows from both seller-input history logs: "the writes
+ * so far were fixture setup, not history". Once the history triggers exist, a test
+ * that arranges a past-dated order's fixture with a desi UPDATE or a link DELETE gets
+ * a log row stamped now, after that order's day end, so the day-end reconstruction
+ * would return the value from before the arrangement.
+ */
+export async function clearSellerInputHistory(organizationId: string): Promise<void> {
+  await prisma.costLinkRemoval.deleteMany({ where: { organizationId } });
+  await prisma.variantDesiChange.deleteMany({ where: { organizationId } });
+}
+
+/**
+ * Restamps the organization's seller-input history rows (`detached_at`,
+ * `changed_at`) to `at`: "the writes so far happened at `at`".
+ */
+export async function backdateSellerInputHistory(organizationId: string, at: Date): Promise<void> {
+  await prisma.costLinkRemoval.updateMany({
+    where: { organizationId },
+    data: { detachedAt: at },
+  });
+  await prisma.variantDesiChange.updateMany({
+    where: { organizationId },
+    data: { changedAt: at },
+  });
 }
 
 /**

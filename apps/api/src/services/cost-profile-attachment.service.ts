@@ -2,6 +2,7 @@ import { prisma } from '@pazarsync/db';
 import type { CostProfile } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import {
   CostProfileArchivedCannotAttachError,
@@ -165,7 +166,10 @@ export async function attachCostProfiles(
   );
 
   // One transaction: create the links + flip any now-calculable buffer entries +
-  // queue a profit recompute for the affected variants' orders (COST_CHANGED).
+  // queue a profit recompute for the affected variants' orders (COST_CHANGED). Every
+  // link transaction in this file stamps seller-input history (link attach or removal),
+  // so each runs with SELLER_INPUT_TX_OPTIONS: its short timeout keeps a write stamped
+  // before a business-day end from committing after that day is settled (D6).
   return await prisma.$transaction(async (tx) => {
     const result = await tx.productVariantCostProfile.createMany({
       data,
@@ -181,7 +185,7 @@ export async function attachCostProfiles(
       reason: ProfitRecomputeReason.COST_CHANGED,
     });
     return { attached: result.count, bufferEntriesPromoted };
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 }
 
 /**
@@ -220,7 +224,7 @@ export async function detachCostProfiles(
       reason: ProfitRecomputeReason.COST_CHANGED,
     });
     return deleted;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return { detached: result.count };
 }
@@ -296,7 +300,7 @@ export async function replaceCostProfilesForVariants(
       reason: ProfitRecomputeReason.COST_CHANGED,
     });
     return promoted;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return {
     variantsAffected: variantIds.length,

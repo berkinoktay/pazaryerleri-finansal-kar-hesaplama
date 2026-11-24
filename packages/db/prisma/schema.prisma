@@ -386,6 +386,10 @@ enum ProfitRecomputeReason {
   REFERENCE_CHANGED
   STALE_STATEMENT
   MANUAL
+  // A variant's desi changed (seller override or synced value) while its orders still follow the day.
+  DESI_CHANGED
+  // The day-close pass made an order's seller inputs final at the end of its business day.
+  DAY_CLOSE
 }
 
 // ─── Models ──────────────────────────────────────────
@@ -424,6 +428,8 @@ model Organization {
   livePerformanceBuffer LivePerformanceBuffer[]
   catalogBarcodeMisses  CatalogBarcodeMiss[]
   priceChangeLogs       PriceChangeLog[]
+  costLinkRemovals      CostLinkRemoval[]
+  variantDesiChanges    VariantDesiChange[]
 
   @@map("organizations")
 }
@@ -681,6 +687,7 @@ model ProductVariant {
   orderItems       OrderItem[]
   costProfileLinks ProductVariantCostProfile[]
   priceChangeLogs  PriceChangeLog[]
+  desiChanges      VariantDesiChange[]
 
   @@unique([storeId, platformVariantId])
   // Intentionally NOT unique on (storeId, barcode): marketplaces enforce
@@ -805,6 +812,15 @@ model Order {
   profitExcludedAt      DateTime?              @map("profit_excluded_at")
   profitExclusionReason ProfitExclusionReason? @map("profit_exclusion_reason")
 
+  // Seller inputs (cost links and desi) of an order follow its Istanbul business
+  // day: the values in force at the day end are the order's values (Berkin
+  // 2026-11-23). NULL = the day is still open, so a recompute re-derives the
+  // captured cost list and desi; set = the day-close pass made them final and a
+  // recompute leaves them frozen. The PR-1 migration marked every order dated
+  // before its deploy day as final (their detaches and desi edits were never
+  // logged, so they can never be re-derived).
+  sellerInputsFinalAt   DateTime?              @map("seller_inputs_final_at")
+
   // Türetilmiş: actualDeliveryDate <= agreedDeliveryDate → true (Bugün Kargoda PSF).
   // applyEstimate hesaplaması: inferDeliveredOnTime(order) — null = henüz delivered değil.
   deliveredOnTime Boolean? @map("delivered_on_time")
@@ -877,6 +893,8 @@ model Order {
   // snapshot_carrier_id is a FK (onDelete: SetNull); the index keeps a carrier
   // delete from scanning every order.
   @@index([snapshotCarrierId])
+  // Day-close pass: the non-final orders (NULL marker) whose business day ended.
+  @@index([sellerInputsFinalAt, orderDate])
   @@map("orders")
 }
 
@@ -916,16 +934,20 @@ model OrderItem {
   // profit loader can read a raw rate and resolve the chain itself.
   orderCommissionRatePct Decimal? @map("order_commission_rate_pct") @db.Decimal(5, 2)
 
-  // ─── Order item profit snapshot (inputs frozen at intake) ────────────
+  // ─── Order item profit snapshot (product inputs frozen at intake) ────
   // Written when the item first enters the profit computation
   // (captureOrderProfitSnapshot, packages/profit), from the product variant, product
   // and commission rules of that moment. Afterwards the item is priced with these
-  // values, not the live ones, so a later desi correction, synced commission rate,
-  // category rule or cost link edit only reaches new orders. Types match the source
+  // values, not the live ones, so a later synced commission rate or category rule only
+  // reaches new orders. The seller inputs (the desi and the cost list) are the
+  // exception: they are the values in force at the end of the order's business day,
+  // re-derived on every recompute while orders.seller_inputs_final_at is NULL and
+  // frozen once it is set (same-day edit window). Types match the source
   // columns (product_variants.synced_dimensional_weight, products.category_id and
   // brand_id, product_variants.synced_commission_rate, marketplace_commission_rate
   // .base_rate).
-  // The only event that changes them: the item's productVariantId is set and differs
+  // Besides that seller-input re-derive, the only event that changes them: the item's
+  // productVariantId is set and differs
   // from snapshotProductVariantId (e.g. the barcode was matched to a variant later);
   // the whole item is captured again. A variant that drops to null (deleted from the
   // catalogue) leaves the captured values as they are. An item without a variant is
@@ -940,12 +962,13 @@ model OrderItem {
   snapshotCategoryRatePct         Decimal?            @map("snapshot_category_rate_pct") @db.Decimal(5, 2)
   snapshotCategoryBrandRatePct    Decimal?            @map("snapshot_category_brand_rate_pct") @db.Decimal(5, 2)
   // The cost profile versions the item is priced with: the variant's links in force
-  // at the end of the order's business day, each by its version at the order time
-  // (or, when none was live then, the one in force at that day end).
-  // No FK (an array column); cost profile versions are never deleted. The list is
-  // frozen at capture: besides the variant change above, a filled list never changes,
-  // even while the order's day is open, and an empty one is filled only from links in
-  // force at that day end (gap fill). The cost deadline rule still applies.
+  // at the end of the order's business day, each by its version in force at that day
+  // end. No FK (an array column); cost profile versions are never deleted. While the
+  // order is not final (orders.seller_inputs_final_at NULL) every recompute re-derives
+  // the list at the day end, so a same-day attach, detach, archive, restore or amount
+  // edit reaches it. Once final, besides the variant change above, a filled list never
+  // changes, and an empty one is filled only from links in force at that day end (gap
+  // fill). The cost deadline rule still applies.
   // Stored in ascending id order.
   snapshotCostProfileVersionIds   String[]            @default([]) @map("snapshot_cost_profile_version_ids") @db.Uuid
   // Marks the item's latest full capture; null = not captured yet. It moves only
@@ -1025,8 +1048,12 @@ model CostProfileVersion {
   changedFields  String[]        @map("changed_fields")
   changedBy      String?         @map("changed_by") @db.Uuid
   changedAt      DateTime        @default(now()) @map("changed_at")
-  // When this version starts to apply; the DB default is the instant of the operation that created the version -- create, update, archive or restore -- so the API service needs no change.
-  effectiveFrom  DateTime        @default(now()) @map("effective_from")
+  // When this version starts to apply. The database writes it: the default is
+  // the start instant of the transaction that created the version (create,
+  // update, archive or restore) as a UTC wall clock, the same instant as every
+  // link attach and link removal of that transaction. Writers pass no value;
+  // test factories may pass one to backdate a version.
+  effectiveFrom  DateTime        @default(dbgenerated("timezone('utc'::text, now())")) @map("effective_from")
   changeReason   String?         @map("change_reason")
 
   profile CostProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -1042,7 +1069,9 @@ model ProductVariantCostProfile {
   productVariantId String   @map("product_variant_id") @db.Uuid
   profileId        String   @map("profile_id") @db.Uuid
   organizationId   String   @map("organization_id") @db.Uuid
-  attachedAt       DateTime @default(now()) @map("attached_at")
+  // Written by the database: the start instant of the attaching transaction as a
+  // UTC wall clock (see CostProfileVersion.effectiveFrom). Writers pass no value.
+  attachedAt       DateTime @default(dbgenerated("timezone('utc'::text, now())")) @map("attached_at")
   attachedBy       String?  @map("attached_by") @db.Uuid
 
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
@@ -1057,6 +1086,63 @@ model ProductVariantCostProfile {
   @@index([profileId])
   @@index([organizationId, productVariantId], map: "idx_pvcp_org_product_variant")
   @@map("product_variant_cost_profiles")
+}
+
+// One row per DIRECT delete of a cost link (a detach or a replace), written by
+// trg_log_cost_link_removal in supabase/sql/triggers.sql. A cascaded delete (the
+// variant, profile, store or organization is deleted) is not logged. With the
+// live links it rebuilds a variant's cost links at an order's business-day end.
+// Append-only and trigger-written: created_at but deliberately no updated_at
+// (@updatedAt has no database default, so a trigger insert could not fill it).
+// productVariantId and profileId are plain columns: the row must outlive a later
+// delete of either parent.
+model CostLinkRemoval {
+  id               BigInt   @id @default(autoincrement())
+  organizationId   String   @map("organization_id") @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  profileId        String   @map("profile_id") @db.Uuid
+  // The removed link's own attached_at.
+  attachedAt       DateTime @map("attached_at")
+  // The deleting transaction's start instant as a UTC wall clock.
+  detachedAt       DateTime @map("detached_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([productVariantId, detachedAt])
+  @@map("cost_link_removals")
+}
+
+// One row per real change of either desi column of a variant (the seller
+// override or the synced marketplace value), written by
+// trg_log_variant_desi_change in supabase/sql/triggers.sql. Rebuilds a variant's
+// desi at an order's business-day end. Append-only and trigger-written: no
+// updated_at (see CostLinkRemoval). seq is the commit-serialised application
+// order of the changes of one variant (same-row writes wait on the row lock).
+model VariantDesiChange {
+  seq              BigInt   @id @default(autoincrement())
+  organizationId   String   @map("organization_id") @db.Uuid
+  storeId          String   @map("store_id") @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  // The updating transaction's start instant as a UTC wall clock.
+  changedAt        DateTime @map("changed_at")
+  overrideChanged  Boolean  @map("override_changed")
+  syncedChanged    Boolean  @map("synced_changed")
+  // Old and new values of both columns; precision mirrors product_variants.
+  oldOverride      Decimal? @map("old_override") @db.Decimal(6, 2)
+  newOverride      Decimal? @map("new_override") @db.Decimal(6, 2)
+  oldSynced        Decimal? @map("old_synced") @db.Decimal(6, 2)
+  newSynced        Decimal? @map("new_synced") @db.Decimal(6, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  // Both desi lookups: the highest seq stamped at or before a day end, and the first logged change.
+  @@index([productVariantId, seq])
+  @@map("variant_desi_changes")
 }
 
 model Expense {

@@ -6,7 +6,9 @@
  *   2. Cross-tenant IDs are silently filtered out (never mutated).
  *   3. Null body clears overrides across all listed variants.
  *   4. Empty / oversized / malformed input → 422.
- *   5. Entering a desi promotes today's PENDING Live Performance buffer entries of
+ *   5. Every write (clear included) queues the non-final orders of the written
+ *      variants only (DESI_CHANGED).
+ *   6. Entering a desi promotes today's PENDING Live Performance buffer entries of
  *      the written variants only (never another store's entries).
  */
 
@@ -16,6 +18,7 @@ import { Decimal } from 'decimal.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
+import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 
 import { createApp } from '@/app';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
@@ -24,6 +27,8 @@ import {
   createBufferEntry,
   createCostProfile,
   createMembership,
+  createOrder,
+  createOrderItem,
   createOrganization,
   createStore,
 } from '../../helpers/factories';
@@ -185,6 +190,40 @@ describe('PATCH .../products/variants/dimensional-weight (bulk)', () => {
     const bRow = await prisma.productVariant.findFirstOrThrow({ where: { id: v1B } });
     expect(aRow.dimensionalWeightOverride?.toString()).toBe('4');
     expect(bRow.dimensionalWeightOverride).toBeNull(); // Org B untouched.
+  });
+
+  // Owner rule (Berkin 2026-11-23): an order's desi is the value in force at the end
+  // of its business day, so a desi write (clear included) queues the non-final orders
+  // of the variants the write actually touched, and only those.
+  it("queues only the written variants' non-final orders, a clear included", async () => {
+    const ctx = await setupCtx();
+    const otherStore = await createStore(ctx.orgId, { name: 'Other Store' });
+    const ownVariant = await seedVariant(ctx, { syncedDimensionalWeight: '1.00' });
+    // Same organization, another store: the write filters it out, so its order must
+    // not be queued either (the queue scope alone is organization-wide).
+    const foreignVariant = await seedVariant(
+      { ...ctx, storeId: otherStore.id },
+      { syncedDimensionalWeight: '1.00' },
+    );
+    const ownOrder = await createOrder(ctx.orgId, ctx.storeId);
+    await createOrderItem(ownOrder.id, ctx.orgId, { productVariantId: ownVariant });
+    const foreignOrder = await createOrder(ctx.orgId, otherStore.id);
+    await createOrderItem(foreignOrder.id, ctx.orgId, { productVariantId: foreignVariant });
+
+    const requestReason = async (orderId: string): Promise<ProfitRecomputeReason | undefined> =>
+      (await prisma.profitRecomputeRequest.findUnique({ where: { orderId } }))?.reason;
+
+    for (const dimensionalWeight of ['3.00', null]) {
+      await prisma.profitRecomputeRequest.deleteMany({ where: { orderId: ownOrder.id } });
+      const res = await bulkPatch(ctx, {
+        variantIds: [ownVariant, foreignVariant],
+        dimensionalWeight,
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ updated: 1 });
+      expect(await requestReason(ownOrder.id)).toBe(ProfitRecomputeReason.DESI_CHANGED);
+      expect(await requestReason(foreignOrder.id)).toBeUndefined();
+    }
   });
 
   it('rejects empty variantIds with 422 INVALID_VARIANT_IDS_EMPTY', async () => {

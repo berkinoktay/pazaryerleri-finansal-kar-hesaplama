@@ -221,6 +221,7 @@ export {
 export {
   recomputeParcelProfit,
   acquireParcelProfitLock,
+  tryAcquireParcelProfitLock,
   type RecomputeParcelResult,
 } from './persistence/recompute-parcel-profit';
 export {
@@ -233,6 +234,24 @@ export {
   captureOrderProfitSnapshot,
   type OrderProfitSnapshotOutcome,
 } from './persistence/order-profit-snapshot';
+// Seller inputs at an order's business-day end (same-day edit window, PR-1)
+export {
+  loadSellerInputsAt,
+  resolveDesiAtDayEnd,
+  type SellerDesiAt,
+  type SellerInputsAt,
+} from './persistence/seller-inputs-at';
+// The settled cutoff: database clock plus no open pre-midnight transaction (same-day edit window, PR-1)
+export {
+  findTransactionsOpenSince,
+  openWriterLogEntry,
+  readDbNow,
+  resetSettledCutoffMemo,
+  resolveSettledCutoff,
+  type OpenWriter,
+  type OpenWriterLogEntry,
+  type SettledCutoff,
+} from './persistence/db-clock';
 // Batch scenario input loader (rebuild, phase 4B) -- docs/plans/2026-11-04-profit-engine-faz-4b-plan.md
 export {
   loadTrendyolScenarioBases,
@@ -279,9 +298,12 @@ export { visibleProfitIssues } from './read/visible-profit-issues';
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {
   PROFIT_RECOMPUTE_BATCH_SIZE,
+  PROFIT_RECOMPUTE_TX_MAX_WAIT_MS,
+  PROFIT_RECOMPUTE_TX_TIMEOUT_MS,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,
+  enqueueProfitRecomputeForNonFinalOrders,
   enqueueStaleProfitStatements,
   enqueueCarrierGapRecomputes,
   enqueueReferenceDataGapRecomputes,

@@ -127,3 +127,116 @@ CREATE TRIGGER trg_reject_automatic_exclusion_change
   BEFORE UPDATE OF profit_excluded_at, profit_exclusion_reason ON orders
   FOR EACH ROW
   EXECUTE FUNCTION public.reject_automatic_exclusion_change();
+
+-- --- Seller-input history (same-day edit window) ----------------------------
+-- Berkin's rule (2026-11-23): an order's cost links and desi are the values in
+-- force at the end of its Istanbul business day. Changes during the day reach
+-- every order of that day; at 00:00 the seller inputs become final. Rebuilding
+-- the state at a day end needs what a hard delete or an in-place overwrite
+-- would lose, so two append-only logs keep it.
+--
+-- Every stamp is timezone('utc'::text, now()): the start instant of the writing
+-- transaction as a UTC wall clock (the stamp columns are TIMESTAMP(3) without
+-- time zone, so a bare now() would follow the session time zone). It is the same
+-- expression as the attached_at / effective_from column defaults, so a replace
+-- (delete the old link, attach the new one, write a version) in one transaction
+-- carries one instant everywhere.
+--
+-- Neither function is SECURITY DEFINER: they run with the caller's privileges.
+-- The API and the worker write as the service role; `authenticated` has no write
+-- policy on product_variant_cost_profiles or product_variants, so it can never
+-- fire them.
+
+-- One-shot final-marker backfill for a database that got this schema without
+-- the migration's own backfill (20261123175419_seller_input_history): `pnpm
+-- db:push`, or `prisma migrate resolve --applied`. Orders dated before today's
+-- Istanbul start had their link detaches and desi edits logged by nobody, so they
+-- must be final, or the day-close pass would re-derive (and possibly stamp) the
+-- whole history. It runs only while trg_log_cost_link_removal does not exist yet,
+-- i.e. once, on the run that first installs the history triggers below, and it
+-- only touches non-final orders: on the db:deploy path the migration already
+-- marked them, so it changes no row. The boundary and the stamp are the
+-- migration's own expressions (order_date is a UTC wall clock: Istanbul local
+-- midnight -> the instant -> its UTC wall clock); neither follows the session
+-- time zone. Must stay before the DROP TRIGGER of trg_log_cost_link_removal.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_trigger
+     WHERE tgname = 'trg_log_cost_link_removal'
+       AND tgrelid = 'public.product_variant_cost_profiles'::regclass
+  ) THEN
+    UPDATE public.orders
+       SET seller_inputs_final_at = timezone('utc'::text, now())
+     WHERE order_date < ((date_trunc('day', now() AT TIME ZONE 'Europe/Istanbul')
+                          AT TIME ZONE 'Europe/Istanbul') AT TIME ZONE 'UTC')
+       AND seller_inputs_final_at IS NULL;
+  END IF;
+END
+$$;
+
+-- log_cost_link_removal: one cost_link_removals row per DIRECT delete of a cost
+-- link (a detach or the delete half of a replace). The removed link's own
+-- attached_at is kept, so the link can be rebuilt for any day end between its
+-- attach and its detach.
+CREATE OR REPLACE FUNCTION public.log_cost_link_removal()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.cost_link_removals
+    (organization_id, product_variant_id, profile_id, attached_at, detached_at)
+  VALUES
+    (OLD.organization_id, OLD.product_variant_id, OLD.profile_id, OLD.attached_at,
+     timezone('utc'::text, now()));
+  RETURN OLD;
+END;
+$$;
+
+-- Direct deletes only. A delete cascaded from a deleted variant, cost profile,
+-- store or organization runs inside the foreign key's own trigger, at depth 1,
+-- and is not logged: the variant or profile is gone for good, and an
+-- organization delete would otherwise insert a row that references the
+-- organization being deleted. WHEN is evaluated when the row is deleted, so the
+-- depth is the deleting statement's own.
+DROP TRIGGER IF EXISTS trg_log_cost_link_removal ON product_variant_cost_profiles;
+CREATE TRIGGER trg_log_cost_link_removal
+  AFTER DELETE ON product_variant_cost_profiles
+  FOR EACH ROW
+  WHEN (pg_trigger_depth() = 0)
+  EXECUTE FUNCTION public.log_cost_link_removal();
+
+-- log_variant_desi_change: one variant_desi_changes row per real change of
+-- either desi column (the seller override or the synced marketplace value),
+-- with the old and new values of both columns and which of them changed. seq
+-- (bigserial) is the application order: writes to one variant row wait on its
+-- row lock, so they take their seq in commit order.
+CREATE OR REPLACE FUNCTION public.log_variant_desi_change()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.variant_desi_changes
+    (organization_id, store_id, product_variant_id, changed_at,
+     override_changed, synced_changed, old_override, new_override, old_synced, new_synced)
+  VALUES
+    (NEW.organization_id, NEW.store_id, NEW.id, timezone('utc'::text, now()),
+     OLD.dimensional_weight_override IS DISTINCT FROM NEW.dimensional_weight_override,
+     OLD.synced_dimensional_weight IS DISTINCT FROM NEW.synced_dimensional_weight,
+     OLD.dimensional_weight_override, NEW.dimensional_weight_override,
+     OLD.synced_dimensional_weight, NEW.synced_dimensional_weight);
+  RETURN NEW;
+END;
+$$;
+
+-- UPDATE OF keeps every unrelated variant update (price, stock, status) from
+-- evaluating the trigger at all; the WHEN clause then skips a write that names
+-- a desi column but keeps its value, so only real changes are logged.
+DROP TRIGGER IF EXISTS trg_log_variant_desi_change ON product_variants;
+CREATE TRIGGER trg_log_variant_desi_change
+  AFTER UPDATE OF dimensional_weight_override, synced_dimensional_weight ON product_variants
+  FOR EACH ROW
+  WHEN (OLD.dimensional_weight_override IS DISTINCT FROM NEW.dimensional_weight_override
+        OR OLD.synced_dimensional_weight IS DISTINCT FROM NEW.synced_dimensional_weight)
+  EXECUTE FUNCTION public.log_variant_desi_change();

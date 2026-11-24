@@ -42,7 +42,9 @@ export const PROFIT_ENGINE_PLATFORMS: readonly Platform[] = Object.values(Platfo
  * parcel-scoped advisory lock first, so concurrent recomputes of the same order run
  * one at a time; the lock releases at commit or rollback. Then captures the order's
  * product and seller inputs (`captureOrderProfitSnapshot`, which fills only missing
- * parts) and computes the parcel from them via `computeParcelProfit` (the single
+ * product parts and, while the order's seller inputs are not final, re-derives its
+ * cost lists and desi at the order's business-day end) and computes the parcel from
+ * them via `computeParcelProfit` (the single
  * per-platform registry), hashes the
  * result, and writes the lines, allocations and both statements only when the stored
  * content hash does not already match. No platform-specific code lives here: a second
@@ -70,7 +72,10 @@ export async function recomputeParcelProfit(
 
   // Order profit snapshot (plan PR-2, decision 4): capture the order's product and
   // seller inputs if it has none yet, or fill only the missing parts, in this same
-  // transaction and under the lock, so the computation below reads the capture.
+  // transaction and under the lock, so the computation below reads the capture. While
+  // the order's seller-input marker is NULL the capture also re-derives the cost lists
+  // and desi at the order's day end (same-day edit window plan PR-1); the marker is
+  // read there, after the lock above, never before it.
   await captureOrderProfitSnapshot(tx, { organizationId, orderId });
 
   const computed = await computeParcelProfit(tx, params);
@@ -136,6 +141,30 @@ export async function acquireParcelProfitLock(
   orderId: string,
 ): Promise<void> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
+}
+
+/**
+ * Tries the same transaction-level advisory lock as `acquireParcelProfitLock` without
+ * waiting: true when it was granted (released at commit or rollback), false when
+ * another transaction holds it -- a recompute of this parcel is running. The day-close
+ * finaliser takes it first and skips a busy order instead of queueing behind it.
+ */
+export async function tryAcquireParcelProfitLock(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<unknown[]>`
+    SELECT pg_try_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8)) AS locked`;
+  const row = rows[0];
+  if (
+    typeof row !== 'object' ||
+    row === null ||
+    !('locked' in row) ||
+    typeof row.locked !== 'boolean'
+  ) {
+    throw new Error('the parcel try-lock returned an unexpected row shape');
+  }
+  return row.locked;
 }
 
 /** A profit-line row built for createMany, carrying the id its allocations reference. */

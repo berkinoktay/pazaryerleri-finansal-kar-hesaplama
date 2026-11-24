@@ -18,8 +18,11 @@
  *   - Order UPSERT on (storeId, platformOrderId)
  *   - OrderItem INSERT skip-if-exists, platformLineId-first (legacy fallback:
  *     (orderId, productVariantId) for lines/rows without a platform line id)
- *   - captureOrderProfitSnapshot on create only: the order's product and seller
- *     inputs are frozen at intake, in the same transaction.
+ *   - captureOrderProfitSnapshot on create only: the order's product inputs are
+ *     frozen at intake and its seller inputs are captured at its business-day end, in
+ *     the same transaction. The seller-input marker (`sellerInputsFinalAt`) is written
+ *     on create only, and only for a settled past day; otherwise the order is created
+ *     non-final and its seller inputs follow its day until the day-close pass.
  *   - enqueueProfitRecompute on every write (create + update): one mark per order.
  *     The sync-worker tick drains it and computes the statement in its own short
  *     transaction; a compute failure there never rolls back this order write.
@@ -74,6 +77,16 @@ export interface UpsertOrderOpts {
    * database layer.
    */
   profitExclusion?: { readonly reason: ProfitExclusionReason };
+  /**
+   * Same-day edit window (plan PR-1, D8): when set, the order is created with its seller
+   * inputs already final (`orders.seller_inputs_final_at`). Passed only for an order
+   * whose business day is settled by `resolveSettledCutoff` (buffer graduation of a
+   * settled past day, intake of a settled past day), with that cutoff's database clock,
+   * so its exclusion is decided at create and the day-close pass never selects it.
+   * Written ONLY on a genuine create, like `profitExclusion`: the UPDATE branch never
+   * touches the column. Omitted -> the order is created non-final.
+   */
+  sellerInputsFinalAt?: Date;
   /**
    * Set true by the buffer-promote worker when this order graduates from the
    * live-performance buffer (the seller already saw it as a cost-missing entry).
@@ -286,6 +299,12 @@ export async function upsertOrderWithSnapshot(
           profitExcludedAt: new Date(),
           profitExclusionReason: opts.profitExclusion.reason,
         }),
+        // Seller-input marker (same-day edit window), CREATE-only like the exclusion:
+        // a settled past-day order is created final, so the snapshot capture below
+        // pins its inputs at the day end once and the day-close pass never selects it.
+        ...(opts?.sellerInputsFinalAt !== undefined && {
+          sellerInputsFinalAt: opts.sellerInputsFinalAt,
+        }),
         // Buffer-graduation marker (CREATE-only): the realtime toast reads this to
         // drop a duplicate "new order" for an order the seller already saw in the
         // buffer. Deliberately NOT in the update branch — an UPDATE emits no
@@ -496,9 +515,12 @@ export async function upsertOrderWithSnapshot(
 
     // 3. Order profit snapshot (plan PR-2, decision 4): on a genuine create only, after
     //    the items are written and in this same transaction, capture the order's product
-    //    and seller inputs, so the order is priced with the values of its intake moment.
-    //    An update never captures here: the recompute it enqueues below fills whatever
-    //    is still missing (an uncaptured order, a later-matched item, an empty cost list).
+    //    inputs as of its intake and its seller inputs (cost list, desi) as they stand at
+    //    the end of its business day. An update never captures here: the recompute it
+    //    enqueues below does it. While the order is non-final (`sellerInputsFinalAt`
+    //    NULL) every recompute re-derives its seller inputs at its day end (same-day
+    //    edit window, plan PR-1); once final, a recompute only fills what is still
+    //    missing (an uncaptured order, a later-matched item, an empty cost list).
     if (existingOrder === null) {
       await captureOrderProfitSnapshot(tx, { organizationId, orderId: upserted.id });
     }

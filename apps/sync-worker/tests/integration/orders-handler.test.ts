@@ -52,6 +52,7 @@ import {
 } from '../../../../apps/api/tests/helpers/factories';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import { ensureFeeDefinitions } from '../../../../apps/api/tests/helpers/seed-fee-definitions';
+import { clearSellerInputHistory } from '../../../../apps/api/tests/helpers/seller-input-history';
 import {
   approvedProductsResponse,
   queriesBarcode,
@@ -1481,6 +1482,8 @@ describe('upsertOrderWithSnapshot — standalone (direct call)', () => {
       where: { id: variant.id },
       data: { syncedDimensionalWeight: '1' },
     });
+    // Fixture setup, not history: the variant had that desi on the (past) order's day.
+    await clearSellerInputHistory(org.id);
 
     await upsertOrderWithSnapshot(store.id, org.id, {
       ...buildDirectMapped({
@@ -1786,6 +1789,9 @@ describe('upsertOrderWithSnapshot: a ship date arriving later decides the Barem 
       where: { id: variant.id },
       data: { syncedDimensionalWeight: '1' },
     });
+    // Fixture setup, not history: the variant had that desi on the order's day, three
+    // business days back.
+    await clearSellerInputHistory(org.id);
     // The store's cost profile carries its version 1 from the factory.
 
     const orderDay = getBusinessDayRange(new Date(Date.now() - 3 * MS_PER_DAY));

@@ -2,79 +2,112 @@ import { prisma } from '@pazarsync/db';
 import type {
   BufferEntryStatus,
   LivePerformanceBuffer,
-  Prisma,
   ProfitExclusionReason,
 } from '@pazarsync/db';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import { hadCostWithinOrderDay, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
+import { upsertOrderWithSnapshot } from '@pazarsync/order-sync';
 import {
   buildCalcCheckLines,
+  type CalcResult,
   costDecisionTime,
-  hasMissingDesi,
-  type OrderLineForCalcCheck,
   resolveOrderCalculability,
+  resolveSettledCutoff,
 } from '@pazarsync/profit';
 import { syncLog } from '@pazarsync/sync-core';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { isRetryDue, MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from '../lib/buffer-promote-backoff';
 
-const CHUNK_SIZE = 25;
+/** How many due buffer entries one promote tick takes. */
+export const CHUNK_SIZE = 25;
+
+/**
+ * One tick's graduation window, from the settled cutoff (same-day edit window, plan
+ * PR-1). Owner rule (Berkin 2026-11-23): an order's cost and desi are the values in
+ * force at the end of its Istanbul business day T, and at 00:00 they become final. A
+ * past day may still receive seller-input rows stamped <= T until it is settled by the
+ * database clock (`resolveSettledCutoff`: T + SELLER_INPUT_SETTLE_MS and no open
+ * transaction that began before T), so graduation acts on a past day only from then
+ * on. The buffer's `order_date` is a `@db.Date` anchor, so "settled" is
+ * `orderDate < settledAnchor`.
+ */
+interface GraduationWindow {
+  /** The business date of the database clock's day (today). */
+  readonly todayAnchor: Date;
+  /** An entry dated before this anchor belongs to a settled day. */
+  readonly settledAnchor: Date;
+  /** The tick's database clock: the marker of an order created final. */
+  readonly dbNow: Date;
+}
+
+/**
+ * Resolves the settled cutoff once for a tick. `dbNow` is a test seam; production
+ * reads the database clock. A forced cutoff is logged by `resolveSettledCutoff` itself.
+ */
+async function resolveGraduationWindow(dbNow: Date | undefined): Promise<GraduationWindow> {
+  const settle = await resolveSettledCutoff(prisma, { dbNow });
+  return {
+    todayAnchor: getBusinessDateAnchor(settle.dbNow),
+    settledAnchor: getBusinessDateAnchor(settle.cutoff),
+    dbNow: settle.dbNow,
+  };
+}
 
 /**
  * The SINGLE cost-window + desi decision point every buffer graduation routes through.
  * Berkin 2026-11-03: an order enters net profit only if every non-cancelled item
- * had a cost entered before the order's business day ended; supply prices drift,
+ * had a cost in force at the end of the order's business day; supply prices drift,
  * so a cost entered after that day is too late. Berkin 2026-11-22 (plan PR-2c): every
- * non-digital item also needs an effective desi; the desi is checked for presence at
- * graduation (no entry time is recorded for it), and the cost reason wins when both
- * are missing.
+ * non-digital item also needs an effective desi; the desi is judged as it stood at the
+ * order's day end, and the cost reason wins when both are missing.
  *
- * This excludes ONLY a PAST-DAY entry whose cost is still missing or arrived late
- * (COST_DEADLINE_MISSED), or whose cost was timely but a product still has no desi
- * (DESI_DEADLINE_MISSED), and returns undefined -- no exclusion -- for:
- *   - a SAME-DAY entry: its cost/desi window is still open, so it is never excluded
- *     here regardless of its cost or desi state. The guard below enforces this so the
- *     function cannot mislead -- it decides PAST-DAY graduations only; the day-end
- *     flush owns an entry once its day closes.
+ * This excludes ONLY an entry of a SETTLED past day whose cost is still missing or
+ * arrived late (COST_DEADLINE_MISSED), or whose cost was timely but a product had no
+ * desi (DESI_DEADLINE_MISSED), and returns undefined -- no exclusion -- for:
+ *   - an entry whose day is not settled (today, or a past day before the settled
+ *     cutoff): its seller inputs can still change, so it is never excluded here
+ *     regardless of its cost or desi state. The guard below enforces this so the
+ *     function cannot mislead -- it decides settled graduations only; the day-end
+ *     flush owns an entry once its day is settled.
  *   - a CANCELLED order: it carries no payout and is never excluded.
  *
- * The decision reads the attach/version timestamps against the entry's OWN business
- * day end (via hadCostWithinOrderDay), so a cost attached before that end still
- * counts even when this tick runs after midnight. Tenant-scoped via the entry's
- * organization + store. The caller's already-built calc lines are reused (no
- * rebuild) for both the cost timing and the desi check. A buffer snapshot carries no
- * per-line cancel flag, so every line is treated as non-cancelled (the order-level
- * CANCELLED check owns the cancelled case).
+ * The decision is the caller's gate result (`resolveOrderCalculability` over calc lines
+ * built at the entry's OWN business day end, `costDecisionTime(entry.orderDate)`), so a
+ * cost attached before that end still counts even when this tick runs after midnight,
+ * and the cost and the desi are read once. The gate reports cost_missing exactly when
+ * some line had no cost link in force at that day end, and it checks the cost before
+ * the desi, so the cost reason wins. Tenant-scoped via the entry's organization +
+ * store (the calc lines' reads). A buffer snapshot carries no per-line cancel flag, so
+ * every line is treated as non-cancelled (the order-level CANCELLED check owns the
+ * cancelled case).
  */
-async function resolvePastDayGraduationExclusion(
-  tx: Prisma.TransactionClient,
+function resolvePastDayGraduationExclusion(
   entry: LivePerformanceBuffer,
   mapped: MappedOrder,
-  calcLines: readonly OrderLineForCalcCheck[],
-  now: Date,
-): Promise<{ readonly reason: ProfitExclusionReason } | undefined> {
-  // Same-day guard: the cost/desi window has not closed, so a same-day entry is
-  // never excluded here. Keeps the name honest (PAST-DAY graduations only).
-  if (entry.orderDate.getTime() >= getBusinessDateAnchor(now).getTime()) {
+  calc: CalcResult,
+  settledAnchor: Date,
+): { readonly reason: ProfitExclusionReason } | undefined {
+  // Settled guard: an entry whose day is not settled is never excluded here. Keeps
+  // the name honest (settled PAST-DAY graduations only).
+  if (entry.orderDate.getTime() >= settledAnchor.getTime()) {
     return undefined;
   }
   if (mapped.status === 'CANCELLED') {
     return undefined;
   }
-  const hasTimelyCost = await hadCostWithinOrderDay(tx, {
-    organizationId: entry.organizationId,
-    storeId: entry.storeId,
-    orderDate: entry.orderDate,
-    items: calcLines.map((line) => ({ productVariantId: line.variantId, isCancelled: false })),
-  });
-  if (!hasTimelyCost) {
-    return { reason: 'COST_DEADLINE_MISSED' };
+  if (calc.kind === 'calculable') {
+    return undefined;
   }
-  if (hasMissingDesi(calcLines)) {
-    return { reason: 'DESI_DEADLINE_MISSED' };
+  switch (calc.reason) {
+    case 'cost_missing':
+      return { reason: 'COST_DEADLINE_MISSED' };
+    case 'desi_missing':
+      return { reason: 'DESI_DEADLINE_MISSED' };
+    default: {
+      const _exhaustive: never = calc.reason;
+      throw new Error(`Unhandled calculability reason: ${_exhaustive}`);
+    }
   }
-  return undefined;
 }
 
 /**
@@ -92,21 +125,41 @@ async function resolvePastDayGraduationExclusion(
  * `tx` on upsertOrderWithSnapshot), so a promoted order is never left as a
  * lingering buffer placeholder — no transient double-count on the Live
  * Performance page.
+ *
+ * Same-day edit window (plan PR-1, NB6): the settled cutoff is resolved once per tick,
+ * and an entry of a past day that is not settled yet is not a candidate at all, so a
+ * backlog of such entries right after midnight can never fill the chunk and starve
+ * today's promotions. `opts.dbNow` is a test seam; production reads the database
+ * clock. The app clock serves only the retry backoff.
  */
-export async function processBufferPromote(): Promise<void> {
+export async function processBufferPromote(opts: { readonly dbNow?: Date } = {}): Promise<void> {
+  const window = await resolveGraduationWindow(opts.dbNow);
   const now = new Date();
   // Permissive prefilter using the shortest backoff window; promoteOne re-checks
   // the exact per-attempt backoff under the row lock.
   const earliestEligibleFailedAt = new Date(now.getTime() - RETRY_BACKOFF_MINUTES[0] * 60_000);
 
+  // Cross-tenant scan by design: each claimed row is promoted under its own
+  // organization and store.
   const candidates = await prisma.livePerformanceBuffer.findMany({
     where: {
-      OR: [
-        { status: 'PROMOTING' },
+      AND: [
         {
-          status: 'FAILED',
-          attempts: { lte: MAX_ATTEMPTS },
-          lastFailedAt: { lte: earliestEligibleFailedAt },
+          OR: [
+            { status: 'PROMOTING' },
+            {
+              status: 'FAILED',
+              attempts: { lte: MAX_ATTEMPTS },
+              lastFailedAt: { lte: earliestEligibleFailedAt },
+            },
+          ],
+        },
+        // Today's entries and settled past days only (NB6).
+        {
+          OR: [
+            { orderDate: { gte: window.todayAnchor } },
+            { orderDate: { lt: window.settledAnchor } },
+          ],
         },
       ],
     },
@@ -116,11 +169,11 @@ export async function processBufferPromote(): Promise<void> {
   });
 
   for (const { id } of candidates) {
-    await promoteOne(id, now);
+    await promoteOne(id, now, window);
   }
 }
 
-async function promoteOne(id: string, now: Date): Promise<void> {
+async function promoteOne(id: string, now: Date, window: GraduationWindow): Promise<void> {
   try {
     // Returns the promoted entry on success, or null when the row was claimed by
     // a parallel worker or is no longer eligible. On a promote error the tx
@@ -138,6 +191,14 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         }
 
         const entry = await tx.livePerformanceBuffer.findUniqueOrThrow({ where: { id } });
+
+        // Same-day edit window: a past-day entry whose day is not settled yet is left
+        // exactly as it is -- no demotion, no attempt counted. Its seller inputs can
+        // still change; a tick after the settled cutoff graduates it.
+        const windowClosed = entry.orderDate.getTime() < window.settledAnchor.getTime();
+        if (!windowClosed && entry.orderDate.getTime() < window.todayAnchor.getTime()) {
+          return null;
+        }
 
         // Re-check eligibility under the lock — status / backoff may have changed
         // since the unlocked prefilter read.
@@ -168,10 +229,10 @@ async function promoteOne(id: string, now: Date): Promise<void> {
           lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
           at: costDecisionTime(entry.orderDate),
         });
-        const isCalculable = resolveOrderCalculability(calcLines).kind === 'calculable';
-        const windowClosed = entry.orderDate.getTime() < getBusinessDateAnchor(now).getTime();
+        const calc = resolveOrderCalculability(calcLines);
 
-        if (!isCalculable && !windowClosed) {
+        // Not settled here means today: an unsettled past day returned above.
+        if (calc.kind !== 'calculable' && !windowClosed) {
           // Same day, cost or desi still missing: the window is still open, so return
           // the entry to PENDING; the missing value arriving during the day re-promotes
           // it via the entry-triggered flip.
@@ -189,22 +250,24 @@ async function promoteOne(id: string, now: Date): Promise<void> {
 
         // Graduate into orders. ONE cost-window + desi decision point for EVERY
         // graduation (Berkin 2026-11-03, 2026-11-22): resolvePastDayGraduationExclusion
-        // excludes a PAST-DAY entry whose cost missed the order's business day
-        // (COST_DEADLINE_MISSED) or whose product still has no desi
-        // (DESI_DEADLINE_MISSED), and no-ops for a same-day or cancelled entry. So a
-        // past-day entry that is calculable ONLY because a late cost was attached is
-        // still excluded (the BLOCKER this fixes: the calculable branch used to skip the
-        // check), while a same-day calculable promote is not. The already-built calc
-        // lines are reused. Same tx -> order write + buffer delete commit atomically;
-        // marked as a buffer graduation so the realtime toast suppresses a duplicate ding
-        // for an order the seller already saw as a waiting buffer entry. profitExclusion
-        // is stamped CREATE-only inside upsertOrderWithSnapshot.
-        const profitExclusion = await resolvePastDayGraduationExclusion(
-          tx,
+        // excludes a settled PAST-DAY entry whose cost missed the order's business day
+        // (COST_DEADLINE_MISSED) or whose product had no desi (DESI_DEADLINE_MISSED),
+        // and no-ops for a same-day or cancelled entry. The gate above is judged at the
+        // entry's day end, so a past-day entry whose cost was attached only after that
+        // day reports cost_missing and is still excluded, while a same-day calculable
+        // promote is not. The gate result above is reused (no second read of the cost
+        // links).
+        // Same tx -> order write + buffer delete commit atomically; marked as a buffer
+        // graduation so the realtime toast suppresses a duplicate ding for an order the
+        // seller already saw as a waiting buffer entry. profitExclusion and the
+        // seller-input marker are written CREATE-only inside upsertOrderWithSnapshot: a
+        // settled past-day entry is created final with its exclusion decided now, a
+        // same-day entry is created non-final and follows its day.
+        const profitExclusion = resolvePastDayGraduationExclusion(
           entry,
           mapped,
-          calcLines,
-          now,
+          calc,
+          window.settledAnchor,
         );
         syncLog.info('buffer.promote-graduation', {
           entryId: entry.id,
@@ -215,6 +278,7 @@ async function promoteOne(id: string, now: Date): Promise<void> {
         await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
           promotedFromBuffer: true,
           profitExclusion,
+          sellerInputsFinalAt: windowClosed ? window.dbNow : undefined,
         });
         await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
         return entry;
@@ -296,14 +360,21 @@ const PERMANENT_FAILED_RETRY_SUMMARY_THROTTLE_MS = 15 * 60_000;
 let lastPermanentFailedRetrySummaryAt = 0;
 
 /**
- * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries whose
- * business date is before today into `orders`, then delete the buffer row -- same
- * atomic claim+upsert+delete as promoteOne. Cost-window rule (Berkin 2026-11-03):
- * an entry whose cost missed the order's business day graduates PROFIT-EXCLUDED
- * (COST_DEADLINE_MISSED); its ciro still counts, its net profit never shows. Desi
- * rule (Berkin 2026-11-22): an entry costed in time whose product still has no desi
- * graduates PROFIT-EXCLUDED as DESI_DEADLINE_MISSED. An entry costed in time with a
- * desi (or a cancelled one) graduates as a normal order.
+ * One flush tick: graduate up to FLUSH_CHUNK_SIZE PENDING buffer entries of a SETTLED
+ * past day into `orders`, then delete the buffer row -- same atomic
+ * claim+upsert+delete as promoteOne. Same-day edit window (Berkin 2026-11-23, plan
+ * PR-1): a past day is settled only once `resolveSettledCutoff` says so (the database
+ * clock at T + SELLER_INPUT_SETTLE_MS with no open transaction that began before T),
+ * never at the first tick after midnight; a seller-input write that began before T
+ * may still commit rows stamped <= T. Every graduated order is created final
+ * (`sellerInputsFinalAt` = the tick's database clock) with its exclusion decided at
+ * create. Cost-window rule (Berkin 2026-11-03): an entry whose cost missed the
+ * order's business day graduates PROFIT-EXCLUDED (COST_DEADLINE_MISSED); its ciro
+ * still counts, its net profit never shows. Desi rule (Berkin 2026-11-22): an entry
+ * costed in time whose product had no desi at the day end graduates PROFIT-EXCLUDED
+ * as DESI_DEADLINE_MISSED. An entry costed in time with a desi (or a cancelled one)
+ * graduates as a normal order. `dbNowOverride` is a test seam; production reads the
+ * database clock.
  *
  * Pass 1 (PENDING): PROMOTING (cost or desi just entered) and FAILED (retry-due)
  * past-day entries are already handled by processBufferPromote, so this pass
@@ -319,17 +390,19 @@ let lastPermanentFailedRetrySummaryAt = 0;
  * per row (that would flood the log for a week) — the tick aggregates them into
  * a single throttled 'buffer.permanent-failed-retry-summary'.
  */
-export async function processPastDayBufferFlush(now: Date = new Date()): Promise<void> {
-  const todayAnchor = getBusinessDateAnchor(now);
+export async function processPastDayBufferFlush(dbNowOverride?: Date): Promise<void> {
+  const window = await resolveGraduationWindow(dbNowOverride);
 
+  // Cross-tenant scan by design: each claimed row is graduated under its own
+  // organization and store.
   const pending = await prisma.livePerformanceBuffer.findMany({
-    where: { status: 'PENDING', orderDate: { lt: todayAnchor } },
+    where: { status: 'PENDING', orderDate: { lt: window.settledAnchor } },
     orderBy: { createdAt: 'asc' },
     take: FLUSH_CHUNK_SIZE,
     select: { id: true },
   });
   for (const { id } of pending) {
-    await flushOne(id, now);
+    await flushOne(id, window);
   }
 
   // Pass 2: give past-day PERMANENT_FAILED rows a final graduation attempt via
@@ -338,14 +411,14 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
   // reaper are retried first. Collect the ids whose retry failed AGAIN this tick
   // so we can emit one throttled aggregate instead of a per-row error flood.
   const permanentFailed = await prisma.livePerformanceBuffer.findMany({
-    where: { status: 'PERMANENT_FAILED', orderDate: { lt: todayAnchor } },
+    where: { status: 'PERMANENT_FAILED', orderDate: { lt: window.settledAnchor } },
     orderBy: { orderDate: 'asc' },
     take: PERMANENT_FAILED_RETRY_LIMIT,
     select: { id: true },
   });
   const retryFailedIds: string[] = [];
   for (const { id } of permanentFailed) {
-    const failedId = await flushOne(id, now);
+    const failedId = await flushOne(id, window);
     if (failedId !== null) {
       retryFailedIds.push(failedId);
     }
@@ -354,7 +427,7 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
   // Throttled aggregate: at most one summary every 15 min, only when this tick
   // saw at least one renewed PERMANENT_FAILED failure.
   if (retryFailedIds.length > 0) {
-    const nowMs = now.getTime();
+    const nowMs = window.dbNow.getTime();
     if (nowMs - lastPermanentFailedRetrySummaryAt >= PERMANENT_FAILED_RETRY_SUMMARY_THROTTLE_MS) {
       syncLog.error('buffer.permanent-failed-retry-summary', {
         failedCount: retryFailedIds.length,
@@ -371,7 +444,7 @@ export async function processPastDayBufferFlush(now: Date = new Date()): Promise
  * can aggregate + throttle the log); returns null in every other outcome
  * (success, skip, claim-lost, or a PENDING failure that was marked FAILED).
  */
-async function flushOne(id: string, now: Date): Promise<string | null> {
+async function flushOne(id: string, window: GraduationWindow): Promise<string | null> {
   try {
     const flushed = await prisma.$transaction(async (tx): Promise<LivePerformanceBuffer | null> => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>`
@@ -386,8 +459,8 @@ async function flushOne(id: string, now: Date): Promise<string | null> {
       // Re-check STATUS under the lock — cost may have been attached since the
       // unlocked prefilter (PENDING → PROMOTING), in which case the promote tick
       // owns the entry. order_date is immutable and the candidate query already
-      // filtered `order_date < todayAnchor`, so there is no date re-check here
-      // (avoids any @db.Date-vs-DateTime comparison ambiguity).
+      // filtered `order_date < settledAnchor` with this tick's window, so there is no
+      // date re-check here (avoids any @db.Date-vs-DateTime comparison ambiguity).
       // Loss-proofing (2026-07-11): flush also owns PERMANENT_FAILED past-day
       // rows for a final graduation attempt. A PENDING row may have flipped to
       // PROMOTING since the unlocked prefilter (cost attached), which belongs to
@@ -397,32 +470,36 @@ async function flushOne(id: string, now: Date): Promise<string | null> {
       }
 
       const mapped = entry.mappedOrder as unknown as MappedOrder;
-      // Window closed: graduate into orders. Cost-window rule (Berkin 2026-11-03): a
+      // Day settled: graduate into orders. Cost-window rule (Berkin 2026-11-03): a
       // past-day entry whose cost missed the order's business day is excluded with
-      // COST_DEADLINE_MISSED; one costed in time whose product still has no desi is
-      // excluded with DESI_DEADLINE_MISSED (Berkin 2026-11-22). A cancelled entry (or
-      // one costed in time with a desi -- e.g. a cost attached just before midnight
+      // COST_DEADLINE_MISSED; one costed in time whose product had no desi at the day
+      // end is excluded with DESI_DEADLINE_MISSED (Berkin 2026-11-22). A cancelled entry
+      // (or one costed in time with a desi -- e.g. a cost attached just before midnight
       // while the attach-flip had not yet fired) graduates as a normal order. The flush
-      // path graduates unconditionally (no calculability re-check), so the calc lines
-      // are built here solely to feed the single cost-window + desi decision point. Same
-      // tx -> order write + buffer delete commit atomically. profitExclusion is stamped
-      // CREATE-only inside upsertOrderWithSnapshot.
-      const calcLines = await buildCalcCheckLines(tx, {
-        organizationId: entry.organizationId,
-        storeId: entry.storeId,
-        lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
-        at: costDecisionTime(entry.orderDate),
-      });
-      const profitExclusion = await resolvePastDayGraduationExclusion(
-        tx,
+      // path graduates unconditionally (no calculability re-check), so the gate is
+      // resolved here solely to feed the single cost-window + desi decision point (one
+      // read of the cost links and the desi at the day end). Same tx -> order write +
+      // buffer delete commit atomically. profitExclusion and the seller-input marker are
+      // written CREATE-only inside upsertOrderWithSnapshot: the day is settled, so the
+      // order is created final.
+      const calc = resolveOrderCalculability(
+        await buildCalcCheckLines(tx, {
+          organizationId: entry.organizationId,
+          storeId: entry.storeId,
+          lines: mapped.lines.map((line) => ({ barcode: line.barcode })),
+          at: costDecisionTime(entry.orderDate),
+        }),
+      );
+      const profitExclusion = resolvePastDayGraduationExclusion(
         entry,
         mapped,
-        calcLines,
-        now,
+        calc,
+        window.settledAnchor,
       );
       await upsertOrderWithSnapshot(entry.storeId, entry.organizationId, mapped, tx, {
         promotedFromBuffer: true,
         profitExclusion,
+        sellerInputsFinalAt: window.dbNow,
       });
       await tx.livePerformanceBuffer.delete({ where: { id: entry.id } });
       return entry;

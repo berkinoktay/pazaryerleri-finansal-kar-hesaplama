@@ -200,14 +200,16 @@ describe('POST /v1/webhooks/orders/:storeId — Live Performance buffer rule (PR
 
   it('cost-missing + previous-day orderDate → persists PROFIT-EXCLUDED, no buffer write', async () => {
     const { orgId, storeId } = await setupStore();
-    const yesterday = todayOrderDateGmt3() - 24 * MS_HOUR;
+    // Two days back: a past day is decided at intake only once it is settled (about two
+    // minutes after midnight), so yesterday could flake right after 00:00.
+    const pastDay = todayOrderDateGmt3() - 48 * MS_HOUR;
 
     const res = await postWebhook(
       storeId,
       makeWebhookPayload({
         shipmentPackageId: 700000002,
         orderNumber: 'buf-late',
-        orderDate: yesterday,
+        orderDate: pastDay,
       }),
       authOk,
     );

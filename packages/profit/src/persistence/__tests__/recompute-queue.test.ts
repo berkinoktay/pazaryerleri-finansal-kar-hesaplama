@@ -36,6 +36,7 @@ import {
   enqueueCarrierGapRecomputes,
   enqueueGapFillOrders,
   enqueueProfitRecompute,
+  enqueueProfitRecomputeForNonFinalOrders,
   enqueueProfitRecomputeForStore,
   enqueueProfitRecomputeForVariants,
   enqueueReferenceDataGapRecomputes,
@@ -213,6 +214,36 @@ describe('profit recompute queue', () => {
     expect(otherRow).toBeNull();
   });
 
+  it('a final order of the variant gets no queue row, a non-final one does', async () => {
+    // The parcel's order is non-final (marker NULL): its seller inputs still follow its day.
+    const parcel = await seedMelontikParcel();
+    // A second order of the same organization and store carrying the same variant, whose
+    // seller inputs the day-close pass already made final.
+    const finalOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      sellerInputsFinalAt: new Date(),
+    });
+    await addOrderItemForVariant({
+      orderId: finalOrderId,
+      organizationId: parcel.organizationId,
+      productVariantId: parcel.variantA,
+      barcode: MELONTIK.items.a.barcode,
+    });
+
+    const count = await enqueueProfitRecomputeForVariants(prisma, {
+      organizationId: parcel.organizationId,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+      variantIds: [parcel.variantA],
+    });
+
+    expect(count).toBe(1);
+    expect(await queuedOrderIds()).toEqual([parcel.orderId]);
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: finalOrderId } }),
+    ).toBeNull();
+  });
+
   it('never enqueues another organization order even when its variant id is passed', async () => {
     const parcel = await seedMelontikParcel();
     const other = await seedMelontikParcel();
@@ -253,6 +284,47 @@ describe('profit recompute queue', () => {
       where: { orderId: siblingOrderId },
     });
     expect(siblingRow).toBeNull();
+  });
+
+  // Deploy backfill (same-day edit window, plan P1-20): the release day's orders move to
+  // the day-end rule through one recompute each; a final order is never touched.
+  it("enqueues only the store's non-final orders", async () => {
+    // The parcel's order is non-final (marker NULL): the positive control.
+    const parcel = await seedMelontikParcel();
+    const finalOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      sellerInputsFinalAt: new Date(),
+    });
+    // A non-final order of a sibling store of the same organization.
+    const siblingStoreId = await createAdditionalStore({ organizationId: parcel.organizationId });
+    const siblingOrderId = await seedBareOrder({
+      organizationId: parcel.organizationId,
+      storeId: siblingStoreId,
+    });
+    // A non-final order of another organization.
+    const other = await seedMelontikParcel();
+
+    const count = await enqueueProfitRecomputeForNonFinalOrders(prisma, {
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      reason: ProfitRecomputeReason.MANUAL,
+    });
+
+    expect(count).toBe(1);
+    expect(await queuedOrderIds()).toEqual([parcel.orderId]);
+    const row = await prisma.profitRecomputeRequest.findUnique({
+      where: { orderId: parcel.orderId },
+      select: { organizationId: true, storeId: true, reason: true },
+    });
+    expect(row).toEqual({
+      organizationId: parcel.organizationId,
+      storeId: parcel.storeId,
+      reason: ProfitRecomputeReason.MANUAL,
+    });
+    for (const orderId of [finalOrderId, siblingOrderId, other.orderId]) {
+      expect(await prisma.profitRecomputeRequest.findUnique({ where: { orderId } })).toBeNull();
+    }
   });
 
   it('sweeps orders without a statement or with an old engine version, up to the limit', async () => {

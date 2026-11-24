@@ -12,6 +12,7 @@ import { compareText } from '../core/compare-text';
 import { type AcceptedReturn, type ParcelItemSnapshot } from '../core/parcel-snapshot';
 import { type ProfitIssue } from '../core/profit-issue';
 import {
+  type CostProfileVersionInput,
   type ItemCostInput,
   type ItemCostProfileInput,
 } from '../core/seller-costs/build-seller-cost-lines';
@@ -36,11 +37,11 @@ import {
 } from '../marketplaces/trendyol/trendyol-inputs';
 import { ParcelNotFoundError, UnsupportedPlatformError } from './errors';
 import { normalizeCargoProviderName } from './normalize-cargo-provider-name';
+import { loadSellerInputsAt, resolveDesiAtDayEnd, type SellerInputsAt } from './seller-inputs-at';
 import {
   dec,
   decOrNull,
   loadCommissionRulesForCategories,
-  loadCostProfilesByVariant,
   loadOrderFeeParams,
   loadPinnedCostProfilesByVersionId,
   loadShippingTariff,
@@ -182,8 +183,11 @@ export async function loadActiveTrendyolCarriers(
  * and shipping tariff source from its capture, and a captured item reads its desi,
  * digital flag, category, brand, synced rate, category rule rates and pinned cost
  * versions from its capture, whatever its variant is today. An uncaptured order or
- * item reads the live values. Writes nothing: an uncaptured order stays live here
- * until a recompute captures it. The query count does not depend on the item count.
+ * item reads the live values, except its seller inputs: an uncaptured item's cost
+ * links and desi are the ones in force at the end of the order's business day
+ * (`loadSellerInputsAt`, same-day edit window plan PR-1), the state a capture would
+ * take. Writes nothing: an uncaptured order stays live here until a recompute
+ * captures it. The query count does not depend on the item count.
  */
 export async function loadTrendyolParcel(
   tx: Prisma.TransactionClient,
@@ -216,10 +220,25 @@ export async function loadTrendyolParcel(
   const orderDate = order.orderDate;
   const businessDate = getBusinessDate(orderDate);
 
-  // Captured items read their capture; uncaptured ones read the live variant.
+  // Captured items read their capture; uncaptured ones read the live variant and the
+  // seller inputs at the order's day end.
   const capturedItems = order.items.filter((item) => item.profitSnapshotAt !== null);
   const uncapturedItems = order.items.filter((item) => item.profitSnapshotAt === null);
-  const itemsWithInputs = order.items.map((item) => ({ item, inputs: itemProductInputs(item) }));
+  // The cost rule's decision time: the order's business-day end, never the clock.
+  const dayEnd = costDecisionTime(orderDate);
+  // One read of the uncaptured items' cost links and desi at the day end, org-filtered,
+  // for both the desi below and the costs further down.
+  const dayEndInputs = await loadSellerInputsAt(tx, {
+    organizationId,
+    variantIds: uncapturedItems
+      .map((item) => item.productVariantId)
+      .filter((variantId): variantId is string => variantId !== null),
+    at: dayEnd,
+  });
+  const itemsWithInputs = order.items.map((item) => ({
+    item,
+    inputs: itemProductInputs(item, dayEndInputs),
+  }));
 
   // --- Snapshot items (decision 7: no item carries a cancellation flag) ---
   const items: ParcelItemSnapshot[] = itemsWithInputs.map(({ item, inputs }) => {
@@ -312,7 +331,11 @@ export async function loadTrendyolParcel(
 
   // --- Costs ---
   const costs = [
-    ...(await loadItemCosts(tx, { organizationId, orderDate, orderItems: uncapturedItems })),
+    ...uncapturedItemCosts({
+      orderItems: uncapturedItems,
+      inputsByVariant: dayEndInputs,
+      at: dayEnd,
+    }),
     ...(await loadCapturedItemCosts(tx, { organizationId, orderItems: capturedItems })),
   ];
 
@@ -402,8 +425,7 @@ interface ItemProductRow {
   readonly snapshotCategoryRatePct: Prisma.Decimal | null;
   readonly snapshotCategoryBrandRatePct: Prisma.Decimal | null;
   readonly productVariant: {
-    readonly dimensionalWeightOverride: Prisma.Decimal | null;
-    readonly syncedDimensionalWeight: Prisma.Decimal | null;
+    readonly id: string;
     readonly isDigital: boolean;
     readonly syncedCommissionRate: Prisma.Decimal | null;
     readonly product: { readonly categoryId: bigint | null; readonly brandId: bigint | null };
@@ -413,9 +435,13 @@ interface ItemProductRow {
 /**
  * An item's product inputs. A captured item reads its capture, independent of its
  * variant today (the variant may since have been corrected, re-linked or deleted);
- * an uncaptured item reads its live variant and product.
+ * an uncaptured item reads its live variant and product, and its desi from
+ * `dayEndInputs` (its variant's seller inputs at the order's business-day end).
  */
-function itemProductInputs(item: ItemProductRow): ItemProductInputs {
+function itemProductInputs(
+  item: ItemProductRow,
+  dayEndInputs: ReadonlyMap<string, SellerInputsAt>,
+): ItemProductInputs {
   if (item.profitSnapshotAt !== null) {
     return {
       unitDesi: decOrNull(item.snapshotUnitDesi),
@@ -429,13 +455,14 @@ function itemProductInputs(item: ItemProductRow): ItemProductInputs {
 
   const variant = item.productVariant;
   const product = variant?.product ?? null;
+  const sellerInputs = variant === null ? undefined : dayEndInputs.get(variant.id);
   return {
-    // The user override wins when set, else the synced desi; both null = no desi
-    // (the engine reports UNKNOWN_DESI). Any stored value counts, a stored 0
-    // included (a seller desi is at least 1).
-    unitDesi: decOrNull(
-      variant?.dimensionalWeightOverride ?? variant?.syncedDimensionalWeight ?? null,
-    ),
+    // Owner rule (Berkin 2026-11-23): the desi in force at the end of the order's
+    // business day, as a capture would take it (`resolveDesiAtDayEnd`: the seller's
+    // correction wins over the synced desi); none = no desi (the engine reports
+    // UNKNOWN_DESI). Any value counts, a stored 0 included (a seller desi is at least 1).
+    unitDesi:
+      sellerInputs === undefined ? null : decOrNull(resolveDesiAtDayEnd(sellerInputs.desi).value),
     isDigital: variant?.isDigital ?? false,
     syncedCommissionRatePct: decOrNull(variant?.syncedCommissionRate ?? null),
     categoryId: product?.categoryId?.toString() ?? null,
@@ -556,45 +583,52 @@ async function loadCommissionRules(
 
 /**
  * The seller cost inputs of the uncaptured items, by the same cost rule the order
- * snapshot pins with (plan PR-3b): per cost profile linked to the item's variant
- * (org-filtered), the version `chooseOrderCostVersion` picks at the end of the order's
- * business day, as a one-version profile (the shape `loadCapturedItemCosts` produces).
- * A profile not in force then (linked later, or archived) contributes nothing; an
- * item without a variant or without such a profile is omitted, and the cost module
- * raises MISSING_COST itself.
+ * snapshot pins with (plan PR-3b): per cost profile linked to the item's variant at
+ * the end of the order's business day (`inputsByVariant`, read by
+ * `loadSellerInputsAt`, org-filtered: the live links plus the removed ones still
+ * attached then, same-day edit window plan PR-1), the version
+ * `chooseOrderCostVersion` picks at that day end `at`, as a one-version profile (the
+ * shape `loadCapturedItemCosts` produces). A profile not in force then (linked later,
+ * or archived) contributes nothing; an item without a variant or without such a
+ * profile is omitted, and the cost module raises MISSING_COST itself.
  */
-async function loadItemCosts(
-  tx: Prisma.TransactionClient,
-  params: {
-    readonly organizationId: string;
-    readonly orderDate: Date;
-    readonly orderItems: readonly {
-      readonly id: string;
-      readonly productVariantId: string | null;
-    }[];
-  },
-): Promise<ItemCostInput[]> {
-  const { organizationId, orderDate, orderItems } = params;
-  const at = costDecisionTime(orderDate);
-  const variantIds = orderItems
-    .map((item) => item.productVariantId)
-    .filter((variantId): variantId is string => variantId !== null);
-  const profilesByVariant = await loadCostProfilesByVariant(tx, { organizationId, variantIds });
-
+function uncapturedItemCosts(params: {
+  readonly orderItems: readonly {
+    readonly id: string;
+    readonly productVariantId: string | null;
+  }[];
+  readonly inputsByVariant: ReadonlyMap<string, SellerInputsAt>;
+  readonly at: Date;
+}): ItemCostInput[] {
+  const { orderItems, inputsByVariant, at } = params;
   const costs: ItemCostInput[] = [];
   for (const item of orderItems) {
     if (item.productVariantId === null) continue;
     const profiles: ItemCostProfileInput[] = [];
-    for (const profile of profilesByVariant.get(item.productVariantId) ?? []) {
-      const version = chooseOrderCostVersion(profile, { orderDate, at });
+    for (const profile of inputsByVariant.get(item.productVariantId)?.costProfiles ?? []) {
+      const version = chooseOrderCostVersion(profile, { at });
       if (version === null) continue;
       // The same linked profile (id, type, link instant), priced by the chosen version only.
-      profiles.push({ ...profile, versions: [version] });
+      profiles.push({ ...profile, versions: [engineCostVersion(version)] });
     }
     if (profiles.length === 0) continue;
     costs.push({ orderItemId: item.id, profiles });
   }
   return costs;
+}
+
+/**
+ * A cost version as the engine reads it, without the row id the day-end loader
+ * carries: the same shape the other cost loaders hand to the engine.
+ */
+function engineCostVersion(version: CostProfileVersionInput): CostProfileVersionInput {
+  return {
+    effectiveFrom: version.effectiveFrom,
+    versionNumber: version.versionNumber,
+    amountGross: version.amountGross,
+    vatRatePct: version.vatRatePct,
+    archivedAt: version.archivedAt,
+  };
 }
 
 /**

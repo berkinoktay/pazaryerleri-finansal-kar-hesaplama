@@ -4,6 +4,7 @@ import { prisma } from '@pazarsync/db';
 import type { CostProfile, CostProfileVersion, Prisma } from '@pazarsync/db';
 import { ProfitRecomputeReason } from '@pazarsync/db/enums';
 import { enqueueProfitRecomputeForVariants } from '@pazarsync/profit';
+import { SELLER_INPUT_TX_OPTIONS } from '@pazarsync/utils';
 
 import { CostProfileNameTakenError, CostProfileNotFoundError } from '../lib/errors';
 import type {
@@ -134,9 +135,10 @@ async function loadProfileVariantIds(
 }
 
 /**
- * Enqueue a profit recompute (COST_CHANGED) for every order carrying one of these
- * variants. Runs inside the mutation's own transaction. An empty id list enqueues
- * nothing (it short-circuits without a query).
+ * Enqueue a profit recompute (COST_CHANGED) for every non-final order (seller inputs
+ * not yet made final by the day-close pass) carrying one of these variants. Runs
+ * inside the mutation's own transaction. An empty id list enqueues nothing (it
+ * short-circuits without a query).
  */
 async function enqueueVariantsRecompute(
   tx: Prisma.TransactionClient,
@@ -151,11 +153,11 @@ async function enqueueVariantsRecompute(
 }
 
 /**
- * Enqueue a profit recompute for every order carrying a variant this profile is
- * attached to. A cost change (amount/vat, archive, or restore) reshapes those
- * orders' profit, so they must be recomputed. Runs inside the
- * mutation's own transaction. A profile with no attached variants enqueues
- * nothing.
+ * Enqueue a profit recompute for every non-final order carrying a variant this
+ * profile is attached to. Every change (any PATCH, a name-only one included, since
+ * each appends a version; archive; restore) re-pins those orders' cost list at their
+ * day end, so they must be recomputed. Runs inside the mutation's own transaction. A
+ * profile with no attached variants enqueues nothing.
  */
 async function enqueueProfileVariants(
   tx: Prisma.TransactionClient,
@@ -239,6 +241,9 @@ export async function createCostProfile(
   actorId: string,
 ): Promise<CostProfile> {
   try {
+    // Every transaction in this file stamps seller-input history (a cost version), so
+    // each runs with SELLER_INPUT_TX_OPTIONS: its short timeout keeps a write stamped
+    // before a business-day end from committing after that day is settled (D6).
     const profile = await prisma.$transaction(async (tx) => {
       const amountGross = new Decimal(input.amountGross);
       const vatRate = input.vatRate ?? 0;
@@ -274,7 +279,7 @@ export async function createCostProfile(
       });
 
       return row;
-    });
+    }, SELLER_INPUT_TX_OPTIONS);
 
     return toWireProfile(profile);
   } catch (err) {
@@ -370,7 +375,7 @@ export async function updateCostProfile(
       await enqueueProfileVariants(tx, orgId, profileId);
 
       return row;
-    });
+    }, SELLER_INPUT_TX_OPTIONS);
 
     return toWireProfile(updated);
   } catch (err) {
@@ -431,7 +436,7 @@ export async function archiveCostProfile(
     await enqueueProfileVariants(tx, orgId, profileId);
 
     return row;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return toWireProfile(archived);
 }
@@ -499,7 +504,7 @@ export async function restoreCostProfile(
     await enqueueVariantsRecompute(tx, orgId, variantIds);
 
     return row;
-  });
+  }, SELLER_INPUT_TX_OPTIONS);
 
   return toWireProfile(restored);
 }
