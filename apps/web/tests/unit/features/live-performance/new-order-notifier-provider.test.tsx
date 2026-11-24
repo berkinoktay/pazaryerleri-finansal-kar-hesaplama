@@ -53,7 +53,7 @@ function listOf(rows: LiveOrderRow[]): LivePerformanceOrders {
   return {
     data: rows,
     total: rows.length,
-    counts: { all: rows.length, calculated: rows.length, pending: 0 },
+    counts: { all: rows.length, calculated: rows.length, pending: 0, cancelled: 0 },
   };
 }
 

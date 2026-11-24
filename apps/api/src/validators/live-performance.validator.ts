@@ -217,16 +217,16 @@ const LiveOrderRowSchema = z.object({
     .nullable()
     .openapi({
       description:
-        'Net profit (decimal string); null for buffer rows and for orders whose estimate profit ' +
-        'statement is not yet computed.',
+        'Net profit (decimal string); null for buffer rows, for cancelled orders and for orders ' +
+        'whose estimate profit statement is not yet computed.',
     }),
   margin: z
     .string()
     .nullable()
     .openapi({
       description:
-        'Sale margin % (decimal string); null for buffer rows and for orders whose estimate profit ' +
-        'statement is not yet computed.',
+        'Sale margin % (decimal string); null for buffer rows, for cancelled orders and for ' +
+        'orders whose estimate profit statement is not yet computed.',
     }),
   // Promosyon gösterimi (spec ekleme #3): indirimli siparişin promosyon adları +
   // brüt tutarları. İndirim/promosyon yoksa null. Buffer satırlarında her zaman null
@@ -244,15 +244,20 @@ const LiveOrderRowSchema = z.object({
     }),
 });
 
+/** Tabs of the live orders feed; `cancelled` is never part of `all`. */
+export const LIVE_ORDERS_FILTERS = ['all', 'calculated', 'pending', 'cancelled'] as const;
+export type LiveOrdersFilter = (typeof LIVE_ORDERS_FILTERS)[number];
+
 export const liveOrdersQuerySchema = z.object({
   filter: z
-    .enum(['all', 'calculated', 'pending'])
+    .enum(LIVE_ORDERS_FILTERS)
     .optional()
     .openapi({
       param: { name: 'filter', in: 'query' },
       description:
-        'Tab filter — all (default), calculated (orders whose estimate is computed), or ' +
-        'pending (buffer + orders whose estimate is not computed)',
+        'Tab filter — all (default), calculated (orders whose estimate is computed), ' +
+        "pending (buffer + orders whose estimate is not computed), or cancelled (today's " +
+        'cancelled orders, which all, calculated and pending never include)',
     }),
 });
 
@@ -261,9 +266,18 @@ export const LivePerformanceOrdersSchema = z
     data: z.array(LiveOrderRowSchema),
     total: z.number().int().nonnegative(),
     counts: z.object({
-      all: z.number().int().nonnegative(),
+      all: z
+        .number()
+        .int()
+        .nonnegative()
+        .openapi({ description: 'calculated + pending; cancelled orders are not counted' }),
       calculated: z.number().int().nonnegative(),
       pending: z.number().int().nonnegative(),
+      cancelled: z
+        .number()
+        .int()
+        .nonnegative()
+        .openapi({ description: "Today's cancelled orders of the store" }),
     }),
   })
   .openapi('LivePerformanceOrders');

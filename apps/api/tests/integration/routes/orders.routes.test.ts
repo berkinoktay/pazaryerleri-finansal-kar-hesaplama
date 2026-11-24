@@ -3212,6 +3212,17 @@ describe('Order routes', () => {
         orderDate: openBusinessDayInstant(),
         platformOrderNumber: 'ON-TODAY-1',
       });
+      // Today's order and buffer entry that do not match q (neither number nor id) stay out.
+      await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        platformOrderId: 'PKG-OTHER-8',
+        platformOrderNumber: 'OTHER-TODAY-8',
+      });
+      await createBufferEntry(ctx.orgId, ctx.storeId, {
+        orderDate: getBusinessDateAnchor(),
+        platformOrderId: 'PKG-OTHER-9',
+        platformOrderNumber: 'OTHER-BUF-9',
+      });
 
       const body = await getList(ctx, '?q=ON-TODAY-1');
       expect(body.data).toEqual([]);

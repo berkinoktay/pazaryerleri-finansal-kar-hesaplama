@@ -113,7 +113,7 @@ const KPIS = {
 const ORDERS: LivePerformanceOrders = {
   data: [],
   total: 0,
-  counts: { all: 0, calculated: 0, pending: 0 },
+  counts: { all: 0, calculated: 0, pending: 0, cancelled: 0 },
 };
 
 /**
@@ -229,7 +229,7 @@ describe('LivePerformancePageClient — detail sheet across a promotion', () => 
         HttpResponse.json({
           data: feedRows,
           total: feedRows.length,
-          counts: { all: feedRows.length, calculated: 0, pending: feedRows.length },
+          counts: { all: feedRows.length, calculated: 0, pending: feedRows.length, cancelled: 0 },
         } satisfies LivePerformanceOrders),
       ),
     );

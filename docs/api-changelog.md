@@ -1335,6 +1335,14 @@ section "Versioning" for details.
   order has no number) and `cancelled`; a short server-capped list, stored orders first; empty
   without `q`). `finalizing`, `todayOrderCount` and `matches` describe the store, so the other
   list filters do not change them (`matches` follows `q` only). Additive.
+- **`filter=cancelled` and `counts.cancelled` on the live-performance orders feed**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/orders`). The new `cancelled`
+  value of `filter` lists the store's cancelled orders of today's Istanbul business day (newest
+  first, `source` `orders`, `profit` and `margin` always null: a cancellation is not an
+  earning), and `counts` gains the required `cancelled` field, reported on every tab. `all`,
+  `calculated`, `pending`, `counts.all` (still `calculated` + `pending`) and the live
+  performance KPIs keep leaving cancelled orders out. Additive for requests; a client that
+  validates `counts` strictly sees one new key.
 - **Why an order's profit is not computable** (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET .../orders/{orderId}`). Each orders list row and the order detail gain `profitBlockers`, an
   array of the new `ProfitBlocker` component schema (`code`, a `ProfitIssueCode`; `detail`, the

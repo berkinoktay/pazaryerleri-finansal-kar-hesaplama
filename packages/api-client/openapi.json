@@ -2460,14 +2460,14 @@
                     "string",
                     "null"
                   ],
-                  "description": "Net profit (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
+                  "description": "Net profit (decimal string); null for buffer rows, for cancelled orders and for orders whose estimate profit statement is not yet computed."
                 },
                 "margin": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "description": "Sale margin % (decimal string); null for buffer rows and for orders whose estimate profit statement is not yet computed."
+                  "description": "Sale margin % (decimal string); null for buffer rows, for cancelled orders and for orders whose estimate profit statement is not yet computed."
                 },
                 "promotionDisplays": {
                   "type": [
@@ -2518,7 +2518,8 @@
             "properties": {
               "all": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "description": "calculated + pending; cancelled orders are not counted"
               },
               "calculated": {
                 "type": "integer",
@@ -2527,12 +2528,18 @@
               "pending": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "cancelled": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Today's cancelled orders of the store"
               }
             },
             "required": [
               "all",
               "calculated",
-              "pending"
+              "pending",
+              "cancelled"
             ]
           }
         },
@@ -11889,7 +11896,7 @@
           "Live Performance"
         ],
         "summary": "Today’s orders (calculated + cost-missing buffer)",
-        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders whose estimate is computed, stored or in the request), or pending (buffer rows and orders whose estimate is not computed). `counts` always reports every tab’s total. Money values are Decimal strings; pending rows have null profit/margin.",
+        "description": "Today’s order feed combining the calculated orders table with the cost-missing buffer, each row tagged by source. `filter` selects the tab: all (default), calculated (orders whose estimate is computed, stored or in the request), pending (buffer rows and orders whose estimate is not computed), or cancelled (today’s cancelled orders of the store; all, calculated, pending and `counts.all` never include them). `counts` always reports every tab’s total. Money values are Decimal strings; pending and cancelled rows have null profit/margin.",
         "security": [
           {
             "bearerAuth": []
@@ -11920,12 +11927,13 @@
               "enum": [
                 "all",
                 "calculated",
-                "pending"
+                "pending",
+                "cancelled"
               ],
-              "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)"
+              "description": "Tab filter — all (default), calculated (orders whose estimate is computed), pending (buffer + orders whose estimate is not computed), or cancelled (today's cancelled orders, which all, calculated and pending never include)"
             },
             "required": false,
-            "description": "Tab filter — all (default), calculated (orders whose estimate is computed), or pending (buffer + orders whose estimate is not computed)",
+            "description": "Tab filter — all (default), calculated (orders whose estimate is computed), pending (buffer + orders whose estimate is not computed), or cancelled (today's cancelled orders, which all, calculated and pending never include)",
             "name": "filter",
             "in": "query"
           }

@@ -1,6 +1,6 @@
 import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
-import { ProfitStatementView, ProfitStatus, type OrderStatus } from '@pazarsync/db/enums';
+import { OrderStatus, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import {
   buildCalcCheckLines,
@@ -17,6 +17,7 @@ import Decimal from 'decimal.js';
 import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup';
 import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
+import type { LiveOrdersFilter } from '../validators/live-performance.validator';
 import { toVariantDesiFields, type VariantDesiFields } from '../validators/product.validator';
 import {
   computeParcelProfitForRead,
@@ -986,19 +987,19 @@ export interface LiveOrderRow {
 export interface LiveOrdersResult {
   data: LiveOrderRow[];
   total: number;
-  counts: { all: number; calculated: number; pending: number };
+  counts: { all: number; calculated: number; pending: number; cancelled: number };
 }
 
 export async function getLiveOrders(args: {
   orgId: string;
   storeId: string;
-  filter?: 'all' | 'calculated' | 'pending';
+  filter?: LiveOrdersFilter;
 }): Promise<LiveOrdersResult> {
   const { start, end } = getBusinessDayRange();
   const todayAnchor = getBusinessDateAnchor();
   const filter = args.filter ?? 'all';
 
-  const [ordersToday, bufferRows] = await Promise.all([
+  const [ordersToday, bufferRows, cancelledToday] = await Promise.all([
     prisma.order.findMany({
       where: {
         organizationId: args.orgId,
@@ -1035,6 +1036,26 @@ export async function getLiveOrders(args: {
         platformOrderNumber: true,
         orderDate: true,
         mappedOrder: true,
+      },
+    }),
+    // The cancelled tab: today's cancels of the store, kept apart from the earnings feed
+    // above (all / calculated / pending and their counts never include them).
+    prisma.order.findMany({
+      where: {
+        organizationId: args.orgId,
+        storeId: args.storeId,
+        orderDate: { gte: start, lt: end },
+        status: OrderStatus.CANCELLED,
+      },
+      orderBy: [{ orderDate: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        platformOrderId: true,
+        platformOrderNumber: true,
+        orderDate: true,
+        status: true,
+        saleGross: true,
+        promotionDisplays: true,
       },
     }),
   ]);
@@ -1095,13 +1116,34 @@ export async function getLiveOrders(args: {
     };
   });
 
+  // A cancellation is not an earning: no profit or margin is served, even when an
+  // estimate statement exists (the detail sheet shows the real statement).
+  const cancelledRows: LiveOrderRow[] = cancelledToday.map((order) => {
+    const revenue =
+      order.saleGross !== null ? new Decimal(order.saleGross.toString()) : new Decimal(0);
+    return {
+      source: 'orders',
+      platformOrderId: order.platformOrderId,
+      platformOrderNumber: order.platformOrderNumber,
+      orderId: order.id,
+      bufferId: null,
+      orderDate: order.orderDate.toISOString(),
+      status: order.status,
+      revenue: revenue.toFixed(2),
+      profit: null,
+      margin: null,
+      promotionDisplays: toPromotionDisplays(order.promotionDisplays),
+    };
+  });
+
   const newestFirst = (a: LiveOrderRow, b: LiveOrderRow): number =>
     b.orderDate.localeCompare(a.orderDate);
   const pendingRows = [...uncostedOrderRows, ...bufferPendingRows].sort(newestFirst);
-  const dataByFilter: Record<typeof filter, LiveOrderRow[]> = {
+  const dataByFilter: Record<LiveOrdersFilter, LiveOrderRow[]> = {
     all: [...calculatedRows, ...pendingRows].sort(newestFirst),
     calculated: calculatedRows,
     pending: pendingRows,
+    cancelled: cancelledRows,
   };
   const data = dataByFilter[filter];
 
@@ -1112,6 +1154,7 @@ export async function getLiveOrders(args: {
       all: calculatedRows.length + pendingRows.length,
       calculated: calculatedRows.length,
       pending: pendingRows.length,
+      cancelled: cancelledRows.length,
     },
   };
 }
