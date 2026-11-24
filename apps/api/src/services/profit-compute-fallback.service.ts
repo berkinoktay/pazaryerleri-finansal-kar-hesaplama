@@ -11,10 +11,10 @@ import type { RequestFailureLog } from './scenario-screen-commons';
  * A read surface that must keep its page up when a parcel's profit cannot be derived for
  * display. The order detail, the new-order notification and live performance (today's
  * KPIs, chart and order feed) compute in-request when no statement is stored; the orders
- * list reads its rows' stored best-known issues for the profit blockers; today's
- * products reads the stored profit lines; product pricing, the commission tariff, the
- * Plus commission tariff, the advantage tariff, the flash product, the discount list and
- * the marketplace campaign screens each evaluate a scenario per variant. Each names
+ * list reads its rows' stored best-known issues for the profit blockers; product
+ * pricing, the commission tariff, the Plus commission tariff, the advantage tariff, the
+ * flash product, the discount list and the marketplace campaign screens each evaluate a
+ * scenario per variant. Each names
  * itself here for the log line (owner decision 2026-11-04).
  */
 export type ProfitReadSurface =
@@ -22,7 +22,6 @@ export type ProfitReadSurface =
   | 'order-list'
   | 'order-notification'
   | 'live-performance'
-  | 'today-products'
   | 'product-pricing'
   | 'commission-tariff'
   | 'plus-commission-tariff'
@@ -33,8 +32,8 @@ export type ProfitReadSurface =
 
 /**
  * Logs a profit-read failure at error level, tagged `[profit-read]` with the surface and
- * the order id (null when the failure is not tied to a single order, e.g. today's
- * products list) so support can trace the line. The single sink for the owner's "the
+ * the order id (null when the failure is not tied to a single order, e.g. the product
+ * pricing list) so support can trace the line. The single sink for the owner's "the
  * page opens, the profit stays empty, the error is logged" rule (decision 2026-11-04):
  * every read surface that swallows a profit failure to keep its page up routes here.
  *

@@ -2,15 +2,7 @@ import type { Prisma } from '@pazarsync/db';
 import { prisma } from '@pazarsync/db';
 import { OrderStatus, ProfitStatementView, ProfitStatus } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
-import {
-  buildCalcCheckLines,
-  costDecisionTime,
-  itemProfitValues,
-  loadOrderProfitLines,
-  parseStoredIssues,
-  roundPercent,
-  selectLines,
-} from '@pazarsync/profit';
+import { buildCalcCheckLines, costDecisionTime, roundPercent } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange, getBusinessHour } from '@pazarsync/utils';
 import Decimal from 'decimal.js';
 
@@ -19,10 +11,8 @@ import { NotFoundError } from '../lib/errors';
 import { toPromotionDisplays, type PromotionDisplayWire } from '../lib/promotion-displays';
 import type { LiveOrdersFilter } from '../validators/live-performance.validator';
 import { toVariantDesiFields, type VariantDesiFields } from '../validators/product.validator';
-import {
-  computeParcelProfitForRead,
-  logProfitReadFailure,
-} from './profit-compute-fallback.service';
+import { fetchCostAggregates } from './cost-aggregate.service';
+import { computeParcelProfitForRead } from './profit-compute-fallback.service';
 import { createRequestFailureLog } from './scenario-screen-commons';
 
 // All "today"/"yesterday" windows come from the single business-timezone helpers
@@ -513,7 +503,10 @@ export interface TodayProductRow extends VariantDesiFields {
   unitsSold: number;
   revenue: string;
   costStatus: 'costed' | 'missing';
-  unitCost: string | null;
+  /** Sum of the variant's active cost profiles, VAT included, per unit; null when it has none. */
+  currentCostTry: string | null;
+  /** Number of active (non-archived) cost profiles linked to the variant; 0 on an unresolved row. */
+  profileCount: number;
   /** Barcode resolves to no catalog variant — identity falls back to the raw
    *  barcode; rare after eager repair (spec 2026-06-12 §7). */
   unresolved: boolean;
@@ -522,19 +515,6 @@ export interface TodayProductRow extends VariantDesiFields {
    *  than "eşleşme bekliyor". Only meaningful for unresolved rows; always false
    *  for resolved ones. Backend-derived; the frontend never computes it. */
   vendorMissing: boolean;
-}
-
-/**
- * An order item whose cost lines can back a variant's displayed unit cost: one of today's
- * order items selling the variant whose order carries a stored ESTIMATE statement.
- * `issues` are that statement's stored issues.
- */
-interface ChosenOrderItem {
-  orderId: string;
-  itemId: string;
-  quantity: number;
-  orderDate: Date;
-  issues: Prisma.JsonValue;
 }
 
 interface ProductAccumulator {
@@ -547,75 +527,8 @@ interface ProductAccumulator {
   bufferEntryCount: number; // distinct buffer entries containing this barcode
   unitsSold: number;
   revenue: Decimal;
-  // The earliest (order date, then item id) item whose order's ESTIMATE statement is
-  // ESTIMATED -- the preferred source of the displayed unit cost; null until one exists.
-  estimatedItem: ChosenOrderItem | null;
-  // The earliest item whose order carries ANY ESTIMATE statement -- the fallback used
-  // only when no ESTIMATED one exists, so a not-yet-estimated order still shows a cost.
-  anyStatementItem: ChosenOrderItem | null;
   unresolved: boolean;
   desi: VariantDesiFields;
-}
-
-/**
- * The item backing a variant's displayed unit cost: the earliest item whose ESTIMATE
- * statement is ESTIMATED if any, else the earliest item with any ESTIMATE statement,
- * else null (unit cost stays null).
- */
-function chosenItemOf(acc: ProductAccumulator): ChosenOrderItem | null {
-  return acc.estimatedItem ?? acc.anyStatementItem;
-}
-
-/** Order-by for the chosen item: earliest order date, then lowest item id. */
-function isEarlierChosenItem(candidate: ChosenOrderItem, current: ChosenOrderItem): boolean {
-  const byDate = candidate.orderDate.getTime() - current.orderDate.getTime();
-  if (byDate !== 0) return byDate < 0;
-  return candidate.itemId < current.itemId;
-}
-
-/**
- * The displayed unit cost for each variant's chosen order item, keyed by that item's id.
- * Loads the chosen orders' stored profit lines once, then runs itemProfitValues per
- * chosen item -- itemProfitValues' unitCostGross over the item's view-selected lines.
- * Rebuilding engine values from stored rows throws on a corrupt row (malformed line
- * inputs/issues, a level conflict); that must not take the whole day down, so on any
- * failure this logs at error level and returns an empty map, leaving every row with a
- * null unit cost (owner decision 2026-11-04). Tenant-scoped by organizationId + storeId.
- */
-async function deriveUnitCostByItem(
-  orgId: string,
-  storeId: string,
-  chosenItems: readonly ChosenOrderItem[],
-): Promise<ReadonlyMap<string, string | null>> {
-  if (chosenItems.length === 0) {
-    return new Map();
-  }
-  try {
-    const orderIds = [...new Set(chosenItems.map((item) => item.orderId))];
-    const linesByOrder = await loadOrderProfitLines(prisma, {
-      organizationId: orgId,
-      storeId,
-      orderIds,
-    });
-    const unitCostByItem = new Map<string, string | null>();
-    for (const chosen of chosenItems) {
-      const lines = linesByOrder.get(chosen.orderId) ?? [];
-      unitCostByItem.set(
-        chosen.itemId,
-        itemProfitValues({
-          orderItemId: chosen.itemId,
-          quantity: chosen.quantity,
-          bestKnownLines: selectLines(lines, 'BEST_KNOWN'),
-          estimateLines: selectLines(lines, 'ESTIMATE'),
-          issues: parseStoredIssues(chosen.issues),
-        }).unitCostGross,
-      );
-    }
-    return unitCostByItem;
-  } catch (err) {
-    logProfitReadFailure({ surface: 'today-products', organizationId: orgId, orderId: null, err });
-    return new Map();
-  }
 }
 
 interface VariantIdentity {
@@ -692,15 +605,15 @@ function identityForBarcode(
 /**
  * One row per product variant that sold today, merged over the universe:
  * `orders`(today) ∪ `buffer`(today). Volume (orderCount / unitsSold / revenue) is
- * known the moment the order arrives — no cost required. costStatus is resolved
- * from the active ProductVariantCostProfile (authoritative; matches the retired
- * getMissingCost), and the displayed unitCost is itemProfitValues' unit cost for the
- * variant's preferred today order item -- the earliest whose ESTIMATE statement is
- * ESTIMATED, else the earliest with any ESTIMATE statement (decision 10) -- derived from
- * that order's cost lines, not a legacy snapshot column. A corrupt stored line must not
- * take the whole day down: on any unit-cost derivation failure the list is returned with
- * a null unitCost on every row and the error is logged (owner decision 2026-11-04);
- * volumes and cost status stand. There is NO per-product profit (an order's net profit
+ * known the moment the order arrives — no cost required. The cost fields come from the
+ * live cost aggregate (fetchCostAggregates, the products page's own sum):
+ * currentCostTry is the sum of the variant's active (non-archived) cost profiles, VAT
+ * included, per unit -- the cost today's orders of the variant carry until the day ends
+ * (the cost rule prices an open day's orders with the current links and versions);
+ * profileCount counts those profiles and costStatus is 'costed' when it is above zero.
+ * No profit line or estimate statement is read for this table, so a product shows its
+ * cost before any of its orders is calculated. An unresolved row is 'missing' with a
+ * null cost and a zero count. There is NO per-product profit (an order's net profit
  * can't be cleanly attributed to one line). Rows are returned sorted by unitsSold desc
  * for deterministic output; the frontend owns the live re-sort. An order line without a
  * variant (deleted or never linked) is not dropped: it is shown by its barcode, resolved
@@ -727,23 +640,11 @@ export async function getTodayProducts(args: {
         },
       },
       select: {
-        id: true,
         orderId: true,
         quantity: true,
         lineSaleGross: true,
         // The line's own barcode names a variantless line's row.
         barcode: true,
-        // The order date orders the candidates; the ESTIMATE statement's status picks
-        // the preferred item (ESTIMATED over any), and its issues feed itemProfitValues.
-        order: {
-          select: {
-            orderDate: true,
-            profitStatements: {
-              where: estimateStatementWhere(args.orgId, args.storeId),
-              select: { status: true, issues: true },
-            },
-          },
-        },
         productVariant: { select: ROW_VARIANT_SELECT },
       },
     }),
@@ -770,8 +671,6 @@ export async function getTodayProducts(args: {
       bufferEntryCount: 0,
       unitsSold: 0,
       revenue: new Decimal(0),
-      estimatedItem: null,
-      anyStatementItem: null,
       unresolved: identity.unresolved,
       desi: identity.desi,
     };
@@ -781,36 +680,13 @@ export async function getTodayProducts(args: {
 
   type TodayOrderItem = (typeof orderItems)[number];
 
-  // Adds one of today's order lines to its row: its order, units and revenue, and the
-  // line as a candidate for the row's displayed unit cost. Linked and variantless lines
-  // both go through it, so a merged row follows one rule.
+  // Adds one of today's order lines to its row: its order, units and revenue. Linked and
+  // variantless lines both go through it, so a merged row follows one rule.
   const addOrderItem = (acc: ProductAccumulator, item: TodayOrderItem): void => {
     acc.orderIds.add(item.orderId);
     acc.unitsSold += item.quantity;
     // lineSaleGross is the LINE total (KDV-dahil, already × quantity) — add directly.
     acc.revenue = acc.revenue.add(item.lineSaleGross.toString());
-    // Track the preferred item whose cost lines back the displayed unit cost below: any
-    // ESTIMATE statement feeds the fallback, an ESTIMATED one also the preferred choice.
-    // Both keep the earliest (order date, then item id) candidate.
-    const estimateStatement = item.order.profitStatements[0];
-    if (estimateStatement !== undefined) {
-      const candidate: ChosenOrderItem = {
-        orderId: item.orderId,
-        itemId: item.id,
-        quantity: item.quantity,
-        orderDate: item.order.orderDate,
-        issues: estimateStatement.issues,
-      };
-      if (acc.anyStatementItem === null || isEarlierChosenItem(candidate, acc.anyStatementItem)) {
-        acc.anyStatementItem = candidate;
-      }
-      if (
-        estimateStatement.status === ProfitStatus.ESTIMATED &&
-        (acc.estimatedItem === null || isEarlierChosenItem(candidate, acc.estimatedItem))
-      ) {
-        acc.estimatedItem = candidate;
-      }
-    }
   };
 
   // Orders: a linked line takes its identity from its variant. A variantless line (its
@@ -898,53 +774,31 @@ export async function getTodayProducts(args: {
     for (const item of items) addOrderItem(acc, item);
   }
 
-  // Cost status: a variant is costed iff it has an active (non-archived) cost
-  // profile — authoritative, independent of buffer/orders presence. Fallback
-  // rows carry no variant id (their map key is `barcode:`-prefixed) and can
-  // never enter the costed set — costStatus is always 'missing' for them.
+  // Current cost: the live cost aggregate (sum and count of the active cost profiles),
+  // authoritative and independent of buffer/orders presence; scoped by organizationId +
+  // storeId. Fallback rows carry no variant id (their map key is `barcode:`-prefixed),
+  // so they never reach the aggregate and stay 'missing'.
   const variantIds = [...byVariant.values()].flatMap((acc) =>
     acc.variantId === null ? [] : [acc.variantId],
-  );
-  const costedVariantIds = new Set(
-    (variantIds.length > 0
-      ? await prisma.productVariantCostProfile.findMany({
-          where: {
-            productVariantId: { in: variantIds },
-            organizationId: args.orgId,
-            profile: { archivedAt: null },
-          },
-          select: { productVariantId: true },
-        })
-      : []
-    ).map((link) => link.productVariantId),
   );
 
   // vendorMissing: an unresolved barcode that is a confirmed catalog gap
   // (CatalogBarcodeMiss with vendorMissing=true) drives the "Trendyol
   // kataloğunda yok" badge. Backend-derived; one batched query over the
   // distinct unresolved barcodes — no N+1. Resolved rows are always false.
-  const vendorMissingBarcodes = await resolveVendorMissingBarcodes(
-    args.orgId,
-    args.storeId,
-    [...byVariant.values()].flatMap((acc) => (acc.variantId === null ? [acc.barcode] : [])),
-  );
-
-  // The chosen items' unit costs, derived in one batched read of their orders' cost
-  // lines (decision 10). A corrupt stored line leaves every unit cost null but never
-  // 500s the day. Tenant-scoped by organizationId + storeId.
-  const chosenItems = [...byVariant.values()].flatMap((acc) => {
-    const chosen = chosenItemOf(acc);
-    return chosen === null ? [] : [chosen];
-  });
-  const unitCostByItem = await deriveUnitCostByItem(args.orgId, args.storeId, chosenItems);
+  const [costByVariantId, vendorMissingBarcodes] = await Promise.all([
+    fetchCostAggregates({ organizationId: args.orgId, storeId: args.storeId, variantIds }),
+    resolveVendorMissingBarcodes(
+      args.orgId,
+      args.storeId,
+      [...byVariant.values()].flatMap((acc) => (acc.variantId === null ? [acc.barcode] : [])),
+    ),
+  ]);
 
   return [...byVariant.values()]
     .map((acc) => {
-      const costed = acc.variantId !== null && costedVariantIds.has(acc.variantId);
-      // Unit cost: the chosen item's derived unit cost; null when no order with a stored
-      // ESTIMATE statement sold this variant today, or when the derivation failed above.
-      const chosen = chosenItemOf(acc);
-      const unitCost = chosen === null ? null : (unitCostByItem.get(chosen.itemId) ?? null);
+      const aggregate = acc.variantId === null ? undefined : costByVariantId.get(acc.variantId);
+      const profileCount = aggregate?.profileCount ?? 0;
       const row: TodayProductRow = {
         variantId: acc.variantId,
         barcode: acc.barcode,
@@ -954,8 +808,9 @@ export async function getTodayProducts(args: {
         orderCount: acc.orderIds.size + acc.bufferEntryCount,
         unitsSold: acc.unitsSold,
         revenue: acc.revenue.toFixed(2),
-        costStatus: costed ? 'costed' : 'missing',
-        unitCost,
+        costStatus: profileCount > 0 ? 'costed' : 'missing',
+        currentCostTry: aggregate?.currentCostTry ?? null,
+        profileCount,
         unresolved: acc.unresolved,
         vendorMissing: acc.variantId === null && vendorMissingBarcodes.has(acc.barcode),
         ...acc.desi,

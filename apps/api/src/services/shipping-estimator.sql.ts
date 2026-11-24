@@ -3,7 +3,7 @@
  * products list. The canonical algorithm lives in `shipping-estimator.service.ts`
  * (see `estimateShippingCostForVariant`); this SQL is a performance mirror to
  * avoid N+1 on a paginated products list (same pattern as cost-profile's
- * `current_cost_try` in `products-list.service.ts`). The equivalence test
+ * `current_cost_try` in `cost-aggregate.service.ts`). The equivalence test
  * `apps/api/tests/integration/shipping-estimator-equivalence.test.ts` asserts
  * the two implementations agree on every documented outcome state and on the
  * Barem table rule (deliveryDuration only, see `hasFastDeliverySetup`: table 1
@@ -20,7 +20,8 @@
  * The CTE returns one row per variant in the (organization, store) scope.
  * Callers join the result against the page of variants they have already
  * loaded; rows for variants outside the current page are simply ignored.
- * The store filter mirrors the sister `fetchCostAggregates` constraint —
+ * The store filter mirrors the sister `fetchCostAggregates`
+ * (`cost-aggregate.service.ts`) constraint —
  * the products list endpoint is always store-scoped, so constraining at
  * the CTE level avoids scanning every variant in the org. The query plan
  * is dominated by the `(organization_id, store_id)` filter (indexed) plus

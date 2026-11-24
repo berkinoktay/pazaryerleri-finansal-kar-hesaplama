@@ -162,14 +162,25 @@ const TodayProductRowSchema = z.object({
     description: "'costed' = variant has an active cost profile; 'missing' = needs a cost",
     example: 'costed',
   }),
-  unitCost: z
+  currentCostTry: z
     .string()
     .nullable()
     .openapi({
       description:
-        "Unit cost incl. VAT (decimal string) derived from the order's cost lines for the earliest " +
-        'today order selling this variant; null when cost-missing or not yet computable.',
+        'Live TL sum of all active cost profiles (VAT included, per unit): the cost that ' +
+        "today's orders of this variant carry until the day ends. Null when profileCount is 0. " +
+        'Decimal string.',
       example: '42.00',
+    }),
+  profileCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .openapi({
+      description:
+        'Number of active (non-archived) cost profiles attached to this variant. 0 on an ' +
+        'unresolved row.',
+      example: 1,
     }),
   unresolved: z.boolean().openapi({
     description:

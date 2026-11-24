@@ -26,6 +26,16 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Today's products show the product's current cost**
+  (`GET /v1/organizations/{orgId}/stores/{storeId}/live-performance/today-products`). Each row
+  drops `unitCost` (the unit cost read from the stored cost lines of one of today's orders) and
+  gains `currentCostTry` (the sum of the variant's active cost profiles, VAT included, per unit,
+  as a Decimal string; null without a profile) and `profileCount` (the number of those profiles; 0
+  on an unresolved row), with the same names and meaning as the products list variant fields. It
+  is the cost today's orders of the variant carry until the day ends, and it shows before any of
+  them is calculated (a buffered-only product, an order without a stored statement). `costStatus`
+  keeps its meaning ('costed' when `profileCount` is above 0). Breaking; the web client ships the
+  matching change in the same PR.
 - **Orders list and summary return completed business days only**
   (`GET /v1/organizations/{orgId}/stores/{storeId}/orders`,
   `GET /v1/organizations/{orgId}/stores/{storeId}/orders/summary`). Both endpoints leave out the
