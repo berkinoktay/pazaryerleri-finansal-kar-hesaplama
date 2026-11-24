@@ -1,7 +1,11 @@
+import { CostProfileType } from '@pazarsync/db/enums';
+import { chooseOrderCostVersion, costDecisionTime, loadSellerInputsAt } from '@pazarsync/profit';
 import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Decimal } from 'decimal.js';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '@/app';
+import { updateCostProfile } from '@/services/cost-profile.service';
 
 import { bearer, createAuthenticatedTestUser } from '../../../helpers/auth';
 import { ensureDbReachable, prisma, truncateAll } from '../../../helpers/db';
@@ -11,6 +15,7 @@ import {
   createMembership,
   createOrder,
   createOrganization,
+  createProductVariant,
   createProfitLine,
   createProfitStatement,
   createStore,
@@ -33,7 +38,8 @@ interface TodayProductsBody {
     unitsSold: number;
     revenue: string;
     costStatus: 'costed' | 'missing';
-    unitCost: string | null;
+    currentCostTry: string | null;
+    profileCount: number;
     unresolved: boolean;
     vendorMissing: boolean;
     dimensionalWeight: string | null;
@@ -147,6 +153,27 @@ async function sellLine(
   return item.id;
 }
 
+/** Link a cost profile to a variant (the link row the attach service writes). */
+async function attachProfile(orgId: string, variantId: string, profileId: string): Promise<void> {
+  await prisma.productVariantCostProfile.create({
+    data: { organizationId: orgId, productVariantId: variantId, profileId },
+  });
+}
+
+/** GET today-products for `org`/`store` as `user`; asserts 200 and returns the rows. */
+async function fetchTodayProducts(
+  app: ReturnType<typeof createApp>,
+  args: { orgId: string; storeId: string; accessToken: string },
+): Promise<TodayProductsBody['data']> {
+  const res = await app.request(
+    `/v1/organizations/${args.orgId}/stores/${args.storeId}/live-performance/today-products`,
+    { headers: { Authorization: bearer(args.accessToken) } },
+  );
+  expect(res.status).toBe(200);
+  const body: TodayProductsBody = await res.json();
+  return body.data;
+}
+
 describe('GET /v1/.../live-performance/today-products', () => {
   const app = createApp();
 
@@ -200,7 +227,8 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.revenue).toBe('230.00'); // 80 + 150
     // No cost profile attached → missing.
     expect(row?.costStatus).toBe('missing');
-    expect(row?.unitCost).toBeNull();
+    expect(row?.currentCostTry).toBeNull();
+    expect(row?.profileCount).toBe(0);
     expect(row?.unresolved).toBe(false);
   });
 
@@ -330,7 +358,8 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.unitsSold).toBe(2);
     expect(row?.revenue).toBe('90.00');
     expect(row?.costStatus).toBe('missing');
-    expect(row?.unitCost).toBeNull();
+    expect(row?.currentCostTry).toBeNull();
+    expect(row?.profileCount).toBe(0);
     // No variant, so no desi state: the row is never counted as missing desi.
     expect(row?.dimensionalWeight).toBeNull();
     expect(row?.syncedDimensionalWeight).toBeNull();
@@ -563,29 +592,22 @@ describe('GET /v1/.../live-performance/today-products', () => {
     expect(row?.vendorMissing).toBe(false);
   });
 
-  it("surfaces the unit cost from the order's cost lines", async () => {
+  it("shows the current profile amount, not the amount today's order was calculated with", async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Costed variant: an active profile + a today order carrying a stored ESTIMATE
-    // statement and a 30 COST_COGS line (qty 1). The displayed unit cost is derived
-    // from the item's cost lines (itemProfitValues), not from a legacy snapshot column.
+    // Costed variant: an active 45.00 profile + a today order whose stored ESTIMATE
+    // statement was calculated with a 30.00 COST_COGS line (qty 1). The column shows
+    // the profile's current amount, not the amount the order's cost line carries.
     const costedId = await createVariant(org.id, store.id, {
       title: 'Costed Variant',
       barcode: 'BC-COSTED',
       seq: 2,
     });
-    const profile = await createCostProfile(org.id);
-    await prisma.productVariantCostProfile.create({
-      data: {
-        organizationId: org.id,
-        productVariantId: costedId,
-        profileId: profile.id,
-        attachedBy: user.id,
-      },
-    });
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '45.00' });
+    await attachProfile(org.id, costedId, profile.id);
     const order = await createOrder(org.id, store.id, {
       orderDate: todayAt(10),
       saleGross: '60.00',
@@ -642,315 +664,332 @@ describe('GET /v1/.../live-performance/today-products', () => {
 
     const costed = body.data.find((r) => r.variantId === costedId);
     expect(costed?.costStatus).toBe('costed');
-    expect(costed?.unitCost).toBe('30.00');
+    expect(costed?.currentCostTry).toBe('45.00');
+    expect(costed?.profileCount).toBe(1);
 
     const missing = body.data.find((r) => r.variantId === missingId);
     expect(missing?.costStatus).toBe('missing');
-    expect(missing?.unitCost).toBeNull();
+    expect(missing?.currentCostTry).toBeNull();
+    expect(missing?.profileCount).toBe(0);
   });
 
-  it('reports costed with a null unitCost when the order has no stored statement', async () => {
+  it("shows the current cost when today's order has no stored statement", async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // Active cost profile attached, but today's order has no stored ESTIMATE statement
-    // yet (the writer has not caught up), so no cost line backs a unit cost. Cost
-    // status is authoritative from the profile; the displayed unit cost stays null.
+    // Active 60.00 profile attached, but today's order has no stored ESTIMATE statement
+    // yet (the writer has not caught up). The current cost does not wait for it.
     const costedId = await createVariant(org.id, store.id, {
       title: 'Costed No-Statement Variant',
       barcode: 'BC-NO-STATEMENT',
       seq: 4,
     });
-    const profile = await createCostProfile(org.id);
-    await prisma.productVariantCostProfile.create({
-      data: {
-        organizationId: org.id,
-        productVariantId: costedId,
-        profileId: profile.id,
-        attachedBy: user.id,
-      },
-    });
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '60.00' });
+    await attachProfile(org.id, costedId, profile.id);
     await sellInOrders(org.id, store.id, costedId, { count: 1, lineSaleGross: '50.00' });
 
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as TodayProductsBody;
-    expect(body.data).toHaveLength(1);
-
-    const row = body.data[0];
-    expect(row?.variantId).toBe(costedId);
-    expect(row?.costStatus).toBe('costed');
-    expect(row?.unitCost).toBeNull();
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      variantId: costedId,
+      costStatus: 'costed',
+      currentCostTry: '60.00',
+      profileCount: 1,
+    });
   });
 
-  it('keeps the list when a stored profit line is corrupt', async () => {
+  it('a buffer-only product with a profile shows its current cost', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // A today order selling the variant, with a stored ESTIMATE statement and a profit
-    // line whose `inputs` is a nested object -- a shape the reader rejects. Rebuilding
-    // the stored lines throws, so the list must still return with a null unit cost and
-    // log the failure (owner decision 2026-11-04); volume is unaffected.
+    // Sold only through the buffer: no order row, so no statement and no cost line.
     const variantId = await createVariant(org.id, store.id, {
-      title: 'Corrupt Line Variant',
-      barcode: 'BC-CORRUPT',
-      seq: 10,
+      title: 'Buffer Only Variant',
+      barcode: 'BC-BUFFER-ONLY',
+      seq: 5,
     });
-    const order = await createOrder(org.id, store.id, {
-      orderDate: todayAt(10),
-      saleGross: '60.00',
-    });
-    const item = await prisma.orderItem.create({
-      data: {
-        orderId: order.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '25.00' });
+    await attachProfile(org.id, variantId, profile.id);
+    await createBufferEntry(org.id, store.id, {
+      orderDate: getBusinessDateAnchor(),
+      mappedOrder: {
+        saleGross: '90.00',
+        orderDate: todayAt(12).toISOString(),
+        lines: [{ barcode: 'BC-BUFFER-ONLY', quantity: 1, lineSaleGross: '90.00' }],
       },
     });
-    await createProfitStatement(order.id, org.id, store.id, {
-      view: 'ESTIMATE',
-      status: 'ESTIMATED',
-      netProfit: '5.00',
-      saleMarginPct: '8.33',
-    });
-    await createProfitLine(order.id, org.id, store.id, {
-      orderItemId: item.id,
-      type: 'COST_COGS',
-      certainty: 'ESTIMATE',
-      source: 'SELLER_INPUT',
-      amountGross: '30.00',
-      amountVat: '5.00',
-      vatRatePct: '20',
-      inputs: { nested: { reason: 'corrupt' } },
-    });
 
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      const res = await app.request(
-        `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
-        { headers: { Authorization: bearer(user.accessToken) } },
-      );
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as TodayProductsBody;
-      expect(body.data).toHaveLength(1);
-      const row = body.data[0];
-      expect(row?.variantId).toBe(variantId);
-      // Volume still reported; only the unit cost falls back to null.
-      expect(row?.unitsSold).toBe(1);
-      expect(row?.revenue).toBe('60.00');
-      expect(row?.unitCost).toBeNull();
-
-      expect(errorSpy).toHaveBeenCalledTimes(1);
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[profit-read] in-request profit computation failed',
-        expect.objectContaining({ surface: 'today-products', orderId: null }),
-      );
-    } finally {
-      errorSpy.mockRestore();
-    }
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      variantId,
+      costStatus: 'costed',
+      currentCostTry: '25.00',
+      profileCount: 1,
+    });
   });
 
-  it('prefers a computed order over an earlier not-computable one for the unit cost', async () => {
+  it('sums two active profiles', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
     const variantId = await createVariant(org.id, store.id, {
-      title: 'Preferred Variant',
-      barcode: 'BC-PREFER',
-      seq: 11,
+      title: 'Two Profiles Variant',
+      barcode: 'BC-TWO-PROFILES',
+      seq: 6,
     });
-
-    // Earlier order: its ESTIMATE statement never reached ESTIMATED and it carries no
-    // cost line, so if it backed the unit cost the row would read 0.00.
-    const earlier = await createOrder(org.id, store.id, {
-      orderDate: todayAt(9),
-      saleGross: '60.00',
-    });
-    await prisma.orderItem.create({
-      data: {
-        orderId: earlier.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
-      },
-    });
-    await createProfitStatement(earlier.id, org.id, store.id, {
-      view: 'ESTIMATE',
-      status: 'NOT_COMPUTABLE',
-      netProfit: null,
-    });
-
-    // Later order: its ESTIMATE statement is ESTIMATED with a 30.00 cost line (qty 1).
-    const later = await createOrder(org.id, store.id, {
-      orderDate: todayAt(11),
-      saleGross: '60.00',
-    });
-    const laterItem = await prisma.orderItem.create({
-      data: {
-        orderId: later.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
-      },
-    });
-    await createProfitStatement(later.id, org.id, store.id, {
-      view: 'ESTIMATE',
-      status: 'ESTIMATED',
-      netProfit: '5.00',
-      saleMarginPct: '8.33',
-    });
-    await createProfitLine(later.id, org.id, store.id, {
-      orderItemId: laterItem.id,
-      type: 'COST_COGS',
-      certainty: 'ESTIMATE',
-      source: 'SELLER_INPUT',
+    const cogs = await createCostProfile(org.id, {
+      storeId: store.id,
+      type: CostProfileType.COGS,
       amountGross: '30.00',
-      amountVat: '5.00',
-      vatRatePct: '20',
     });
+    const packaging = await createCostProfile(org.id, {
+      storeId: store.id,
+      type: CostProfileType.PACKAGING,
+      amountGross: '12.50',
+    });
+    await attachProfile(org.id, variantId, cogs.id);
+    await attachProfile(org.id, variantId, packaging.id);
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '100.00' });
 
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as TodayProductsBody;
-    expect(body.data).toHaveLength(1);
-    const row = body.data[0];
-    expect(row?.variantId).toBe(variantId);
-    expect(row?.unitsSold).toBe(2);
-    // The ESTIMATED (later) order backs the unit cost, not the earlier not-computable one.
-    expect(row?.unitCost).toBe('30.00');
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      variantId,
+      costStatus: 'costed',
+      currentCostTry: '42.50',
+      profileCount: 2,
+    });
   });
 
-  it('picks the next order when the first has no statement', async () => {
+  it('an archived profile is not summed and does not make the variant costed', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    const variantId = await createVariant(org.id, store.id, {
-      title: 'Next Order Variant',
-      barcode: 'BC-NEXT',
-      seq: 12,
+    // Variant X: one active 30.00 profile and one archived 99.00 profile.
+    const variantX = await createVariant(org.id, store.id, {
+      title: 'Active And Archived Variant',
+      barcode: 'BC-ARCHIVED-X',
+      seq: 8,
+    });
+    const activeX = await createCostProfile(org.id, { storeId: store.id, amountGross: '30.00' });
+    const archivedX = await createCostProfile(org.id, { storeId: store.id, amountGross: '99.00' });
+    await attachProfile(org.id, variantX, activeX.id);
+    await attachProfile(org.id, variantX, archivedX.id);
+    await sellInOrders(org.id, store.id, variantX, { count: 2, lineSaleGross: '100.00' });
+
+    // Variant Y: only an archived profile.
+    const variantY = await createVariant(org.id, store.id, {
+      title: 'Archived Only Variant',
+      barcode: 'BC-ARCHIVED-Y',
+      seq: 9,
+    });
+    const archivedY = await createCostProfile(org.id, { storeId: store.id, amountGross: '50.00' });
+    await attachProfile(org.id, variantY, archivedY.id);
+    await sellInOrders(org.id, store.id, variantY, { count: 1, lineSaleGross: '100.00' });
+
+    await prisma.costProfile.updateMany({
+      where: { organizationId: org.id, id: { in: [archivedX.id, archivedY.id] } },
+      data: { archivedAt: new Date() },
     });
 
-    // Earliest order has no ESTIMATE statement yet (the writer has not caught up), so it
-    // is not a unit-cost candidate at all.
-    const first = await createOrder(org.id, store.id, {
-      orderDate: todayAt(9),
-      saleGross: '60.00',
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
     });
-    await prisma.orderItem.create({
-      data: {
-        orderId: first.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
-      },
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.variantId === variantX)).toMatchObject({
+      costStatus: 'costed',
+      currentCostTry: '30.00',
+      profileCount: 1,
     });
-
-    // Next order: ESTIMATED with a 30.00 cost line (qty 1) -- the unit cost source.
-    const next = await createOrder(org.id, store.id, {
-      orderDate: todayAt(11),
-      saleGross: '60.00',
+    expect(rows.find((r) => r.variantId === variantY)).toMatchObject({
+      costStatus: 'missing',
+      currentCostTry: null,
+      profileCount: 0,
     });
-    const nextItem = await prisma.orderItem.create({
-      data: {
-        orderId: next.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
-      },
-    });
-    await createProfitStatement(next.id, org.id, store.id, {
-      view: 'ESTIMATE',
-      status: 'ESTIMATED',
-      netProfit: '5.00',
-      saleMarginPct: '8.33',
-    });
-    await createProfitLine(next.id, org.id, store.id, {
-      orderItemId: nextItem.id,
-      type: 'COST_COGS',
-      certainty: 'ESTIMATE',
-      source: 'SELLER_INPUT',
-      amountGross: '30.00',
-      amountVat: '5.00',
-      vatRatePct: '20',
-    });
-
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as TodayProductsBody;
-    expect(body.data).toHaveLength(1);
-    const row = body.data[0];
-    expect(row?.variantId).toBe(variantId);
-    expect(row?.unitsSold).toBe(2);
-    expect(row?.unitCost).toBe('30.00');
   });
 
-  it('reports zero unit cost when the statement has no cost line', async () => {
+  it('a zero-amount profile is costed with a 0.00 current cost', async () => {
     const user = await createAuthenticatedTestUser();
     const org = await createOrganization();
     await createMembership(org.id, user.id);
     const store = await createStore(org.id);
 
-    // A today order with an ESTIMATED estimate statement but no cost line. itemProfitValues
-    // reports a 0.00 unit cost for an item with no cost line (and no MISSING_COST issue).
     const variantId = await createVariant(org.id, store.id, {
       title: 'Zero Cost Variant',
       barcode: 'BC-ZEROCOST',
       seq: 13,
     });
-    const order = await createOrder(org.id, store.id, {
-      orderDate: todayAt(10),
-      saleGross: '60.00',
-    });
-    await prisma.orderItem.create({
-      data: {
-        orderId: order.id,
-        organizationId: org.id,
-        productVariantId: variantId,
-        quantity: 1,
-        lineSaleGross: '60.00',
-      },
-    });
-    await createProfitStatement(order.id, org.id, store.id, {
-      view: 'ESTIMATE',
-      status: 'ESTIMATED',
-      netProfit: '5.00',
-      saleMarginPct: '8.33',
-    });
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '0.00' });
+    await attachProfile(org.id, variantId, profile.id);
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '60.00' });
 
-    const res = await app.request(
-      `/v1/organizations/${org.id}/stores/${store.id}/live-performance/today-products`,
-      { headers: { Authorization: bearer(user.accessToken) } },
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as TodayProductsBody;
-    expect(body.data).toHaveLength(1);
-    const row = body.data[0];
-    expect(row?.variantId).toBe(variantId);
-    expect(row?.unitCost).toBe('0.00');
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      variantId,
+      costStatus: 'costed',
+      currentCostTry: '0.00',
+      profileCount: 1,
+    });
+  });
+
+  it('reports each variant of one product with its own current cost', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const firstId = await createVariant(org.id, store.id, {
+      title: 'Two Variant Product',
+      barcode: 'BC-SIBLING-1',
+      seq: 14,
+    });
+    const first = await prisma.productVariant.findUniqueOrThrow({
+      where: { id: firstId },
+      select: { productId: true },
+    });
+    const second = await createProductVariant(org.id, store.id, first.productId, {
+      barcode: 'BC-SIBLING-2',
+    });
+    const firstProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '10.00',
+    });
+    const secondProfile = await createCostProfile(org.id, {
+      storeId: store.id,
+      amountGross: '20.00',
+    });
+    await attachProfile(org.id, firstId, firstProfile.id);
+    await attachProfile(org.id, second.id, secondProfile.id);
+    await sellInOrders(org.id, store.id, firstId, { count: 1, lineSaleGross: '50.00' });
+    await sellInOrders(org.id, store.id, second.id, { count: 1, lineSaleGross: '60.00' });
+
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.variantId === firstId)).toMatchObject({
+      costStatus: 'costed',
+      currentCostTry: '10.00',
+      profileCount: 1,
+    });
+    expect(rows.find((r) => r.variantId === second.id)).toMatchObject({
+      costStatus: 'costed',
+      currentCostTry: '20.00',
+      profileCount: 1,
+    });
+  });
+
+  it('a digital variant shows its current cost like any other', async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Digital Costed Variant',
+      barcode: 'BC-DIGITAL-COST',
+      seq: 15,
+      syncedDimensionalWeight: null,
+      dimensionalWeightOverride: null,
+      isDigital: true,
+    });
+    const profile = await createCostProfile(org.id, { storeId: store.id, amountGross: '15.00' });
+    await attachProfile(org.id, variantId, profile.id);
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '30.00' });
+
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      variantId,
+      costStatus: 'costed',
+      currentCostTry: '15.00',
+      profileCount: 1,
+      isDimensionalWeightMissing: false,
+    });
+  });
+
+  it("the current cost equals what the cost rule gives today's orders", async () => {
+    const user = await createAuthenticatedTestUser();
+    const org = await createOrganization();
+    await createMembership(org.id, user.id);
+    const store = await createStore(org.id);
+
+    const variantId = await createVariant(org.id, store.id, {
+      title: 'Parity Variant',
+      barcode: 'BC-PARITY',
+      seq: 16,
+    });
+    const cogs = await createCostProfile(org.id, { storeId: store.id, amountGross: '20.00' });
+    const packaging = await createCostProfile(org.id, {
+      storeId: store.id,
+      type: CostProfileType.PACKAGING,
+      amountGross: '7.25',
+    });
+    await attachProfile(org.id, variantId, cogs.id);
+    await attachProfile(org.id, variantId, packaging.id);
+    // A second version through the real service: the cost rule prices the link by it.
+    await updateCostProfile(org.id, cogs.id, { amountGross: '33.30' }, user.id);
+    await sellInOrders(org.id, store.id, variantId, { count: 1, lineSaleGross: '100.00' });
+
+    // What the cost rule gives today's orders: each link in force at the day end,
+    // priced by its version in force then.
+    const at = costDecisionTime(new Date());
+    const inputs = await loadSellerInputsAt(prisma, {
+      organizationId: org.id,
+      variantIds: [variantId],
+      at,
+    });
+    const links = inputs.get(variantId)?.costProfiles ?? [];
+    expect(links).toHaveLength(2);
+    const expected = links.reduce((sum, link) => {
+      const version = chooseOrderCostVersion(link, { at });
+      return version === null ? sum : sum.add(version.amountGross.toString());
+    }, new Decimal(0));
+    // Not vacuous: the updated profile is priced by its second version (33.30 + 7.25).
+    expect(expected.toFixed(2)).toBe('40.55');
+
+    const rows = await fetchTodayProducts(app, {
+      orgId: org.id,
+      storeId: store.id,
+      accessToken: user.accessToken,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.currentCostTry).toBe(expected.toFixed(2));
+    expect(rows[0]?.profileCount).toBe(2);
   });
 
   it('keeps a today order line whose variant was deleted, as an unresolved barcode row', async () => {
@@ -991,7 +1030,8 @@ describe('GET /v1/.../live-performance/today-products', () => {
       unitsSold: 2,
       revenue: '80.00',
       costStatus: 'missing',
-      unitCost: null,
+      currentCostTry: null,
+      profileCount: 0,
       unresolved: true,
       vendorMissing: false,
       isDimensionalWeightMissing: false,

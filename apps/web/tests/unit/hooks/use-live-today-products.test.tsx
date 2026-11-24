@@ -28,7 +28,8 @@ const todayProducts = {
       unitsSold: 8,
       revenue: '1250.00',
       costStatus: 'costed',
-      unitCost: '42.00',
+      currentCostTry: '42.00',
+      profileCount: 1,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: '1.5',
@@ -46,7 +47,8 @@ const todayProducts = {
       unitsSold: 3,
       revenue: '600.00',
       costStatus: 'missing',
-      unitCost: null,
+      currentCostTry: null,
+      profileCount: 0,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: null,
@@ -65,7 +67,8 @@ describe('useLiveTodayProducts', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.data).toHaveLength(2);
     expect(result.current.data?.data[0]?.costStatus).toBe('costed');
-    expect(result.current.data?.data[1]?.unitCost).toBeNull();
+    expect(result.current.data?.data[0]?.currentCostTry).toBe('42.00');
+    expect(result.current.data?.data[1]?.currentCostTry).toBeNull();
   });
 
   it('does not fire when org/store is null', () => {

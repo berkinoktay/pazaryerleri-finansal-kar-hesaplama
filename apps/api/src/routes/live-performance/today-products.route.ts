@@ -28,8 +28,8 @@ const todayProductsRoute = createRoute({
     'Every product variant that sold today, one row per barcode, merged over the business-day ' +
     "universe (the calculated orders table ∪ today's cost-missing buffer). Each row reports " +
     'distinct order count, units sold and net revenue (all known without cost) plus a ' +
-    'cost-status flag and the costed net unit cost. No per-product profit. Money values are ' +
-    'Decimal strings; counts are ints.',
+    'cost-status flag and the current cost (sum of the active cost profiles, VAT included). ' +
+    'No per-product profit. Money values are Decimal strings; counts are ints.',
   security: [{ bearerAuth: [] }],
   request: { params: storeScopeParams },
   responses: {

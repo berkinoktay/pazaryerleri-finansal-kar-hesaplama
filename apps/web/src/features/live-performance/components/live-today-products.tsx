@@ -57,7 +57,8 @@ function medalForRank(rank: number): React.ComponentType<{ className?: string }>
  * units desc), Tümü / Maliyet bekleyen / Desi bekleyen tabs, product-name
  * search, and pagination — the dataset is bounded to today's distinct products
  * so it loads fully. The Sıra column awards a neutral podium medal to the
- * current-sort top-3; the Maliyet column shows the quiet unit cost when costed,
+ * current-sort top-3; the Maliyet column shows the product's current cost (the
+ * backend's sum of its active cost profiles) when costed, display only,
  * else an inline "Maliyet Ekle" action (the existing variant-level
  * CostCellPopover). The Desi column shows the effective desi, else an inline
  * "Desi Gir" action (the products feature's DesiCellPopover) when the backend
@@ -229,8 +230,8 @@ export function LiveTodayProducts({ orgId, storeId }: LiveTodayProductsProps): R
         cell: ({ row }) => {
           const product = row.original;
           if (product.costStatus === 'costed') {
-            return product.unitCost !== null ? (
-              <Currency value={product.unitCost} className="text-muted-foreground" />
+            return product.currentCostTry !== null ? (
+              <Currency value={product.currentCostTry} className="text-muted-foreground" />
             ) : (
               <span className="text-muted-foreground">—</span>
             );

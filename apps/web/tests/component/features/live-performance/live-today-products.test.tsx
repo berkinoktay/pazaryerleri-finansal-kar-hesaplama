@@ -50,7 +50,8 @@ const response = {
       unitsSold: 14,
       revenue: '3600.00',
       costStatus: 'costed',
-      unitCost: '42.00',
+      currentCostTry: '42.00',
+      profileCount: 1,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: '2.5',
@@ -68,7 +69,8 @@ const response = {
       unitsSold: 5,
       revenue: '900.00',
       costStatus: 'missing',
-      unitCost: null,
+      currentCostTry: null,
+      profileCount: 0,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: null,
@@ -86,7 +88,8 @@ const response = {
       unitsSold: 3,
       revenue: '300.00',
       costStatus: 'missing',
-      unitCost: null,
+      currentCostTry: null,
+      profileCount: 0,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: null,
@@ -104,7 +107,8 @@ const response = {
       unitsSold: 2,
       revenue: '200.00',
       costStatus: 'costed',
-      unitCost: '12.00',
+      currentCostTry: '12.00',
+      profileCount: 1,
       unresolved: false,
       vendorMissing: false,
       dimensionalWeight: '0',
@@ -142,7 +146,7 @@ function cellUnder(row: HTMLElement, header: string): HTMLElement {
 }
 
 describe('LiveTodayProducts', () => {
-  it('renders one row per product with a podium medal on the top seller, copyable identifiers, costed unit cost and a cost-missing CTA', async () => {
+  it('renders one row per product with a podium medal on the top seller, copyable identifiers, costed current cost and a cost-missing CTA', async () => {
     server.use(http.get(URL, () => HttpResponse.json(response)));
 
     render(
@@ -168,6 +172,18 @@ describe('LiveTodayProducts', () => {
     if (!(rank4Row instanceof HTMLElement)) throw new Error('rank-4 row not found');
     expect(within(rank4Row).getByText('4')).toBeInTheDocument();
     expect(within(rank4Row).queryByText('4. sıra')).toBeNull();
+  });
+
+  it("shows the backend's current cost on a costed row", async () => {
+    server.use(http.get(URL, () => HttpResponse.json(response)));
+    renderTable();
+
+    // v-top is costed; its barcode keeps the lookup ASCII.
+    const topRow = await findRow('8690000000001');
+    const costCell = cellUnder(topRow, trMessages.livePerformance.todayProducts.columns.cost);
+    expect(within(costCell).getByText(/42,00/)).toBeInTheDocument();
+    // Display only: a costed row offers no cost action in this table.
+    expect(within(costCell).queryByRole('button')).toBeNull();
   });
 
   it('shows no stock code copy button when the stock code is an empty string', async () => {
@@ -198,7 +214,8 @@ describe('LiveTodayProducts', () => {
           unitsSold: 1,
           revenue: '45.00',
           costStatus: 'missing',
-          unitCost: null,
+          currentCostTry: null,
+          profileCount: 0,
           unresolved: true,
           vendorMissing: false,
           dimensionalWeight: null,
@@ -243,7 +260,8 @@ describe('LiveTodayProducts', () => {
               unitsSold: 1,
               revenue: '45.00',
               costStatus: 'missing',
-              unitCost: null,
+              currentCostTry: null,
+              profileCount: 0,
               unresolved: true,
               vendorMissing: false,
               dimensionalWeight: null,

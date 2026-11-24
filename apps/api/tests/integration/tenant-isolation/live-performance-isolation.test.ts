@@ -5,11 +5,15 @@ import { createApp } from '@/app';
 
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { openBusinessDayInstant } from '../../helpers/completed-day';
-import { ensureDbReachable, truncateAll } from '../../helpers/db';
+import { ensureDbReachable, prisma, truncateAll } from '../../helpers/db';
 import {
+  createCostProfile,
   createMembership,
   createOrder,
+  createOrderItem,
   createOrganization,
+  createProduct,
+  createProductVariant,
   createStore,
 } from '../../helpers/factories';
 
@@ -19,6 +23,31 @@ interface CancelledFeedBody {
   data: { orderId: string | null; platformOrderId: string }[];
   // Optional so a missing field fails on the assertion, not on the read.
   counts?: { cancelled?: number };
+}
+
+interface TodayProductsCostBody {
+  data: {
+    variantId: string | null;
+    costStatus: 'costed' | 'missing';
+    // Optional so a missing field fails on the assertion, not on the read.
+    currentCostTry?: string | null;
+    profileCount?: number;
+  }[];
+}
+
+/** A product variant of `storeId` sold once in one of today's orders of that store. */
+async function variantSoldToday(orgId: string, storeId: string): Promise<string> {
+  const product = await createProduct(orgId, storeId);
+  const variant = await createProductVariant(orgId, storeId, product.id);
+  const order = await createOrder(orgId, storeId, {
+    orderDate: openBusinessDayInstant(),
+    saleGross: '100.00',
+  });
+  await createOrderItem(order.id, orgId, {
+    productVariantId: variant.id,
+    lineSaleGross: '100.00',
+  });
+  return variant.id;
 }
 
 describe('Tenant isolation: live-performance endpoints', () => {
@@ -104,5 +133,64 @@ describe('Tenant isolation: live-performance endpoints', () => {
     expect(afterBody.data.map((row) => [row.orderId, row.platformOrderId])).toEqual([
       [own.id, 'A1-CAN'],
     ]);
+  });
+
+  it("/today-products never sums another tenant's cost profile or lists another store's product", async () => {
+    const userA = await createAuthenticatedTestUser();
+    const orgA = await createOrganization();
+    await createMembership(orgA.id, userA.id);
+    const storeA1 = await createStore(orgA.id);
+    const storeA2 = await createStore(orgA.id);
+    const orgB = await createOrganization();
+
+    // V1 in store A1, linked to org B's profile by a row no writer produces (the attach
+    // guard refuses it): the link carries org A, the profile belongs to org B.
+    const v1 = await variantSoldToday(orgA.id, storeA1.id);
+    const profileB = await createCostProfile(orgB.id, { amountGross: '99.00' });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: orgA.id, productVariantId: v1, profileId: profileB.id },
+    });
+
+    // V2 in store A2 with its own profile, sold today in A2.
+    const v2 = await variantSoldToday(orgA.id, storeA2.id);
+    const profileA2 = await createCostProfile(orgA.id, {
+      storeId: storeA2.id,
+      amountGross: '55.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: orgA.id, productVariantId: v2, profileId: profileA2.id },
+    });
+
+    const url = `/v1/organizations/${orgA.id}/stores/${storeA1.id}/live-performance/today-products`;
+    const before = await app.request(url, {
+      headers: { Authorization: bearer(userA.accessToken) },
+    });
+    expect(before.status).toBe(200);
+    const beforeBody: TodayProductsCostBody = await before.json();
+    // A2's product is absent (the order and buffer reads are store-scoped).
+    expect(beforeBody.data.map((row) => row.variantId)).toEqual([v1]);
+    expect(beforeBody.data[0]).toMatchObject({
+      costStatus: 'missing',
+      currentCostTry: null,
+      profileCount: 0,
+    });
+
+    // Positive control: org A's own profile on V1 is summed.
+    const profileA1 = await createCostProfile(orgA.id, {
+      storeId: storeA1.id,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: orgA.id, productVariantId: v1, profileId: profileA1.id },
+    });
+    const after = await app.request(url, { headers: { Authorization: bearer(userA.accessToken) } });
+    expect(after.status).toBe(200);
+    const afterBody: TodayProductsCostBody = await after.json();
+    expect(afterBody.data.map((row) => row.variantId)).toEqual([v1]);
+    expect(afterBody.data[0]).toMatchObject({
+      costStatus: 'costed',
+      currentCostTry: '40.00',
+      profileCount: 1,
+    });
   });
 });

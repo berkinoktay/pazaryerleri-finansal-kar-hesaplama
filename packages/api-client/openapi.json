@@ -2333,13 +2333,19 @@
                   "description": "'costed' = variant has an active cost profile; 'missing' = needs a cost",
                   "example": "costed"
                 },
-                "unitCost": {
+                "currentCostTry": {
                   "type": [
                     "string",
                     "null"
                   ],
-                  "description": "Unit cost incl. VAT (decimal string) derived from the order's cost lines for the earliest today order selling this variant; null when cost-missing or not yet computable.",
+                  "description": "Live TL sum of all active cost profiles (VAT included, per unit): the cost that today's orders of this variant carry until the day ends. Null when profileCount is 0. Decimal string.",
                   "example": "42.00"
+                },
+                "profileCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of active (non-archived) cost profiles attached to this variant. 0 on an unresolved row.",
+                  "example": 1
                 },
                 "unresolved": {
                   "type": "boolean",
@@ -2388,7 +2394,8 @@
                 "unitsSold",
                 "revenue",
                 "costStatus",
-                "unitCost",
+                "currentCostTry",
+                "profileCount",
                 "unresolved",
                 "vendorMissing",
                 "dimensionalWeight",
@@ -11774,7 +11781,7 @@
           "Live Performance"
         ],
         "summary": "Products that sold today (orders ∪ buffer, per barcode)",
-        "description": "Every product variant that sold today, one row per barcode, merged over the business-day universe (the calculated orders table ∪ today's cost-missing buffer). Each row reports distinct order count, units sold and net revenue (all known without cost) plus a cost-status flag and the costed net unit cost. No per-product profit. Money values are Decimal strings; counts are ints.",
+        "description": "Every product variant that sold today, one row per barcode, merged over the business-day universe (the calculated orders table ∪ today's cost-missing buffer). Each row reports distinct order count, units sold and net revenue (all known without cost) plus a cost-status flag and the current cost (sum of the active cost profiles, VAT included). No per-product profit. Money values are Decimal strings; counts are ints.",
         "security": [
           {
             "bearerAuth": []
