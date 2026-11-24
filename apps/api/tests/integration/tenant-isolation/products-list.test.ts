@@ -2,6 +2,7 @@
 // Pattern matches docs/SECURITY.md §9: two orgs, both with data,
 // query as one user, assert nothing leaks from the other.
 
+import { z } from '@hono/zod-openapi';
 import { prisma } from '@pazarsync/db';
 import { ProductVariantStatus } from '@pazarsync/db/enums';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -12,6 +13,7 @@ import { encryptCredentials } from '@pazarsync/sync-core';
 import { bearer, createAuthenticatedTestUser } from '../../helpers/auth';
 import { ensureDbReachable, truncateAll } from '../../helpers/db';
 import {
+  createCostProfile,
   createMemberStoreAccess,
   createMembership,
   createOrganization,
@@ -73,6 +75,33 @@ async function makeTenantWithProducts(brandSeed: number): Promise<TenantSetup> {
     });
   }
   return { user: { id: user.id, accessToken: user.accessToken }, orgId: org.id, storeId: store.id };
+}
+
+const VariantCostSchema = z.object({
+  id: z.string(),
+  currentCostTry: z.string().nullable(),
+  profileCount: z.number(),
+  costStatus: z.string(),
+});
+
+const ProductsCostBodySchema = z.object({
+  data: z.array(z.object({ variants: z.array(VariantCostSchema) })),
+});
+
+/** The cost fields of one variant as GET /products returns them to the tenant. */
+async function listVariantCost(
+  tenant: TenantSetup,
+  variantId: string,
+): Promise<z.infer<typeof VariantCostSchema>> {
+  const res = await app.request(
+    `/v1/organizations/${tenant.orgId}/stores/${tenant.storeId}/products`,
+    { headers: { Authorization: bearer(tenant.user.accessToken) } },
+  );
+  expect(res.status).toBe(200);
+  const body = ProductsCostBodySchema.parse(await res.json());
+  const variant = body.data.flatMap((p) => p.variants).find((v) => v.id === variantId);
+  if (variant === undefined) throw new Error(`variant ${variantId} is missing from the list`);
+  return variant;
 }
 
 describe('Tenant isolation — GET /products + /facets', () => {
@@ -142,6 +171,40 @@ describe('Tenant isolation — GET /products + /facets', () => {
       { headers: { Authorization: bearer(a.user.accessToken) } },
     );
     expect(res.status).toBe(404);
+  });
+
+  it("a link to another organization's cost profile is never summed into the caller's variant cost", async () => {
+    const a = await makeTenantWithProducts(1);
+    const orgB = await createOrganization();
+    const variantA = await prisma.productVariant.findFirstOrThrow({
+      where: { organizationId: a.orgId, storeId: a.storeId, barcode: 'bc-1-1' },
+    });
+    const profileB = await createCostProfile(orgB.id, { amountGross: '99.00' });
+    // A row no writer produces (the attach guard refuses it): the link carries org A,
+    // the profile belongs to org B. No foreign key or trigger forbids it, so only the
+    // aggregate's organization predicate on the profile keeps org B's amount out.
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: a.orgId, productVariantId: variantA.id, profileId: profileB.id },
+    });
+
+    const leaked = await listVariantCost(a, variantA.id);
+    expect(leaked.currentCostTry).toBeNull();
+    expect(leaked.profileCount).toBe(0);
+    expect(leaked.costStatus).toBe('NO_PROFILES');
+
+    // Positive control: org A's own profile on the same variant is summed.
+    const profileA = await createCostProfile(a.orgId, {
+      storeId: a.storeId,
+      amountGross: '40.00',
+    });
+    await prisma.productVariantCostProfile.create({
+      data: { organizationId: a.orgId, productVariantId: variantA.id, profileId: profileA.id },
+    });
+
+    const own = await listVariantCost(a, variantA.id);
+    expect(own.currentCostTry).toBe('40.00');
+    expect(own.profileCount).toBe(1);
+    expect(own.costStatus).toBe('OK');
   });
 });
 

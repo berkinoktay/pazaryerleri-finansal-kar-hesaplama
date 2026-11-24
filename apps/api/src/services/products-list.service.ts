@@ -5,21 +5,18 @@
 // to matching variants — but the parent itself is included whenever
 // ≥1 of its variants matches.
 
-import { Decimal } from 'decimal.js';
-
 import { LISTED_VARIANT_WHERE } from '@pazarsync/catalog-sync';
 import { prisma } from '@pazarsync/db';
 import type { Prisma } from '@pazarsync/db';
 
 import { enumInWhere, rangeWhere } from '../lib/where-builders';
+import { fetchCostAggregates } from './cost-aggregate.service';
 import { SHIPPING_ESTIMATE_CTE_SQL, type ShippingEstimateRow } from './shipping-estimator.sql';
 import type {
-  CostStatus,
   ListProductsQuery,
   ProductListSort,
   ProductListStatusFilter,
   ProductOverrideMissing,
-  VariantCostAggregate,
   VariantShippingEstimate,
 } from '../validators/product.validator';
 import {
@@ -234,7 +231,7 @@ export async function list(opts: {
   // keeps the wall time at max(cost, shipping) rather than serializing.
   const variantIds = products.flatMap((p) => p.variants.map((v) => v.id));
   const [costByVariantId, shippingByVariantId] = await Promise.all([
-    fetchCostAggregates(organizationId, variantIds),
+    fetchCostAggregates({ organizationId, storeId, variantIds }),
     fetchShippingEstimates(organizationId, storeId),
   ]);
 
@@ -280,60 +277,6 @@ async function fetchShippingEstimates(
       shippingCarrierCode: row.shipping_carrier_code,
       shippingTariffApplied: row.shipping_tariff_applied,
       shippingEstimateStatus: row.shipping_estimate_status,
-    });
-  }
-  return result;
-}
-
-// ─── Cost aggregate ────────────────────────────────────────────────────
-// Raw SQL: the plain TL sum of the active (non-archived) cost profiles
-// attached to each variant. The result is a flat list keyed by variant_id;
-// the caller builds a Map<id, VariantCostAggregate> for O(1) lookup in the
-// mapper. Status is OK when the variant has ≥1 profile, NO_PROFILES otherwise.
-
-interface CostAggregateRow {
-  variant_id: string;
-  current_cost_try: unknown; // Decimal from PG — coerce below
-  profile_count: bigint; // Prisma $queryRaw returns bigint for COUNT
-}
-
-function deriveCostStatus(profileCount: number): CostStatus {
-  return profileCount === 0 ? 'NO_PROFILES' : 'OK';
-}
-
-export async function fetchCostAggregates(
-  organizationId: string,
-  variantIds: string[],
-): Promise<Map<string, VariantCostAggregate>> {
-  if (variantIds.length === 0) return new Map();
-
-  // Cast to uuid[] so Postgres can match against the typed column.
-  const rows = await prisma.$queryRaw<CostAggregateRow[]>`
-    SELECT
-      pv.id                                             AS variant_id,
-      COALESCE(SUM(cp.amount_gross), 0)::DECIMAL(12,2)  AS current_cost_try,
-      COUNT(cp.id)                                      AS profile_count
-    FROM product_variants pv
-    LEFT JOIN product_variant_cost_profiles pvcp
-      ON pvcp.product_variant_id = pv.id
-    LEFT JOIN cost_profiles cp
-      ON cp.id = pvcp.profile_id AND cp.archived_at IS NULL
-    WHERE pv.id = ANY(${variantIds}::uuid[])
-      AND pv.organization_id = ${organizationId}::uuid
-    GROUP BY pv.id
-  `;
-
-  const result = new Map<string, VariantCostAggregate>();
-  for (const row of rows) {
-    const profileCount = Number(row.profile_count);
-    const costStatus = deriveCostStatus(profileCount);
-    const rawCost = row.current_cost_try;
-    const costDecimal =
-      rawCost !== null && rawCost !== undefined ? new Decimal(String(rawCost)) : new Decimal(0);
-    result.set(row.variant_id, {
-      currentCostTry: profileCount > 0 ? costDecimal.toFixed(2) : null,
-      profileCount,
-      costStatus,
     });
   }
   return result;
