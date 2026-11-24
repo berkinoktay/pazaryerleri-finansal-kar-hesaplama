@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { dateRangeFromParams, dateRangeToParams } from '@/lib/date-range-params';
+import {
+  businessDateToPickerDate,
+  dateRangeFromParams,
+  dateRangeToParams,
+} from '@/lib/date-range-params';
 
 // The picker hands over local-midnight Dates and the URL carries the calendar
 // day the user picked. The zone-pinned cases below stub TZ at runtime; each one
@@ -72,4 +76,27 @@ describe('date-range-params helpers', () => {
       expect(params).toEqual({ from: '2026-01-31', to: '2026-12-01' });
     },
   );
+
+  describe('businessDateToPickerDate', () => {
+    it('gives the local midnight of the business date (UTC+3 runner)', () => {
+      vi.stubEnv('TZ', 'Europe/Istanbul');
+      expect(new Date(2026, 10, 23).getTimezoneOffset()).toBe(ISTANBUL_OFFSET_MINUTES); // pin control
+
+      const date = businessDateToPickerDate('2026-11-23');
+
+      expect(date).toBeInstanceOf(Date);
+      expect([date?.getFullYear(), date?.getMonth(), date?.getDate()]).toEqual([2026, 10, 23]);
+      expect([date?.getHours(), date?.getMinutes()]).toEqual([0, 0]);
+    });
+
+    it('gives undefined for an empty or malformed value, never an Invalid Date', () => {
+      // Control: a well-formed value gives a Date, so the undefined cases are not vacuous.
+      expect(businessDateToPickerDate('2026-11-23')).toBeInstanceOf(Date);
+
+      expect(businessDateToPickerDate('')).toBeUndefined();
+      expect(businessDateToPickerDate('2026-13-40')).toBeUndefined();
+      expect(businessDateToPickerDate('2026-02-30')).toBeUndefined();
+      expect(businessDateToPickerDate('not-a-date')).toBeUndefined();
+    });
+  });
 });

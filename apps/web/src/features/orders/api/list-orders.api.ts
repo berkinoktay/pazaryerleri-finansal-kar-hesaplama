@@ -7,6 +7,7 @@ import type { CostStatusValue, OrderSortValue } from '../lib/orders-filter-parse
 
 export type OrderListItem = components['schemas']['OrderListItem'];
 export type ListOrdersResponse = components['schemas']['ListOrdersResponse'];
+export type OrderListOpenDay = components['schemas']['OrderListOpenDay'];
 
 export interface ListOrdersArgs {
   orgId: string;

@@ -4,12 +4,26 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 
 import { listOrders, type ListOrdersArgs, type ListOrdersResponse } from '../api/list-orders.api';
 import { orderKeys, type OrderListFilters } from '../query-keys';
+import type { FinalizingPoll } from './use-finalizing-poll';
+
+export interface UseOrdersOptions {
+  /**
+   * The list half of the page's finalizing poll: fed the latest response's
+   * `openDay.finalizing`, it returns the refetch interval. Without it the list
+   * does not poll.
+   */
+  pollInterval?: FinalizingPoll['fromList'];
+}
 
 /**
  * Lists orders for a store. Disabled when args is null (no active org/store
  * resolved yet) — avoids a wasted fetch + reads cleanly during cold load.
  */
-export function useOrders(args: ListOrdersArgs | null): UseQueryResult<ListOrdersResponse> {
+export function useOrders(
+  args: ListOrdersArgs | null,
+  options?: UseOrdersOptions,
+): UseQueryResult<ListOrdersResponse> {
+  const pollInterval = options?.pollInterval;
   return useQuery<ListOrdersResponse>({
     queryKey:
       args !== null
@@ -20,6 +34,10 @@ export function useOrders(args: ListOrdersArgs | null): UseQueryResult<ListOrder
       return listOrders(args);
     },
     enabled: args !== null,
+    refetchInterval:
+      pollInterval !== undefined
+        ? (query) => pollInterval(query.state.data?.openDay.finalizing)
+        : false,
   });
 }
 

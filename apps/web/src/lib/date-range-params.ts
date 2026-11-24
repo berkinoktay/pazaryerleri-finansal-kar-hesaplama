@@ -48,6 +48,21 @@ export function dateRangeFromParams(from: string, to: string): DateRange | undef
 }
 
 /**
+ * The picker Date (local midnight) of the business date `value` (`YYYY-MM-DD`),
+ * for bounds such as the DateRangePicker's `disabledAfter`. Undefined for an
+ * empty or malformed value, so no Invalid Date reaches the Calendar.
+ */
+export function businessDateToPickerDate(value: string): Date | undefined {
+  const date = parseLocalIsoDate(value);
+  // The round trip rejects a day the month does not have: `Date` rolls
+  // `2026-13-40` over into a later, valid day instead of failing.
+  if (Number.isNaN(date.getTime()) || toLocalIsoDate(date) !== value) {
+    return undefined;
+  }
+  return date;
+}
+
+/**
  * Project a selected DateRange back to the URL's `from`/`to` params. An unset
  * bound becomes an empty string — the parsers' "no filter" sentinel.
  */
