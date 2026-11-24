@@ -43,6 +43,14 @@ export interface ItemCostInput {
  * version by the same order is used (the first-version rule, design section 6.6).
  * Throws `RangeError` on an empty list.
  *
+ * The order path never relies on this choice: its loader hands each profile as ONE
+ * version already chosen at the order's business-day end (the captured pin, or
+ * `chooseOrderCostVersion` at the day end for an uncaptured item; same-day edit window,
+ * plan PR-1), so the result is that version even when it became effective after the
+ * order instant (the fallback above returns the only version). A caller that passes a
+ * profile's version history (the price scenario, at its scenario date) gets the choice
+ * described above.
+ *
  * Generic so a caller can keep its own version element; the chosen element is
  * returned as passed in.
  */
@@ -107,9 +115,10 @@ function buildItemCostLines(params: {
   let costed = false;
 
   for (const profile of entry.profiles) {
+    // For an order the profile carries the one version chosen at its day end.
     const version = chooseCostVersion(profile.versions, snapshot.orderDate);
     if (version.archivedAt !== null) {
-      continue; // archived at the order date: not usable, contributes nothing
+      continue; // archived in the chosen version: not usable, contributes nothing
     }
     costed = true;
 
@@ -146,7 +155,8 @@ function buildItemCostLines(params: {
 
 /**
  * Builds the seller cost lines for a parcel from its cost profiles. For each
- * active item, the version valid at the order date is chosen per profile, its
+ * active item, one version is chosen per profile (`chooseCostVersion`: for an order,
+ * the single version its loader chose at the order's business-day end), its
  * archived state is read from that version, and the amount is the version's
  * per-unit lira amount times the item quantity. An active item with no cost entry,
  * or whose every chosen version is archived, yields a `MISSING_COST` issue. Lines

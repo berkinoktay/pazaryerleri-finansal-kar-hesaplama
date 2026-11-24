@@ -46,7 +46,7 @@
  * (exactly what the buffer-promote worker does).
  *
  * Cost-window rule (Berkin 2026-11-03): an order enters net profit only if every
- * non-cancelled item had a cost entered BEFORE the order's business day ended
+ * non-cancelled item had a cost in force at the end of the order's business day
  * (Europe/Istanbul midnight). Supply prices drift, so a cost entered after that day
  * may not reflect the day's real price. A past-day order that arrives without a
  * timely cost -- or one whose cost was entered only after its day (hadCostWithinOrderDay
@@ -70,11 +70,11 @@
  * a cost AND an effective desi (override ?? synced; any stored value counts, a seller
  * desi is at least 1) on every
  * non-digital item. Today's desiless order waits in the buffer exactly like a cost-missing
- * one. For a past-day order the cost keeps its "entered before the order day ended" check;
- * the desi is only checked for presence when the order is written (a desi is a physical
- * measure that does not drift, and no entry time is recorded for it). The order's
- * cargo-measured desi (`cargoDeci`) never stands in for a product desi. Reasons, with the
- * cost winning when both are missing:
+ * one. For a past-day order both are judged as they stood at the end of the order's
+ * business day: the cost links in force then, and the desi in force then (rebuilt from
+ * the trigger-written desi history by `loadSellerInputsAt`), so a desi entered after
+ * that day does not count. The order's cargo-measured desi (`cargoDeci`) never stands in
+ * for a product desi. Reasons, with the cost winning when both are missing:
  *
  *                       buffer row graduated     no buffer row
  *   cost missed day     COST_DEADLINE_MISSED     LATE_UNCOSTED_ARRIVAL
@@ -297,18 +297,19 @@ export async function intakeOrder(args: IntakeOrderArgs): Promise<OrderIntakeOut
   });
   const calc = resolveOrderCalculability(calcLines);
 
-  // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22). A past-day order's
-  // window (its own business day) has already closed, so it enters profit ONLY when every
-  // non-cancelled item had its cost entered before that day ended AND the gate is
-  // calculable (a cost link in force at that day's end, and a desi present now).
-  // Otherwise it is persisted but PERMANENTLY
-  // excluded. The cost is judged first and wins: no cost at all, or a cost entered only
-  // after the day (decision 2), is a cost gap; a timely cost with a desiless item is a
-  // desi gap (the desi is checked for presence only -- no entry time is recorded). The
-  // exclusion reason is derived in persistWithBufferGraduation from the gap and from
-  // whether a buffer row is graduated. When the gate already reports a missing cost, the
-  // timing query is skipped. The order is never cancelled here (the CANCELLED branch
-  // returned above), so every line is non-cancelled.
+  // Past-day cost-window + desi gate (Berkin 2026-11-03, 2026-11-22, 2026-11-23). A
+  // past-day order's window (its own business day) has already closed, so it enters
+  // profit ONLY when every non-cancelled item had a cost in force at that day's end AND
+  // the gate is calculable: both the cost links and the desi are judged as they stood at
+  // that day end (`buildCalcCheckLines` at `costDecisionTime`, rebuilt from the
+  // database-stamped seller-input history), never as they stand now. Otherwise it is
+  // persisted but PERMANENTLY excluded. The cost is judged first and wins: no cost at
+  // all, or a cost entered only after the day (decision 2), is a cost gap; a timely cost
+  // with an item that had no desi at the day end is a desi gap. The exclusion reason is
+  // derived in persistWithBufferGraduation from the gap and from whether a buffer row is
+  // graduated. When the gate already reports a missing cost, the timing query is
+  // skipped. The order is never cancelled here (the CANCELLED branch returned above), so
+  // every line is non-cancelled.
   //
   // Same-day edit window (Berkin 2026-11-23, plan PR-1): the app clock above only
   // routes. Whether the order's day is settled -- its seller inputs final -- is read

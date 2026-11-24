@@ -213,9 +213,9 @@ function sorted(ids: readonly string[]): string[] {
   return [...ids].sort();
 }
 
-/** A cost version start before the melontik order date (2026-10-28): in force at it. */
+/** A cost version start before the melontik order date (2026-10-28): in force at its day end. */
 const BEFORE_ORDER_DATE = new Date('2026-10-01T00:00:00Z');
-/** A cost version start after the melontik order date: not yet in force at it. */
+/** A cost version start after the melontik order's day end: not yet in force at it. */
 const AFTER_ORDER_DATE = new Date('2026-11-10T00:00:00Z');
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -988,7 +988,7 @@ describe('captureOrderProfitSnapshot', () => {
     expect(itemABefore.snapshotCostProfileVersionIds).toEqual([]);
     expect(itemBBefore.snapshotCostProfileVersionIds).toHaveLength(1);
 
-    // A cost in force at the order date is linked to both variants later the same day.
+    // A cost is linked to both variants later the same day, before the day end.
     for (const productVariantId of [parcel.variantA, parcel.variantB]) {
       await attachCostProfile({
         organizationId: parcel.organizationId,
@@ -1062,7 +1062,8 @@ describe('captureOrderProfitSnapshot', () => {
     expect((await readItemSnapshot(parcel.itemA)).snapshotCostProfileVersionIds).toEqual([]);
     expect((await readItemSnapshot(parcel.itemB)).snapshotCostProfileVersionIds).toEqual([]);
 
-    // A cost in force at the order date is linked to both variants later.
+    // A cost in force at the day end (the factory backdates the link) is linked to both
+    // variants later.
     for (const productVariantId of [parcel.variantA, parcel.variantB]) {
       await attachCostProfile({
         organizationId: parcel.organizationId,
@@ -1750,18 +1751,18 @@ describe('captureOrderProfitSnapshot', () => {
     );
   });
 
-  it('skips a cost profile whose version in force at the order date is archived', async () => {
+  it('skips a cost profile whose version in force at the day end is archived', async () => {
     const parcel = await seedSnapshotParcel();
     const cogsVersionIds = await linkedCostVersionIds(parcel.organizationId, parcel.variantA);
     expect(cogsVersionIds).toHaveLength(1);
-    // Archived at the order date, restored later: the version in force is archived.
+    // Archived at the day end, restored after it: the version in force is archived.
     const archivedInForceId = randomUUID();
     const restoredLaterId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [
       { id: archivedInForceId, effectiveFrom: BEFORE_ORDER_DATE, archived: true },
       { id: restoredLaterId, effectiveFrom: AFTER_ORDER_DATE, archived: false },
     ]);
-    // Live at the order date, archived later: the version in force is usable.
+    // Live at the day end, archived after it: the version in force is usable.
     const liveInForceId = lowSortingId();
     const archivedLaterId = randomUUID();
     await attachCostProfileVersions(parcel, parcel.variantA, [

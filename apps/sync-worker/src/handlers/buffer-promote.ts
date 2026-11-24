@@ -58,7 +58,7 @@ async function resolveGraduationWindow(dbNow: Date | undefined): Promise<Graduat
 /**
  * The SINGLE cost-window + desi decision point every buffer graduation routes through.
  * Berkin 2026-11-03: an order enters net profit only if every non-cancelled item
- * had a cost entered before the order's business day ended; supply prices drift,
+ * had a cost in force at the end of the order's business day; supply prices drift,
  * so a cost entered after that day is too late. Berkin 2026-11-22 (plan PR-2c): every
  * non-digital item also needs an effective desi; the desi is judged as it stood at the
  * order's day end, and the cost reason wins when both are missing.

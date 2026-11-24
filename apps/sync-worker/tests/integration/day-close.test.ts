@@ -446,6 +446,80 @@ describe('day-close tick', () => {
     expect((await readOrder(orderId)).sellerInputsFinalAt).toEqual(afterDayEnd(10 * HOUR_MS));
   });
 
+  it("a worker down for three days finalises each day's orders at their own day end in one pass", async () => {
+    const tenant = await seedTenant();
+    const variantId = await seedVariant(tenant);
+    const cost = await attachCost(tenant, variantId);
+    // Three past days, oldest first: their day ends T3 < T2 < T1 (T1 = today's start).
+    const t1 = dayEnd();
+    const t2 = previousDayStart(t1);
+    const t3 = previousDayStart(t2);
+    const oldest = await seedOrder(tenant, variantId, { dayEndOf: t3 });
+    const middle = await seedOrder(tenant, variantId, { dayEndOf: t2 });
+    const newest = await seedOrder(tenant, variantId, { dayEndOf: t1 });
+    const orderIds = [oldest, middle, newest];
+    for (const orderId of orderIds) {
+      await prisma.$transaction((tx) =>
+        captureOrderProfitSnapshot(tx, { organizationId: tenant.orgId, orderId }),
+      );
+    }
+    // Amount edits stamped between the day ends, and one after T1; the worker was down
+    // the whole time, so no recompute ran after any of them.
+    const profile = await prisma.costProfile.findUniqueOrThrow({ where: { id: cost.profileId } });
+    const editAt = (version: number, amountGross: string, effectiveFrom: Date) =>
+      prisma.costProfileVersion.create({
+        data: {
+          profileId: profile.id,
+          organizationId: tenant.orgId,
+          version,
+          name: profile.name,
+          type: profile.type,
+          amountGross,
+          vatRate: profile.vatRate,
+          changedFields: ['amountGross'],
+          effectiveFrom,
+        },
+      });
+    const betweenT3AndT2 = await editAt(2, '50.00', new Date(t3.getTime() + 5 * MINUTE_MS));
+    const betweenT2AndT1 = await editAt(3, '60.00', new Date(t2.getTime() + 5 * MINUTE_MS));
+    const afterT1 = await editAt(4, '70.00', new Date(t1.getTime() + MINUTE_MS));
+    const pinned = async (orderId: string): Promise<readonly string[]> =>
+      (
+        await prisma.orderItem.findFirstOrThrow({
+          where: { orderId, organizationId: tenant.orgId },
+          select: { snapshotCostProfileVersionIds: true },
+        })
+      ).snapshotCostProfileVersionIds;
+    // Positive control: before the pass every order still pins the first version.
+    for (const orderId of orderIds) {
+      expect(await pinned(orderId)).toEqual([cost.versionId]);
+    }
+
+    const dbNow = afterDayEnd(10 * HOUR_MS);
+    const result = await processDayClose({ dbNow });
+
+    expect(result).toEqual({
+      skipped: false,
+      cutoff: t1,
+      finalized: 3,
+      excluded: 0,
+      busy: 0,
+      failed: 0,
+    });
+    // Each order is priced by the version in force at its own day end.
+    expect(await pinned(oldest)).toEqual([cost.versionId]);
+    expect(await pinned(middle)).toEqual([betweenT3AndT2.id]);
+    expect(await pinned(newest)).toEqual([betweenT2AndT1.id]);
+    for (const orderId of orderIds) {
+      expect(await pinned(orderId)).not.toContain(afterT1.id);
+      expect(await readOrder(orderId)).toEqual({
+        sellerInputsFinalAt: dbNow,
+        profitExcludedAt: null,
+        profitExclusionReason: null,
+      });
+    }
+  });
+
   it('a detach stamped after T leaves the cost line in place', async () => {
     const tenant = await seedTenant();
     const seeded = await seedCalculableYesterdayOrder(tenant);
@@ -520,7 +594,11 @@ describe('day-close tick', () => {
 
   it('an order that throws is skipped on the next tick and does not block the others', async () => {
     const tenant = await seedTenant();
-    const failing = await seedOrder(tenant, await seedVariant(tenant));
+    // Dated one day earlier than the others, so the scan (order date ascending) always
+    // reaches it first: the others are finalised after it threw.
+    const failing = await seedOrder(tenant, await seedVariant(tenant), {
+      dayEndOf: previousDayStart(dayEnd()),
+    });
     const others = [
       await seedOrder(tenant, await seedVariant(tenant)),
       await seedOrder(tenant, await seedVariant(tenant)),
@@ -537,6 +615,9 @@ describe('day-close tick', () => {
 
     const first = await processDayClose({ dbNow, finalize: flaky });
     expect(first).toMatchObject({ finalized: 2, failed: 1 });
+    // Positive control: the failing order was the first one tried.
+    expect(calls[0]).toBe(failing);
+    expect(calls).toHaveLength(3);
     for (const id of others) {
       expect((await readOrder(id)).sellerInputsFinalAt).not.toBeNull();
     }

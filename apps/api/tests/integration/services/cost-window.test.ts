@@ -572,17 +572,21 @@ describe('hadCostWithinOrderDay', () => {
 });
 
 // The backfill (Faz 3E, Task 4): stamp the cost-window exclusion on a store's
-// EXISTING orders. A past-day, non-cancelled, not-yet-excluded order whose cost
-// missed its business day is stamped COST_DEADLINE_MISSED -- or LATE_UNCOSTED_ARRIVAL
+// EXISTING orders. A past-day, final (seller inputs made final by the day-close pass),
+// non-cancelled, not-yet-excluded order whose cost missed its business day is stamped COST_DEADLINE_MISSED -- or LATE_UNCOSTED_ARRIVAL
 // when our first record of it (created_at) is itself after the day closed -- and
 // enqueued for a MANUAL recompute. dryRun returns the counts and writes nothing.
 // See packages/order-sync/src/cost-window.ts (stampCostWindowExclusions).
 
 const IN_TIME = new Date(DAY_END.getTime() - ONE_MINUTE_MS);
 const TOO_LATE = new Date(DAY_END.getTime() + ONE_MINUTE_MS);
+// The seller-input marker of a past-day order the day-close pass already made final
+// (same-day edit window, plan PR-1, NB8): the backfill decides final orders only.
+const FINAL_AT = new Date(DAY_END.getTime() + 2 * ONE_MINUTE_MS);
 
 // Create a past-day order (orderDate ORDER_DATE) with a single line carrying the
 // given variant, then force its created_at so the reason split is deterministic.
+// The order is final (FINAL_AT) unless `sellerInputsFinalAt` says otherwise.
 async function createPastDayOrder(params: {
   orgId: string;
   storeId: string;
@@ -590,10 +594,13 @@ async function createPastDayOrder(params: {
   createdAt: Date;
   orderDate?: Date;
   status?: 'DELIVERED' | 'CANCELLED';
+  sellerInputsFinalAt?: Date | null;
 }): Promise<string> {
   const order = await createOrder(params.orgId, params.storeId, {
     orderDate: params.orderDate ?? ORDER_DATE,
     status: params.status ?? 'DELIVERED',
+    sellerInputsFinalAt:
+      params.sellerInputsFinalAt === undefined ? FINAL_AT : params.sellerInputsFinalAt,
   });
   await createOrderItem(order.id, params.orgId, { productVariantId: params.variantId });
   await prisma.order.update({ where: { id: order.id }, data: { createdAt: params.createdAt } });
@@ -655,9 +662,47 @@ describe('stampCostWindowExclusions', () => {
     expect(queued?.reason).toBe(ProfitRecomputeReason.MANUAL);
   });
 
-  // Plan PR-3b (A1, Berkin 2026-11-23: a cost list is frozen the moment the order
-  // enters profit): a captured cost proves the window was not missed. The live links
-  // alone read a same-day archive after the capture as "no cost at the day end".
+  // Same-day edit window (plan PR-1, NB8): a non-final order's seller inputs still follow
+  // its day, and its exclusion belongs to the day-close pass behind the settled cutoff.
+  // The backfill compares with the app clock, so it must not decide such an order.
+  it('the backfill never stamps or counts a non-final order', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // A resolved but never-costed variant: both orders below miss the cost window.
+    const variantId = await createVariant(org.id, store.id, 'EAN13-BF-NONFINAL');
+    const nonFinalId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: IN_TIME,
+      sellerInputsFinalAt: null,
+    });
+    // Positive control: the final twin of the same shape is stamped.
+    const finalId = await createPastDayOrder({
+      orgId: org.id,
+      storeId: store.id,
+      variantId,
+      createdAt: IN_TIME,
+    });
+
+    const dryRun = await runStamp({ organizationId: org.id, storeId: store.id, dryRun: true });
+    const result = await runStamp({ organizationId: org.id, storeId: store.id });
+
+    expect(dryRun).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    expect(result).toEqual({ costDeadlineMissed: 1, lateUncostedArrival: 0 });
+    const nonFinal = await prisma.order.findUniqueOrThrow({ where: { id: nonFinalId } });
+    expect(nonFinal.profitExcludedAt).toBeNull();
+    expect(nonFinal.sellerInputsFinalAt).toBeNull();
+    expect(
+      await prisma.profitRecomputeRequest.findUnique({ where: { orderId: nonFinalId } }),
+    ).toBeNull();
+    const final = await prisma.order.findUniqueOrThrow({ where: { id: finalId } });
+    expect(final.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  // A final order's captured cost list is frozen (same-day edit window, plan PR-1): a
+  // captured cost proves the window was not missed. The links alone read a same-day
+  // archive after the capture as "no cost at the day end".
   it('the backfill never stamps an order whose captured cost list is non-empty, even if its only profile was archived before the day ended', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
@@ -835,8 +880,12 @@ describe('stampCostWindowExclusions', () => {
       status: 'CANCELLED',
     });
 
-    // (3) Already excluded -> filtered out by the profit_excluded_at IS NULL guard.
-    const excluded = await createOrder(org.id, store.id, { orderDate: ORDER_DATE });
+    // (3) Already excluded -> filtered out by the profit_excluded_at IS NULL guard (it is
+    // final, so that guard alone keeps it out).
+    const excluded = await createOrder(org.id, store.id, {
+      orderDate: ORDER_DATE,
+      sellerInputsFinalAt: FINAL_AT,
+    });
     await prisma.order.update({
       where: { id: excluded.id },
       data: {
@@ -865,7 +914,8 @@ describe('stampCostWindowExclusions', () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
     // Uncosted, but its business day is today -> the window is still open, so it is
-    // not a backfill candidate.
+    // not a backfill candidate. The order carries a final marker on purpose, so the
+    // past-day filter alone keeps it out.
     const variantId = await createVariant(org.id, store.id, 'EAN13-BF-TODAY');
     const orderId = await createPastDayOrder({
       orgId: org.id,

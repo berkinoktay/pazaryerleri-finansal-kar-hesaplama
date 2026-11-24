@@ -3,24 +3,31 @@
 //
 // Purpose: historic orders predate the cost-window rule (Berkin 2026-11-03), so
 // their profit figures were written without it. This walks each store's past-day,
-// not-yet-excluded, non-cancelled orders and stamps the ones whose cost missed the
+// final, not-yet-excluded, non-cancelled orders and stamps the ones whose cost missed the
 // order's business day -- COST_DEADLINE_MISSED, or LATE_UNCOSTED_ARRIVAL when our
 // first record of the order is itself after its day closed. Each stamped order is
 // enqueued for a MANUAL profit recompute in the same transaction; the sync-worker
 // recompute tick then rewrites its statements as EXCLUDED. The core logic lives in
 // `stampCostWindowExclusions` (packages/order-sync/src/cost-window.ts).
 //
-// WARNING (order profit snapshot, PR-2 / PR-3b): orders are priced from the cost
-// list frozen in their snapshot. The script skips an order whose every line (digital
-// ones too) already carries a non-empty captured cost list, so an order
-// costed in the morning whose only profile was archived or detached later that day
-// is no longer stamped (guarded since PR-3b). Every other order is still judged from
-// the live cost links (`attached_at` and the profile's version history): a detached
-// link is invisible to it (links are hard-deleted) and replacing a variant's cost
-// profiles resets `attached_at`, so an order without a full captured cost list can
-// still be wrongly, and irreversibly, excluded from profit. A list captured before
-// PR-3b could pin a cost linked after the order's day; such an order is skipped
-// too (never stamped), so the backfill can under-stamp it. Review a --dry-run first.
+// FINAL ORDERS ONLY (same-day edit window, plan PR-1, NB8): only orders whose seller
+// inputs are final (`seller_inputs_final_at` set) are candidates. A non-final order's
+// cost list still follows its business day; the sync-worker day-close pass decides its
+// exclusion behind the settled cutoff (database clock), and this script, which
+// compares with the app clock, never stamps or counts it.
+//
+// WARNING (order profit snapshot): a final order is priced from its frozen cost list.
+// The script skips an order whose every line (digital ones too) already carries a
+// non-empty captured cost list. Every other order is judged from the cost links in
+// force at its business-day end (`loadSellerInputsAt`: the live links plus the
+// trigger-logged removals, so a link detached after the day still counts, and the
+// profile's version history). The history only covers what the database stamps:
+// `attached_at` / `effective_from` rewritten in place by an operator script are not
+// logged and not protected by the history triggers (NB11), so such a rewrite can
+// still make an order look uncosted and get it wrongly, and irreversibly, excluded.
+// A list captured before PR-3b could pin a cost linked after the order's day; such an
+// order is skipped too (never stamped), so the backfill can under-stamp it. Review a
+// --dry-run first.
 //
 // Run from inside the package (connects with DATABASE_URL from the workspace-root .env):
 //   cd packages/order-sync && pnpm exec tsx --env-file=../../.env scripts/backfill-cost-window-exclusions.ts --store <id> --dry-run

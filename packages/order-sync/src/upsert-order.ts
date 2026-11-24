@@ -515,9 +515,12 @@ export async function upsertOrderWithSnapshot(
 
     // 3. Order profit snapshot (plan PR-2, decision 4): on a genuine create only, after
     //    the items are written and in this same transaction, capture the order's product
-    //    and seller inputs, so the order is priced with the values of its intake moment.
-    //    An update never captures here: the recompute it enqueues below fills whatever
-    //    is still missing (an uncaptured order, a later-matched item, an empty cost list).
+    //    inputs as of its intake and its seller inputs (cost list, desi) as they stand at
+    //    the end of its business day. An update never captures here: the recompute it
+    //    enqueues below does it. While the order is non-final (`sellerInputsFinalAt`
+    //    NULL) every recompute re-derives its seller inputs at its day end (same-day
+    //    edit window, plan PR-1); once final, a recompute only fills what is still
+    //    missing (an uncaptured order, a later-matched item, an empty cost list).
     if (existingOrder === null) {
       await captureOrderProfitSnapshot(tx, { organizationId, orderId: upserted.id });
     }

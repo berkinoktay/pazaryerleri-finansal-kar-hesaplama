@@ -301,6 +301,7 @@ export {
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,
+  enqueueProfitRecomputeForNonFinalOrders,
   enqueueStaleProfitStatements,
   enqueueCarrierGapRecomputes,
   enqueueReferenceDataGapRecomputes,

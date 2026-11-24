@@ -130,6 +130,28 @@ export function enqueueProfitRecomputeForStore(
 }
 
 /**
+ * Enqueues every NON-FINAL order of one store (`seller_inputs_final_at IS NULL`): the
+ * orders whose seller inputs still follow their business day. The deploy backfill
+ * (`scripts/enqueue-non-final-orders.ts`) and the operator scripts that rewrite seller
+ * inputs call it, so those orders re-derive their cost list and desi at their day end;
+ * a final order is never queued. Returns the affected row count.
+ */
+export function enqueueProfitRecomputeForNonFinalOrders(
+  tx: Prisma.TransactionClient,
+  params: EnqueueScope & { readonly storeId: string },
+): Promise<number> {
+  const { organizationId, reason, storeId } = params;
+  return enqueueFromOrders(
+    tx,
+    reason,
+    Prisma.sql`o.organization_id = ${organizationId}::uuid
+      AND o.store_id = ${storeId}::uuid
+      AND o.seller_inputs_final_at IS NULL`,
+    'REFRESH',
+  );
+}
+
+/**
  * What an enqueue does to an order that already has a queue row. `REFRESH` re-requests
  * it (a producer whose input changed); `KEEP` leaves the row exactly as it is (a sweep
  * that only fills a gap, so it never resets another producer's retry state).

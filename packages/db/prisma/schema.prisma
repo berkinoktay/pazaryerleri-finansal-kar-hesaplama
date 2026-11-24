@@ -934,16 +934,20 @@ model OrderItem {
   // profit loader can read a raw rate and resolve the chain itself.
   orderCommissionRatePct Decimal? @map("order_commission_rate_pct") @db.Decimal(5, 2)
 
-  // ─── Order item profit snapshot (inputs frozen at intake) ────────────
+  // ─── Order item profit snapshot (product inputs frozen at intake) ────
   // Written when the item first enters the profit computation
   // (captureOrderProfitSnapshot, packages/profit), from the product variant, product
   // and commission rules of that moment. Afterwards the item is priced with these
-  // values, not the live ones, so a later desi correction, synced commission rate,
-  // category rule or cost link edit only reaches new orders. Types match the source
+  // values, not the live ones, so a later synced commission rate or category rule only
+  // reaches new orders. The seller inputs (the desi and the cost list) are the
+  // exception: they are the values in force at the end of the order's business day,
+  // re-derived on every recompute while orders.seller_inputs_final_at is NULL and
+  // frozen once it is set (same-day edit window). Types match the source
   // columns (product_variants.synced_dimensional_weight, products.category_id and
   // brand_id, product_variants.synced_commission_rate, marketplace_commission_rate
   // .base_rate).
-  // The only event that changes them: the item's productVariantId is set and differs
+  // Besides that seller-input re-derive, the only event that changes them: the item's
+  // productVariantId is set and differs
   // from snapshotProductVariantId (e.g. the barcode was matched to a variant later);
   // the whole item is captured again. A variant that drops to null (deleted from the
   // catalogue) leaves the captured values as they are. An item without a variant is
@@ -958,12 +962,13 @@ model OrderItem {
   snapshotCategoryRatePct         Decimal?            @map("snapshot_category_rate_pct") @db.Decimal(5, 2)
   snapshotCategoryBrandRatePct    Decimal?            @map("snapshot_category_brand_rate_pct") @db.Decimal(5, 2)
   // The cost profile versions the item is priced with: the variant's links in force
-  // at the end of the order's business day, each by its version at the order time
-  // (or, when none was live then, the one in force at that day end).
-  // No FK (an array column); cost profile versions are never deleted. The list is
-  // frozen at capture: besides the variant change above, a filled list never changes,
-  // even while the order's day is open, and an empty one is filled only from links in
-  // force at that day end (gap fill). The cost deadline rule still applies.
+  // at the end of the order's business day, each by its version in force at that day
+  // end. No FK (an array column); cost profile versions are never deleted. While the
+  // order is not final (orders.seller_inputs_final_at NULL) every recompute re-derives
+  // the list at the day end, so a same-day attach, detach, archive, restore or amount
+  // edit reaches it. Once final, besides the variant change above, a filled list never
+  // changes, and an empty one is filled only from links in force at that day end (gap
+  // fill). The cost deadline rule still applies.
   // Stored in ascending id order.
   snapshotCostProfileVersionIds   String[]            @default([]) @map("snapshot_cost_profile_version_ids") @db.Uuid
   // Marks the item's latest full capture; null = not captured yet. It moves only

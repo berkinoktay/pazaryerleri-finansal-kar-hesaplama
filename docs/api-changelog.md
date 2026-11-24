@@ -26,6 +26,27 @@ section "Versioning" for details.
 
 ### Changed
 
+- **Seller cost and desi edits reach the day's stored orders until the day ends**
+  (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
+  `PATCH .../products/variants/dimensional-weight`,
+  `PATCH /v1/organizations/{orgId}/cost-profiles/{id}`, `POST .../cost-profiles/{id}/archive`,
+  `POST .../cost-profiles/{id}/restore`, `POST .../cost-profile-attachments/attach`,
+  `POST .../cost-profile-attachments/detach`, `POST .../cost-profile-attachments/replace`, and the
+  catalog sync; seen through the order list, summary and detail profit fields). An order's cost
+  list and desi are now the values in force at the end of its Istanbul business day (00:00), and a
+  stored order follows them until its day is made final. The desi PATCH (single and bulk, a clear
+  included) now queues a profit recompute of the variant's stored orders whose seller inputs are
+  not final yet (today's orders, and a past day's until the day-close pass has run); a cost profile
+  edit, archive or restore and a cost attach, detach or replace do the same for their variants, so
+  today's already calculated orders change: they take the new amount, and gain or lose a cost or a
+  desi. A cost line is priced by the version in force at the day end, no longer by the amount at
+  the order time. About two minutes after 00:00 a worker pass makes the day final (later edits no
+  longer reach it) and permanently excludes an order that had no cost (`COST_DEADLINE_MISSED`) or,
+  with a cost, no desi (`DESI_DEADLINE_MISSED`) at the day end. Orders dated before the release day
+  are final as stored. This supersedes, for orders that are not final, "Entering a desi moves
+  today's waiting orders into profit" (clearing a desi no longer leaves stored orders untouched)
+  and "Product and store edits no longer reprice stored orders" (a desi override or a cost profile
+  change reaches them again until the day ends). Request and response shapes are unchanged.
 - **A seller desi is at least 1; a sync without a desi keeps the last known Trendyol desi**
   (`PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/{variantId}/dimensional-weight`,
   `PATCH /v1/organizations/{orgId}/stores/{storeId}/products/variants/dimensional-weight`). The

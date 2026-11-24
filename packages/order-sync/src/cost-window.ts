@@ -146,7 +146,12 @@ const BACKFILL_CHUNK_SIZE = 500;
  *
  * A candidate is one of the store's orders that is:
  *   - not CANCELLED (a cancel carries no payout and is never excluded);
- *   - not already excluded (`profit_excluded_at IS NULL`); and
+ *   - not already excluded (`profit_excluded_at IS NULL`);
+ *   - FINAL (`seller_inputs_final_at IS NOT NULL`, same-day edit window plan PR-1,
+ *     NB8): a non-final order's captured cost list still follows its day, and its
+ *     exclusion belongs to the day-close pass, which decides it behind the settled
+ *     cutoff read from the database clock. This function compares with the app clock
+ *     (`now`), so it never decides a non-final order; and
  *   - from a business day that has ENDED relative to `now` -- the SAME past-day
  *     convention intake-order.ts uses for an order's orderDate
  *     (`getBusinessDate(orderDate) < getBusinessDate(now)`), expressed here as the
@@ -155,9 +160,9 @@ const BACKFILL_CHUNK_SIZE = 500;
  *
  * A candidate whose every line (digital ones too: every line needs a cost) already
  * carries a non-empty captured cost list (`hasCapturedCostOnEveryItem`) is skipped:
- * the list is frozen at capture and, since plan PR-3b, a capture pins only links in
- * force at the order's day end, so the window was met even if its only profile was
- * archived or detached later that day.
+ * a final order's list is frozen and was last derived from the links in force at the
+ * order's day end, so the window was met even if its only profile was archived or
+ * detached after that day.
  * A capture made before PR-3b could pin a link attached after the day; such an order
  * is skipped as well (never stamped), the safe direction for an irreversible stamp.
  *
@@ -207,6 +212,8 @@ export async function stampCostWindowExclusions(
       storeId,
       status: { not: OrderStatus.CANCELLED },
       profitExcludedAt: null,
+      // Final orders only: a non-final order is the day-close pass's to decide (NB8).
+      sellerInputsFinalAt: { not: null },
       orderDate: { lt: todayStart },
     };
     // Keyset pagination: advance strictly past the last id of the previous chunk.
@@ -238,11 +245,11 @@ export async function stampCostWindowExclusions(
     const lateArrivalIds: string[] = [];
 
     for (const order of candidates) {
-      // A captured cost is taken as proof the window was met: since PR-3b a capture
-      // pins only links in force at the day end and the list is frozen afterwards, so
-      // a later archive or detach that the live links would read as "no cost" must
-      // not stamp it. (A capture made before PR-3b could pin a late link; such an
-      // order is skipped too, the safe direction for an irreversible stamp.)
+      // A captured cost is taken as proof the window was met: the order is final, so
+      // its list was derived from the links in force at its day end and is frozen, and
+      // an archive or detach after that day must not stamp it. (A capture made before
+      // PR-3b could pin a late link; such an order is skipped too, the safe direction
+      // for an irreversible stamp.)
       if (hasCapturedCostOnEveryItem(order.items)) {
         continue;
       }
