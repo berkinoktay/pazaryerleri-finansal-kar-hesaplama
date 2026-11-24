@@ -385,6 +385,52 @@ describe('OrdersPageClient - open day', () => {
       releaseUnfiltered();
     }
   });
+
+  it("a new search hides the previous search's today matches while it loads", async () => {
+    const match: OpenDayMatch = {
+      source: 'orders',
+      id: '00000000-0000-0000-0000-0000000000a1',
+      orderNumber: 'TY-TODAY-1',
+      cancelled: false,
+    };
+    // The unfiltered list is held until the test releases it.
+    let releaseUnfiltered = (): void => {};
+    const unfilteredHeld = new Promise<void>((resolve) => {
+      releaseUnfiltered = resolve;
+    });
+    const counts = { list: 0 };
+    server.use(
+      http.get(SUMMARY_URL, () => HttpResponse.json(summaryResponse())),
+      http.get(LIST_URL, async ({ request }) => {
+        counts.list += 1;
+        const searched = new URL(request.url).searchParams.has('q');
+        if (!searched) await unfilteredHeld;
+        return HttpResponse.json(
+          listResponse({
+            openDay: { matches: searched ? [match] : [] },
+            counts: { calculated: 50, excluded: 0 },
+            pagination: { page: 1, perPage: 25, total: 50, totalPages: 2 },
+          }),
+        );
+      }),
+    );
+    const matchLink = tOpenDay('matchStored', { orderNumber: match.orderNumber });
+    try {
+      const { user } = renderPage(createTestQueryClient(), `?q=${match.orderNumber}`);
+      // Control: the search's own response offers its match.
+      expect(await screen.findByRole('link', { name: matchLink })).toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole('button', { name: trMessages.common.dataTable.toolbar.clear }),
+      );
+      await waitFor(() => expect(counts.list).toBe(2));
+
+      // The cleared search is still loading: the old match is not offered for it.
+      expect(screen.queryByRole('link', { name: matchLink })).not.toBeInTheDocument();
+    } finally {
+      releaseUnfiltered();
+    }
+  });
 });
 
 describe('OrdersPageClient - refresh triggers', () => {
@@ -524,6 +570,44 @@ describe('OrdersPageClient - refresh triggers', () => {
     await advance(queryClient, POLL_STEP_MS);
     await advance(queryClient, POLL_STEP_MS);
     expect(counts).toEqual(settled);
+  });
+
+  it("a store switch does not carry the previous store's finalizing into a summary refetch", async () => {
+    // Store 1 is finalizing, store 2 is not.
+    const counts = serve(() => listResponse({ openDay: { finalizing: true } }));
+    const otherStoreId = '00000000-0000-0000-0000-000000000003';
+    const otherListUrl = `http://localhost:3001/v1/organizations/${ORG_ID}/stores/${otherStoreId}/orders`;
+    const otherCounts: HandlerCounts = { list: 0, summary: 0 };
+    server.use(
+      http.get(`${otherListUrl}/summary`, () => {
+        otherCounts.summary += 1;
+        return HttpResponse.json(summaryResponse());
+      }),
+      http.get(otherListUrl, () => {
+        otherCounts.list += 1;
+        return HttpResponse.json(listResponse({ openDay: { finalizing: false } }));
+      }),
+    );
+    const queryClient = createTestQueryClient();
+    const view = renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    view.rerender(
+      <OrdersPageClient
+        orgId={ORG_ID}
+        storeId={otherStoreId}
+        pageTitle="orders-title"
+        pageIntent="orders-intent"
+      />,
+    );
+    await waitFor(() => {
+      expect(otherCounts.list).toBe(1);
+      expect(otherCounts.summary).toBe(1);
+    });
+    await waitForIdle(queryClient);
+
+    // Store 2 never reported finalizing, so its summary is fetched once only.
+    expect(otherCounts.summary).toBe(1);
   });
 
   it('the summary stops polling when the list poll cap is reached', async () => {

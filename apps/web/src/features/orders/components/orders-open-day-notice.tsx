@@ -5,11 +5,11 @@ import * as React from 'react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Link } from '@/i18n/navigation';
+import { LIVE_PERFORMANCE_PATH } from '@/lib/live-performance-links';
 import { cn } from '@/lib/utils';
 
 import type { OrderListOpenDay } from '../api/list-orders.api';
 import {
-  LIVE_PERFORMANCE_PATH,
   type OpenDayMatchKind,
   openDayMatchHref,
   openDayMatchKind,
@@ -33,8 +33,8 @@ const MATCH_LABEL_KEY: Record<OpenDayMatchKind, 'matchStored' | 'matchCancelled'
   };
 
 // Inline text link inside the notice; reaches 44px under a finger. `break-words`
-// is meant to keep a long order number from widening a narrow screen; not yet
-// checked at 360px (no layout in the test DOM).
+// keeps a long order number from widening a narrow screen (checked in the
+// browser at 375px: no horizontal overflow).
 const LINK_CLASS = cn(
   'text-primary inline-flex cursor-pointer items-center font-medium break-words',
   'underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none',

@@ -133,19 +133,23 @@ export function OrdersPageClient({
   // The trailing summary refetch. When the list first reports that finalising
   // is over, the re-render cancels the summary's pending poll, so whatever was
   // finalised since its previous poll would never reach the KPI strip. It fires
-  // on the last KNOWN state going true -> false. A filter, sort or page change
-  // keeps the previous page as the list's placeholder, so finalising that ends
-  // during the swap reads as a direct true -> false; an undefined in between (a
-  // store switch) keeps the last known state; a first load (nothing known ->
-  // false) does not fire. The list was just fetched, so only the summary is
-  // invalidated. (The placeholder carries the data only: the poll window
-  // survives the swap because the list feeds the poll from its own responses
-  // alone, see useOrders.)
-  const lastKnownFinalizingRef = React.useRef<boolean | undefined>(finalizing);
+  // on the store's last KNOWN state going true -> false. A filter, sort or page
+  // change keeps the previous page as the list's placeholder, so finalising that
+  // ends during the swap reads as a direct true -> false. A store switch starts
+  // from nothing known, like a first load: another store's state says nothing
+  // about this one, and nothing known -> false does not fire. The list was just
+  // fetched, so only the summary is invalidated. (The placeholder carries the
+  // data only: the poll window survives the swap because the list feeds the
+  // poll from its own responses alone, see useOrders.)
+  const lastKnownFinalizingRef = React.useRef<{
+    storeId: string | null;
+    finalizing: boolean | undefined;
+  }>({ storeId, finalizing });
   React.useEffect(() => {
     if (finalizing === undefined) return;
-    const previous = lastKnownFinalizingRef.current;
-    lastKnownFinalizingRef.current = finalizing;
+    const last = lastKnownFinalizingRef.current;
+    const previous = last.storeId === storeId ? last.finalizing : undefined;
+    lastKnownFinalizingRef.current = { storeId, finalizing };
     if (previous !== true || finalizing !== false) return;
     if (orgId === null || storeId === null) return;
     void queryClient.invalidateQueries({ queryKey: orderKeys.summaries(orgId, storeId) });
@@ -178,6 +182,19 @@ export function OrdersPageClient({
   const storeIsEmpty = ordersQuery.isPlaceholderData
     ? lastStoreIsEmpty && !hasAnyFilter
     : (settledStoreIsEmpty ?? false);
+
+  // Today's search matches belong to the search that produced them. The
+  // placeholder carries the previous response's matches, so while a new search
+  // loads they are hidden rather than offered as matches of the new one; a
+  // sort, tab or page change under the same search keeps them.
+  const [settledQ, setSettledQ] = React.useState(filters.q);
+  if (ownListData !== undefined && settledQ !== filters.q) {
+    setSettledQ(filters.q);
+  }
+  const noticeOpenDay =
+    openDay !== undefined && ordersQuery.isPlaceholderData && settledQ !== filters.q
+      ? { ...openDay, matches: [] }
+      : openDay;
 
   if (noStoreSelected) {
     return (
@@ -266,7 +283,10 @@ export function OrdersPageClient({
         <StaleDataBanner pageKey="orders" />
         {/* The open (today's) day the list leaves out: finalising note, today's
             pointer to live performance, today's search matches. */}
-        <OrdersOpenDayNotice openDay={openDay} hideTodayNotice={ordersEmptyBody !== undefined} />
+        <OrdersOpenDayNotice
+          openDay={noticeOpenDay}
+          hideTodayNotice={ordersEmptyBody !== undefined}
+        />
         <OrdersTable
           rows={rows}
           loading={tableLoading}

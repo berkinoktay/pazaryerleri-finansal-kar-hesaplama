@@ -1,14 +1,10 @@
+import {
+  LIVE_ORDERS_CANCELLED_FILTER,
+  LIVE_PERFORMANCE_PARAMS,
+  LIVE_PERFORMANCE_PATH,
+} from '@/lib/live-performance-links';
+
 import type { OpenDayMatch } from '../api/list-orders.api';
-
-export const LIVE_PERFORMANCE_PATH = '/live-performance';
-
-// Live performance's URL contract: `?order=<id>` opens a stored order's detail
-// sheet from today's feed; `?ordersFilter=cancelled` opens its orders table on
-// the cancelled tab. Mirrored here because the orders feature may not import
-// from the live-performance feature.
-const LIVE_ORDER_PARAM = 'order';
-const LIVE_ORDERS_FILTER_PARAM = 'ordersFilter';
-const LIVE_CANCELLED_FILTER = 'cancelled';
 
 /** What a today's search match is, from the orders page's point of view. */
 export type OpenDayMatchKind = 'stored' | 'cancelled' | 'pending';
@@ -23,12 +19,13 @@ function liveHref(param: string, value: string): string {
 }
 
 const HREF_BY_KIND: Record<OpenDayMatchKind, (match: OpenDayMatch) => string> = {
-  stored: (match) => liveHref(LIVE_ORDER_PARAM, match.id),
+  stored: (match) => liveHref(LIVE_PERFORMANCE_PARAMS.order, match.id),
   // The `?order=` resolver reads the feed of today's orders, which leaves
   // cancelled orders out by design, so a cancelled match opens the tab instead.
-  cancelled: () => liveHref(LIVE_ORDERS_FILTER_PARAM, LIVE_CANCELLED_FILTER),
-  // A buffer entry is still waiting to become an order: live performance lists it.
-  pending: () => LIVE_PERFORMANCE_PATH,
+  cancelled: () => liveHref(LIVE_PERFORMANCE_PARAMS.ordersFilter, LIVE_ORDERS_CANCELLED_FILTER),
+  // A buffer entry is still waiting to become an order: its own sheet opens and
+  // follows it once it is promoted.
+  pending: (match) => liveHref(LIVE_PERFORMANCE_PARAMS.buffer, match.id),
 };
 
 /** Where a today's search match lives on live performance. */

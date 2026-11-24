@@ -186,6 +186,34 @@ describe('profit recompute queue', () => {
     expect(row.requestedAt.getTime()).toBeGreaterThan(past.getTime());
   });
 
+  it('a re-request keeps a pending DAY_CLOSE reason and still refreshes the mark', async () => {
+    const parcel = await seedMelontikParcel();
+    const scope = { organizationId: parcel.organizationId, storeId: parcel.storeId };
+
+    await enqueueProfitRecompute(prisma, {
+      ...scope,
+      reason: ProfitRecomputeReason.DAY_CLOSE,
+      orderIds: [parcel.orderId],
+    });
+    await prisma.profitRecomputeRequest.update({
+      where: { orderId: parcel.orderId },
+      data: { attempts: 2, lastError: 'boom' },
+    });
+
+    await enqueueProfitRecompute(prisma, {
+      ...scope,
+      reason: ProfitRecomputeReason.COST_CHANGED,
+      orderIds: [parcel.orderId],
+    });
+
+    const row = await prisma.profitRecomputeRequest.findUniqueOrThrow({
+      where: { orderId: parcel.orderId },
+    });
+    expect(row.reason).toBe(ProfitRecomputeReason.DAY_CLOSE);
+    expect(row.attempts).toBe(0);
+    expect(row.lastError).toBeNull();
+  });
+
   it('enqueues the orders that contain the given variants within the organization', async () => {
     const parcel = await seedMelontikParcel();
     // A second line of the same variant: the enqueue must still touch the row once.

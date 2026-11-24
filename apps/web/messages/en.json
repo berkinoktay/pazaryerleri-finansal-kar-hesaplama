@@ -2229,7 +2229,7 @@
       "openDayOnly": "No orders from completed days yet"
     },
     "openDay": {
-      "finalizing": "Yesterday's orders are being finalised. Figures can still change for a few minutes.",
+      "finalizing": "Some orders of completed days are being finalised. Figures may change meanwhile.",
       "matchesTitle": "{count, plural, one {Today's order matching your search:} other {Today's orders matching your search:}}",
       "matchStored": "Open order {orderNumber} on Live Performance",
       "matchPending": "Order {orderNumber} is waiting on Live Performance",

@@ -1327,9 +1327,11 @@ section "Versioning" for details.
   business date, `YYYY-MM-DD`), `lastCompletedBusinessDate` (the latest day the list can show),
   `finalizing` (true while a business day before today is still being closed for the store: an
   order of a completed day whose seller inputs are not final yet, a completed-day live
-  performance buffer entry still waiting to become an order (not a permanently failed one), or a
-  queued day-close profit recompute), `todayOrderCount` (the store's stored orders of today that
-  are not cancelled, plus its buffer entries of today) and `matches` (an array of the new
+  performance buffer entry still waiting to become an order (not a permanently failed one), a
+  queued day-close profit recompute, or a queued first recompute of a final completed-day order
+  that has no figures yet; a queue row that keeps failing stops counting after a few attempts),
+  `todayOrderCount` (the store's stored orders of today, cancelled ones included, plus its buffer
+  entries of today) and `matches` (an array of the new
   `OrderListOpenDayMatch` component schema: today's orders and buffer entries matching `q`, each
   with `source` (`orders` or `buffer`), `id`, `orderNumber` (the platform order id when the
   order has no number) and `cancelled`; a short server-capped list, stored orders first; empty

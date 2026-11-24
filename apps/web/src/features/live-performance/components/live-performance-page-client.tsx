@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusDot, type StatusDotProps } from '@/components/ui/status-dot';
+import { LIVE_PERFORMANCE_PARAMS } from '@/lib/live-performance-links';
 import { type RealtimeHealth } from '@/lib/supabase/realtime';
 import { useIsMounted } from '@/lib/use-is-mounted';
 import { cn } from '@/lib/utils';
@@ -101,8 +102,8 @@ export function LivePerformancePageClient({
   // setState-in-effect) and let it drive the Sheet. The param is cleared only
   // when the user closes the Sheet -- so a brand-new order whose row arrives a
   // beat later (via the realtime refetch) still opens instead of being dropped.
-  const [orderParam, setOrderParam] = useQueryState('order');
-  const [bufferParam, setBufferParam] = useQueryState('buffer');
+  const [orderParam, setOrderParam] = useQueryState(LIVE_PERFORMANCE_PARAMS.order);
+  const [bufferParam, setBufferParam] = useQueryState(LIVE_PERFORMANCE_PARAMS.buffer);
   const deepLinkOrders = useLiveOrders(orgId, storeId, 'all');
   const deepLinkRow = resolveDeepLinkRow(deepLinkOrders.data?.data, orderParam, bufferParam);
 

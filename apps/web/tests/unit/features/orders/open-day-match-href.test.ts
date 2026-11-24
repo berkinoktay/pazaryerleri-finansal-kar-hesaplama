@@ -21,7 +21,9 @@ describe('openDayMatchHref', () => {
     );
   });
 
-  it('links a buffer entry to live performance', () => {
-    expect(openDayMatchHref(match({ source: 'buffer', id: BUFFER_ID }))).toBe('/live-performance');
+  it('links a buffer entry to its own sheet on live performance', () => {
+    expect(openDayMatchHref(match({ source: 'buffer', id: BUFFER_ID }))).toBe(
+      `/live-performance?buffer=${BUFFER_ID}`,
+    );
   });
 });

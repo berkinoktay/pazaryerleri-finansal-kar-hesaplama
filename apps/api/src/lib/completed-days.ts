@@ -18,6 +18,15 @@ export interface CompletedDaysScope {
   readonly openDayAnchor: Date;
 }
 
+/**
+ * A queued profit recompute stops counting toward `openDay.finalizing` once it has
+ * failed this many times. The queue backs a failing row off (30 s doubling, capped at
+ * an hour) but never drops it, so without this bound one order whose recompute keeps
+ * throwing would hold the "still being finalised" note for good. Five failures span
+ * about a quarter of an hour of retries, the same span as the page's finalising poll.
+ */
+export const FINALIZING_MAX_RECOMPUTE_ATTEMPTS = 5;
+
 /** The completed-days scope at `now` (the API clock by default). */
 export function completedDaysScope(now: Date = new Date()): CompletedDaysScope {
   const cutoff = getCompletedDaysCutoff(now);

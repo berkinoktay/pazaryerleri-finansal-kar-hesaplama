@@ -161,7 +161,14 @@ type EnqueueConflict = 'REFRESH' | 'KEEP';
 /** The ON CONFLICT clause of each conflict policy. */
 const ON_ORDER_CONFLICT: Readonly<Record<EnqueueConflict, Prisma.Sql>> = {
   REFRESH: Prisma.sql`ON CONFLICT (order_id) DO UPDATE SET
-      reason = EXCLUDED.reason,
+      -- A pending DAY_CLOSE keeps its reason: the orders page reads it as "a completed
+      -- day is still being finalised", and a settlement, claim or cost re-request of
+      -- the same order before the drain must not end that early.
+      reason = CASE
+        WHEN profit_recompute_queue.reason = 'DAY_CLOSE'::"ProfitRecomputeReason"
+          THEN profit_recompute_queue.reason
+        ELSE EXCLUDED.reason
+      END,
       requested_at = clock_timestamp(),
       -- A re-request of an order that is being computed resets next_attempt_at to now,
       -- so the mark is claimable again before its lease ends: a second worker may pick
@@ -179,7 +186,8 @@ const ON_ORDER_CONFLICT: Readonly<Record<EnqueueConflict, Prisma.Sql>> = {
  * The single enqueue statement shared by every scope: one `INSERT ... SELECT ...
  * ON CONFLICT (order_id)`. The DISTINCT subquery means a scope that fans out over
  * items (variants) cannot touch the same conflict row twice, which Postgres rejects.
- * On conflict `onConflict` decides: `REFRESH` refreshes the mark (new reason, fresh
+ * On conflict `onConflict` decides: `REFRESH` refreshes the mark (new reason unless a
+ * DAY_CLOSE is pending, fresh
  * request and next-attempt times, attempts back to 0 and last_error cleared), `KEEP`
  * leaves it untouched.
  *

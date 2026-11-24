@@ -91,10 +91,10 @@ describe('<OrdersOpenDayNotice>', () => {
     );
   });
 
-  it('links a buffered match to live performance', () => {
+  it('links a buffered match to its own sheet on live performance', () => {
     render(<OrdersOpenDayNotice openDay={openDay({ matches: [BUFFERED] })} />);
     expect(linkHref(t('matchPending', { orderNumber: BUFFERED.orderNumber }))).toBe(
-      '/live-performance',
+      `/live-performance?buffer=${BUFFERED.id}`,
     );
   });
 

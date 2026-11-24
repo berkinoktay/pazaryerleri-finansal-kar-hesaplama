@@ -7,8 +7,7 @@ import * as React from 'react';
 
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Button } from '@/components/ui/button';
-
-import { LIVE_PERFORMANCE_PATH } from '../lib/open-day-match-href';
+import { LIVE_PERFORMANCE_PATH } from '@/lib/live-performance-links';
 
 interface OrdersEmptyStateProps {
   /**

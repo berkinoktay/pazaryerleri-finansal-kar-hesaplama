@@ -15,6 +15,7 @@ import { ProfitBadge } from '@/components/patterns/profit-badge';
 import { PromotionIndicator } from '@/components/patterns/promotion-indicator';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { formatPercentDisplay } from '@/lib/format-percent';
+import { LIVE_PERFORMANCE_PARAMS } from '@/lib/live-performance-links';
 import { useMarginColoring } from '@/lib/margin-coloring-context';
 
 import type { LiveOrderRow, LivePerformanceOrders } from '../api/get-live-orders.api';
@@ -89,7 +90,9 @@ export function LiveOrdersTable({
   // URL state (nuqs) — the selected tab survives reload/share; distinct param
   // name because the products table on the same page owns its own tab/search.
   const [{ ordersFilter: filter }, setUrlState] = useQueryStates({
-    ordersFilter: parseAsStringEnum<LiveOrdersFilter>([...LIVE_ORDERS_FILTERS]).withDefault('all'),
+    [LIVE_PERFORMANCE_PARAMS.ordersFilter]: parseAsStringEnum<LiveOrdersFilter>([
+      ...LIVE_ORDERS_FILTERS,
+    ]).withDefault('all'),
   });
   const setFilter = (next: LiveOrdersFilter): void => void setUrlState({ ordersFilter: next });
   const query = useLiveOrders(orgId, storeId, filter);

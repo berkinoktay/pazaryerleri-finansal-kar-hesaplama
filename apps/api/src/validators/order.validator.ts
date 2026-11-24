@@ -350,8 +350,10 @@ export const OpenDaySchema = z
       description:
         'True while a business day before today is still being closed for this store: an ' +
         'order of a completed day whose seller inputs are not final yet, a buffer entry of a ' +
-        'completed day still waiting to become an order (not one that failed permanently), or ' +
-        'a queued day-close profit recompute. Profit figures of the completed days can still ' +
+        'completed day still waiting to become an order (not one that failed permanently), a ' +
+        'queued day-close profit recompute, or a queued first recompute of a final completed-day ' +
+        'order that has no figures yet (a queue row that keeps failing stops counting after a ' +
+        'few attempts). Profit figures of the completed days can still ' +
         'change while it is true. Describes the store, so it ignores every list filter.',
       example: false,
     }),
@@ -362,8 +364,9 @@ export const OpenDaySchema = z
       .openapi({
         description:
           "Today's orders of the store that the list leaves out: stored orders of the open " +
-          'business day that are not cancelled, plus buffer entries of the open business ' +
-          'day. Ignores every list filter.',
+          'business day, cancelled ones included (live performance lists those on its ' +
+          'cancelled tab), plus buffer entries of the open business day. Ignores every list ' +
+          'filter.',
         example: 4,
       }),
     matches: z.array(OpenDayMatchSchema).openapi({

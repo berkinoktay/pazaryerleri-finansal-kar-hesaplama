@@ -31,6 +31,7 @@ import { resolveVendorMissingBarcodes } from '../lib/catalog-barcode-miss-lookup
 import {
   completedDaysScope,
   completedOrderDateFilter,
+  FINALIZING_MAX_RECOMPUTE_ATTEMPTS,
   type CompletedDaysScope,
 } from '../lib/completed-days';
 import { NotFoundError } from '../lib/errors';
@@ -448,6 +449,8 @@ function fetchOrderListRows(
  *   recompute carries the intake's reason, not DAY_CLOSE. Any other queued row is left
  *   out on purpose: settlement, claim and cargo recomputes run all day for orders that
  *   already have figures.
+ * A queue row that has failed FINALIZING_MAX_RECOMPUTE_ATTEMPTS times stops counting, so
+ * one order whose recompute keeps throwing cannot hold the flag for good.
  */
 async function isStoreFinalizing(
   orgId: string,
@@ -475,7 +478,12 @@ async function isStoreFinalizing(
       select: { id: true },
     }),
     prisma.profitRecomputeRequest.findFirst({
-      where: { organizationId: orgId, storeId, reason: ProfitRecomputeReason.DAY_CLOSE },
+      where: {
+        organizationId: orgId,
+        storeId,
+        reason: ProfitRecomputeReason.DAY_CLOSE,
+        attempts: { lt: FINALIZING_MAX_RECOMPUTE_ATTEMPTS },
+      },
       select: { id: true },
     }),
     // A born-final order's first recompute, whatever its reason (see the doc comment).
@@ -483,6 +491,7 @@ async function isStoreFinalizing(
       where: {
         organizationId: orgId,
         storeId,
+        attempts: { lt: FINALIZING_MAX_RECOMPUTE_ATTEMPTS },
         order: {
           organizationId: orgId,
           storeId,
@@ -506,8 +515,9 @@ async function isStoreFinalizing(
 
 /**
  * How many of today's orders the list leaves out: the store's stored orders of the open
- * business day that are not cancelled, plus its buffer entries of the open day (the live
- * performance feed's set, bounded by the request's scope). Blind to the list filters.
+ * business day, cancelled ones included (live performance lists those on its cancelled
+ * tab), plus its buffer entries of the open day, bounded by the request's scope. Blind to
+ * the list filters.
  */
 async function countOpenDayOrders(
   orgId: string,
@@ -520,7 +530,6 @@ async function countOpenDayOrders(
         organizationId: orgId,
         storeId,
         orderDate: { gte: scope.cutoff },
-        status: { not: OrderStatus.CANCELLED },
       },
     }),
     prisma.livePerformanceBuffer.count({

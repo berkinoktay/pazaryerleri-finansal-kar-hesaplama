@@ -18,6 +18,7 @@ import {
 import { getBusinessDate, getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { createApp } from '../../../src/app';
+import { FINALIZING_MAX_RECOMPUTE_ATTEMPTS } from '../../../src/lib/completed-days';
 import {
   OPEN_DAY_MATCH_LIMIT,
   getOrdersSummary,
@@ -3159,6 +3160,24 @@ describe('Order routes', () => {
       expect((await getOpenDay(ctx))?.finalizing).toBe(false);
     });
 
+    it('a queued recompute stops counting once it has failed the attempt limit', async () => {
+      const ctx = await memberStore();
+      // One order whose recompute keeps throwing: the queue backs it off but never drops it.
+      const order = await seedFinalOrder(ctx);
+      await queueRecompute(ctx, order.id, ProfitRecomputeReason.DAY_CLOSE);
+      await prisma.profitRecomputeRequest.update({
+        where: { orderId: order.id },
+        data: { attempts: FINALIZING_MAX_RECOMPUTE_ATTEMPTS - 1 },
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+
+      await prisma.profitRecomputeRequest.update({
+        where: { orderId: order.id },
+        data: { attempts: FINALIZING_MAX_RECOMPUTE_ATTEMPTS },
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
     it("today's order waiting for its first statement does not set finalizing", async () => {
       const ctx = await memberStore();
       // Every new order of today has a queued first recompute and no figures yet; only a
@@ -3193,23 +3212,24 @@ describe('Order routes', () => {
       expect((await getOpenDay(ctx))?.matches).toEqual([]);
     });
 
-    it("todayOrderCount counts today's stored non-cancelled orders and buffer rows", async () => {
+    it("todayOrderCount counts today's stored orders, cancelled included, and buffer rows", async () => {
       const ctx = await memberStore();
       await createOrder(ctx.orgId, ctx.storeId, { orderDate: openBusinessDayInstant() });
       await createBufferEntry(ctx.orgId, ctx.storeId, { orderDate: getBusinessDateAnchor() });
-      // Not counted: a cancellation of today, a completed-day order, a past-day buffer row.
+      // Live performance lists today's cancellations on its cancelled tab.
       await createOrder(ctx.orgId, ctx.storeId, {
         orderDate: openBusinessDayInstant(),
         status: OrderStatus.CANCELLED,
       });
+      // Not counted: a completed-day order, a past-day buffer row.
       await createOrder(ctx.orgId, ctx.storeId, { orderDate: completedBusinessDayInstant() });
       await createBufferEntry(ctx.orgId, ctx.storeId, {
         orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
       });
 
-      expect((await getOpenDay(ctx))?.todayOrderCount).toBe(2);
+      expect((await getOpenDay(ctx))?.todayOrderCount).toBe(3);
       // It describes the store, not the current view: the list filters do not change it.
-      expect((await getOpenDay(ctx, '?status=CANCELLED&q=zzz'))?.todayOrderCount).toBe(2);
+      expect((await getOpenDay(ctx, '?status=CANCELLED&q=zzz'))?.todayOrderCount).toBe(3);
     });
 
     it('service clock: openDay reads the same clock as the clamp', async () => {
