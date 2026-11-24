@@ -75,7 +75,8 @@ export function OrdersPageClient({
 
   // One poll decision for both queries: the list records what each response
   // says about `finalizing`, the summary follows it and stops at the same cap.
-  const poll = useFinalizingPoll();
+  // Scoped to the store: the page stays mounted across a store switch.
+  const poll = useFinalizingPoll(storeId);
   const ordersQuery = useOrders(
     noStoreSelected
       ? null
@@ -132,11 +133,14 @@ export function OrdersPageClient({
   // The trailing summary refetch. When the list first reports that finalising
   // is over, the re-render cancels the summary's pending poll, so whatever was
   // finalised since its previous poll would never reach the KPI strip. It fires
-  // on the last KNOWN state going true -> false: an undefined in between (a
-  // filter, sort or page change swapping the list query) keeps the last known
-  // state, so finalising that ends during the swap still refetches; a first load
-  // (nothing known -> false) does not. The list was just fetched, so only the
-  // summary is invalidated.
+  // on the last KNOWN state going true -> false. A filter, sort or page change
+  // keeps the previous page as the list's placeholder, so finalising that ends
+  // during the swap reads as a direct true -> false; an undefined in between (a
+  // store switch) keeps the last known state; a first load (nothing known ->
+  // false) does not fire. The list was just fetched, so only the summary is
+  // invalidated. (The placeholder carries the data only: the poll window
+  // survives the swap because the list feeds the poll from its own responses
+  // alone, see useOrders.)
   const lastKnownFinalizingRef = React.useRef<boolean | undefined>(finalizing);
   React.useEffect(() => {
     if (finalizing === undefined) return;
@@ -146,6 +150,34 @@ export function OrdersPageClient({
     if (orgId === null || storeId === null) return;
     void queryClient.invalidateQueries({ queryKey: orderKeys.summaries(orgId, storeId) });
   }, [finalizing, orgId, storeId, queryClient]);
+
+  const hasAnyFilter =
+    filters.q.length > 0 ||
+    filters.status !== null ||
+    filters.reconciliationStatus !== null ||
+    filters.lossOnly ||
+    filters.from.length > 0 ||
+    filters.to.length > 0;
+
+  // Whether the store has no completed-day orders at all: zero counts with no
+  // filter active. Decided only from the current key's own response. While the
+  // previous page stands in as a placeholder its counts belong to its own
+  // filters (a search with no hits), so the last settled decision is kept
+  // instead (React's "store information from previous renders" pattern): a tab,
+  // sort or page change cannot make the store less empty, and neither the empty
+  // state nor the today line above the table blinks during the swap.
+  const ownListData = ordersQuery.isPlaceholderData ? undefined : ordersQuery.data;
+  const settledStoreIsEmpty =
+    ownListData === undefined
+      ? undefined
+      : !hasAnyFilter && ownListData.counts.calculated === 0 && ownListData.counts.excluded === 0;
+  const [lastStoreIsEmpty, setLastStoreIsEmpty] = React.useState(false);
+  if (settledStoreIsEmpty !== undefined && settledStoreIsEmpty !== lastStoreIsEmpty) {
+    setLastStoreIsEmpty(settledStoreIsEmpty);
+  }
+  const storeIsEmpty = ordersQuery.isPlaceholderData
+    ? lastStoreIsEmpty && !hasAnyFilter
+    : (settledStoreIsEmpty ?? false);
 
   if (noStoreSelected) {
     return (
@@ -164,15 +196,6 @@ export function OrdersPageClient({
     totalPages: 0,
   };
   const counts = ordersQuery.data?.counts ?? { calculated: 0, excluded: 0 };
-  const noOrdersAtAll = counts.calculated === 0 && counts.excluded === 0;
-
-  const hasAnyFilter =
-    filters.q.length > 0 ||
-    filters.status !== null ||
-    filters.reconciliationStatus !== null ||
-    filters.lossOnly ||
-    filters.from.length > 0 ||
-    filters.to.length > 0;
 
   const syncCenterLogs = toSyncCenterLogs(activeSyncs, recentSyncs);
 
@@ -207,13 +230,19 @@ export function OrdersPageClient({
   // shape stays stable. A store whose only orders are today's gets a pointer to
   // live performance instead. With a filter active this is left undefined so the
   // DataTable's "clear filters" no-results affordance surfaces instead.
-  const ordersEmptyBody =
-    !hasAnyFilter && noOrdersAtAll ? (
-      <OrdersEmptyState
-        variant={(openDay?.todayOrderCount ?? 0) > 0 ? 'open-day-only' : 'no-orders'}
-        embedded
-      />
-    ) : undefined;
+  const ordersEmptyBody = storeIsEmpty ? (
+    <OrdersEmptyState
+      variant={(openDay?.todayOrderCount ?? 0) > 0 ? 'open-day-only' : 'no-orders'}
+      embedded
+    />
+  ) : undefined;
+
+  // A placeholder with no rows says nothing about the next page's rows (a
+  // cleared search would keep its "no results" body), so the table shows its
+  // skeleton until the response lands, unless the store-level empty state stands.
+  const tableLoading =
+    ordersQuery.isLoading ||
+    (ordersQuery.isPlaceholderData && rows.length === 0 && ordersEmptyBody === undefined);
 
   return (
     <>
@@ -240,7 +269,7 @@ export function OrdersPageClient({
         <OrdersOpenDayNotice openDay={openDay} hideTodayNotice={ordersEmptyBody !== undefined} />
         <OrdersTable
           rows={rows}
-          loading={ordersQuery.isLoading}
+          loading={tableLoading}
           empty={ordersEmptyBody}
           paginationLeading={<PageSyncFooterTrace pageKey="orders" />}
           pagination={pagination}

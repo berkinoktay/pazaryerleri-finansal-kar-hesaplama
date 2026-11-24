@@ -82,7 +82,7 @@ describe('useOrders polling while finalizing', () => {
 
   // Mirrors the page: one shared poll, its list half handed to useOrders.
   function useOrdersWithFinalizingPoll(args: ListOrdersArgs) {
-    const poll = useFinalizingPoll();
+    const poll = useFinalizingPoll(args.storeId);
     return useOrders(args, { pollInterval: poll.fromList });
   }
 

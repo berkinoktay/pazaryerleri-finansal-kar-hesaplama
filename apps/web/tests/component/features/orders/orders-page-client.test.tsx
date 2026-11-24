@@ -242,6 +242,149 @@ describe('OrdersPageClient - open day', () => {
     expect(dayButton(15)).toBeDisabled();
     expect(dayButton(14)).toBeEnabled();
   });
+
+  it('the open-day notice stays while the list page changes', async () => {
+    // Page 2 is held until the test releases it, so the swap is observable.
+    let releasePageTwo = (): void => {};
+    const pageTwoHeld = new Promise<void>((resolve) => {
+      releasePageTwo = resolve;
+    });
+    const counts = { list: 0 };
+    server.use(
+      http.get(SUMMARY_URL, () => HttpResponse.json(summaryResponse())),
+      http.get(LIST_URL, async ({ request }) => {
+        counts.list += 1;
+        const onSecondPage = new URL(request.url).searchParams.get('page') === '2';
+        if (onSecondPage) await pageTwoHeld;
+        return HttpResponse.json(
+          listResponse({
+            // Page 2 also names today's orders, so its arrival is visible.
+            openDay: { finalizing: true, todayOrderCount: onSecondPage ? 2 : 0 },
+            counts: { calculated: 50, excluded: 0 },
+            pagination: { page: onSecondPage ? 2 : 1, perPage: 25, total: 50, totalPages: 2 },
+          }),
+        );
+      }),
+    );
+    try {
+      const { user } = renderPage(createTestQueryClient());
+      expect(await screen.findByText(tOpenDay('finalizing'))).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: trMessages.common.pagination.nextPage }));
+      await waitFor(() => expect(counts.list).toBe(2));
+
+      // Page 2 is still loading: the previous page's open day keeps the notice up.
+      expect(screen.getByText(tOpenDay('finalizing'))).toBeInTheDocument();
+    } finally {
+      releasePageTwo();
+    }
+
+    expect(await screen.findByText(tOpenDay('todayNotice'))).toBeInTheDocument();
+    expect(screen.getByText(tOpenDay('finalizing'))).toBeInTheDocument();
+  });
+
+  it('the open-day-only empty state and notice do not blink when the cost-status tab changes', async () => {
+    // The store's only orders are today's. The excluded tab is held until the
+    // test releases it, so the swap is observable.
+    let releaseExcluded = (): void => {};
+    const excludedHeld = new Promise<void>((resolve) => {
+      releaseExcluded = resolve;
+    });
+    const counts = { list: 0 };
+    server.use(
+      http.get(SUMMARY_URL, () => HttpResponse.json(summaryResponse())),
+      http.get(LIST_URL, async ({ request }) => {
+        counts.list += 1;
+        if (new URL(request.url).searchParams.get('costStatus') === 'excluded') {
+          await excludedHeld;
+        }
+        return HttpResponse.json(listResponse({ openDay: { todayOrderCount: 3 } }));
+      }),
+    );
+    // The today line is said once, by the empty state inside the table, never
+    // by the notice above it.
+    const expectTodayPointerOnlyInTable = (): void => {
+      const table = screen.getByRole('table');
+      expect(within(table).getByText(trMessages.ordersPage.empty.openDayOnly)).toBeInTheDocument();
+      expect(within(table).getByText(tOpenDay('todayNotice'))).toBeInTheDocument();
+      expect(screen.getAllByText(tOpenDay('todayNotice'))).toHaveLength(1);
+      expect(screen.getAllByRole('link', { name: tOpenDay('todayLink') })).toHaveLength(1);
+    };
+    const queryClient = createTestQueryClient();
+    try {
+      const { user } = renderPage(queryClient);
+      expect(await screen.findByText(trMessages.ordersPage.empty.openDayOnly)).toBeInTheDocument();
+      expectTodayPointerOnlyInTable(); // control
+
+      await user.click(screen.getByText(trMessages.ordersPage.tabs.excluded));
+      await waitFor(() => expect(counts.list).toBe(2));
+
+      // The excluded tab is still loading. A tab change cannot make the store
+      // less empty, so the screen stays as it was: no generic tab body, no
+      // today line popping up above the table.
+      expectTodayPointerOnlyInTable();
+      expect(screen.queryByText(trMessages.ordersPage.excludedList.empty)).not.toBeInTheDocument();
+    } finally {
+      releaseExcluded();
+    }
+    await waitForIdle(queryClient);
+
+    expectTodayPointerOnlyInTable();
+  });
+
+  it('the no-orders welcome does not show while a cleared search loads', async () => {
+    // The unfiltered list is held until the test releases it.
+    let releaseUnfiltered = (): void => {};
+    const unfilteredHeld = new Promise<void>((resolve) => {
+      releaseUnfiltered = resolve;
+    });
+    const counts = { list: 0 };
+    server.use(
+      http.get(SUMMARY_URL, () => HttpResponse.json(summaryResponse())),
+      http.get(LIST_URL, async ({ request }) => {
+        counts.list += 1;
+        const searched = new URL(request.url).searchParams.has('q');
+        if (!searched) await unfilteredHeld;
+        return HttpResponse.json(
+          listResponse({
+            // Today has orders too, so the today line is on screen throughout.
+            openDay: { todayOrderCount: 2 },
+            counts: searched ? { calculated: 0, excluded: 0 } : { calculated: 50, excluded: 0 },
+            pagination: searched
+              ? { page: 1, perPage: 25, total: 0, totalPages: 0 }
+              : { page: 1, perPage: 25, total: 50, totalPages: 2 },
+          }),
+        );
+      }),
+    );
+    try {
+      const { user } = renderPage(createTestQueryClient(), '?q=zzz');
+      // The search's zero-row body is up before the search is cleared.
+      expect(
+        await screen.findByText(trMessages.ordersPage.tabs.emptyCalculated),
+      ).toBeInTheDocument();
+      // Control: a filtered view shows the today line above the table.
+      expect(screen.getByText(tOpenDay('todayNotice'))).toBeInTheDocument();
+      await user.click(
+        screen.getByRole('button', { name: trMessages.common.dataTable.toolbar.clear }),
+      );
+      await waitFor(() => expect(counts.list).toBe(2));
+
+      // The store has orders: the search's zero counts must not read as an empty store.
+      expect(
+        screen.queryByText(trMessages.ordersPage.empty.noOrders.title),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(trMessages.ordersPage.empty.openDayOnly)).not.toBeInTheDocument();
+      // Nor does the search's "no results" body stand in: the table loads.
+      expect(
+        screen.queryByText(trMessages.ordersPage.tabs.emptyCalculated),
+      ).not.toBeInTheDocument();
+      // ...nor hide the today line while the unfiltered list loads.
+      expect(screen.getByText(tOpenDay('todayNotice'))).toBeInTheDocument();
+    } finally {
+      releaseUnfiltered();
+    }
+  });
 });
 
 describe('OrdersPageClient - refresh triggers', () => {
@@ -367,8 +510,8 @@ describe('OrdersPageClient - refresh triggers', () => {
     await waitForFirstLoad(counts, queryClient);
     const summaryBeforeSwap = counts.summary;
 
-    // The list query swaps to page 2: its data is undefined until page 2 lands
-    // with finalizing: false.
+    // The list query swaps to page 2: page 1's data (finalizing: true) stays as
+    // its placeholder until page 2 lands with finalizing: false.
     await user.click(screen.getByRole('button', { name: trMessages.common.pagination.nextPage }));
     await waitFor(() => expect(counts.summary).toBe(summaryBeforeSwap + 1));
     await waitForIdle(queryClient);
@@ -397,6 +540,40 @@ describe('OrdersPageClient - refresh triggers', () => {
     // Jump past the cap without firing timers. The cap is read when each
     // interval callback re-runs, so one more tick of each may still land.
     vi.setSystemTime(Date.now() + FINALIZING_POLL_MAX_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    const atCap = { ...counts };
+
+    await advance(queryClient, POLL_STEP_MS);
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts).toEqual(atCap);
+  });
+
+  it('a page change does not restart the poll cap', async () => {
+    const counts = serve((_call, url) => {
+      const onSecondPage = url.searchParams.get('page') === '2';
+      return listResponse({
+        openDay: { finalizing: true },
+        counts: { calculated: 50, excluded: 0 },
+        pagination: { page: onSecondPage ? 2 : 1, perPage: 25, total: 50, totalPages: 2 },
+      });
+    });
+    const queryClient = createTestQueryClient();
+    const { user } = renderPage(queryClient);
+    await waitForFirstLoad(counts, queryClient);
+
+    // Close to the cap (without firing timers), the seller moves to page 2.
+    vi.setSystemTime(Date.now() + FINALIZING_POLL_MAX_MS - 3 * POLL_STEP_MS);
+    await user.click(screen.getByRole('button', { name: trMessages.common.pagination.nextPage }));
+    await waitFor(() => expect(counts.list).toBe(2));
+    await waitForIdle(queryClient);
+
+    // Control: page 2 still polls inside the window.
+    await advance(queryClient, POLL_STEP_MS);
+    expect(counts.list).toBe(3);
+
+    // Past the window that opened on page 1. The cap is read when each interval
+    // callback re-runs, so one more tick of each may still land.
+    vi.setSystemTime(Date.now() + 3 * POLL_STEP_MS);
     await advance(queryClient, POLL_STEP_MS);
     const atCap = { ...counts };
 

@@ -24,11 +24,24 @@ export interface FinalizingPoll {
  * which happens during the first render. The clock is therefore read only while
  * the list says finalizing, and nothing these functions return reaches markup.
  *
- * Stable identity across renders: the object is created once per mount.
+ * `scope` is the store the page shows. The page stays mounted across a store
+ * switch, so a new scope gets a fresh poll: another store's flag must not drive
+ * this store's summary, and its window must not shorten this store's cap.
+ * Stable identity across renders while the scope is unchanged.
  */
-export function useFinalizingPoll(): FinalizingPoll {
-  const [poll] = React.useState(createFinalizingPoll);
-  return poll;
+export function useFinalizingPoll(scope: string | null): FinalizingPoll {
+  const [current, setCurrent] = React.useState(() => ({
+    scope,
+    poll: createFinalizingPoll(),
+  }));
+  // React's "store information from previous renders" pattern: a guarded
+  // setState during render swaps the poll before any effect or timer reads it.
+  if (current.scope !== scope) {
+    const next = { scope, poll: createFinalizingPoll() };
+    setCurrent(next);
+    return next.poll;
+  }
+  return current.poll;
 }
 
 function createFinalizingPoll(): FinalizingPoll {

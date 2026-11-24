@@ -1,5 +1,5 @@
 import { prisma } from '@pazarsync/db';
-import { ProfitRecomputeReason } from '@pazarsync/db/enums';
+import { ProfitRecomputeReason, ProfitStatementView } from '@pazarsync/db/enums';
 import { getBusinessDateAnchor } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -427,10 +427,15 @@ describe('Orders — tenant isolation', () => {
     return body.openDay;
   }
 
-  // A final completed-day order with a queued DAY_CLOSE recompute (no factory for the queue).
-  async function queueDayCloseRecompute(orgId: string, storeId: string, orderId: string) {
+  // A queued profit recompute for an order (no factory for the queue).
+  async function queueRecompute(
+    orgId: string,
+    storeId: string,
+    orderId: string,
+    reason: ProfitRecomputeReason,
+  ) {
     await prisma.profitRecomputeRequest.create({
-      data: { organizationId: orgId, storeId, orderId, reason: ProfitRecomputeReason.DAY_CLOSE },
+      data: { organizationId: orgId, storeId, orderId, reason },
     });
   }
 
@@ -441,15 +446,25 @@ describe('Orders — tenant isolation', () => {
     });
   }
 
+  // A final completed-day order that already has its best-known figures.
+  async function createFinalOrderWithFigures(orgId: string, storeId: string) {
+    const order = await createFinalOrder(orgId, storeId);
+    await createProfitStatement(order.id, orgId, storeId, { view: ProfitStatementView.BEST_KNOWN });
+    return order;
+  }
+
   // Every source of `finalizing` for one store: a non-final completed-day order, a past-day
-  // buffer row waiting for graduation and a queued DAY_CLOSE recompute of a final order.
+  // buffer row waiting for graduation, a queued DAY_CLOSE recompute of a final order with
+  // figures, and a born-final order whose first recompute (another reason) is still queued.
   async function seedFinalizingSources(orgId: string, storeId: string): Promise<void> {
     await createOrder(orgId, storeId, { orderDate: completedBusinessDayInstant() });
     await createBufferEntry(orgId, storeId, {
       orderDate: getBusinessDateAnchor(completedBusinessDayInstant()),
     });
-    const finalOrder = await createFinalOrder(orgId, storeId);
-    await queueDayCloseRecompute(orgId, storeId, finalOrder.id);
+    const closedOrder = await createFinalOrderWithFigures(orgId, storeId);
+    await queueRecompute(orgId, storeId, closedOrder.id, ProfitRecomputeReason.DAY_CLOSE);
+    const bornFinalOrder = await createFinalOrder(orgId, storeId);
+    await queueRecompute(orgId, storeId, bornFinalOrder.id, ProfitRecomputeReason.ORDER_CHANGED);
   }
 
   it('LIST: finalizing reflects only the queried store', async () => {
@@ -464,8 +479,8 @@ describe('Orders — tenant isolation', () => {
     // Each source would set store A1's flag without its tenant and store filters.
     await seedFinalizingSources(orgB.id, storeB.id);
     await seedFinalizingSources(orgA.id, storeA2.id);
-    // Store A1 itself has only a final order and nothing queued.
-    const finalA1 = await createFinalOrder(orgA.id, storeA1.id);
+    // Store A1 itself has only a final order with figures and nothing queued.
+    const finalA1 = await createFinalOrderWithFigures(orgA.id, storeA1.id);
 
     expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(false);
 
@@ -476,9 +491,14 @@ describe('Orders — tenant isolation', () => {
     expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
     await prisma.livePerformanceBuffer.delete({ where: { id: ownBuffer.id } });
 
-    await queueDayCloseRecompute(orgA.id, storeA1.id, finalA1.id);
+    await queueRecompute(orgA.id, storeA1.id, finalA1.id, ProfitRecomputeReason.DAY_CLOSE);
     expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
     await prisma.profitRecomputeRequest.delete({ where: { orderId: finalA1.id } });
+
+    const bornFinalA1 = await createFinalOrder(orgA.id, storeA1.id);
+    await queueRecompute(orgA.id, storeA1.id, bornFinalA1.id, ProfitRecomputeReason.ORDER_CHANGED);
+    expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);
+    await prisma.profitRecomputeRequest.delete({ where: { orderId: bornFinalA1.id } });
 
     await createOrder(orgA.id, storeA1.id, { orderDate: completedBusinessDayInstant() });
     expect((await openDayOf(user.accessToken, orgA.id, storeA1.id))?.finalizing).toBe(true);

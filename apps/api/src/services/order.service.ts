@@ -435,21 +435,26 @@ function fetchOrderListRows(
 
 /**
  * True while a business day before the open one is still being closed for the store.
- * Three sources, each scoped by organization and store and blind to the list filters (the
+ * Four sources, each scoped by organization and store and blind to the list filters (the
  * flag describes the store, not the current view):
  * - an order of a completed day whose seller inputs are not final yet (the day-close pass
  *   has not reached it);
  * - a completed-day buffer entry still on its way to the orders table;
  * - a queued DAY_CLOSE profit recompute: the day-close pass marks an order final and only
  *   enqueues its recompute, so the order's statements hold the pre-close profit until the
- *   worker drains that row.
+ *   worker drains that row;
+ * - a queued recompute of a final completed-day order that has no best-known statement
+ *   yet: an order taken in after its day settled is final from birth and its first
+ *   recompute carries the intake's reason, not DAY_CLOSE. Any other queued row is left
+ *   out on purpose: settlement, claim and cargo recomputes run all day for orders that
+ *   already have figures.
  */
 async function isStoreFinalizing(
   orgId: string,
   storeId: string,
   scope: CompletedDaysScope,
 ): Promise<boolean> {
-  const [nonFinalOrder, waitingBufferEntry, dayCloseRecompute] = await Promise.all([
+  const [nonFinalOrder, waitingBufferEntry, dayCloseRecompute, firstRecompute] = await Promise.all([
     prisma.order.findFirst({
       where: {
         organizationId: orgId,
@@ -473,8 +478,30 @@ async function isStoreFinalizing(
       where: { organizationId: orgId, storeId, reason: ProfitRecomputeReason.DAY_CLOSE },
       select: { id: true },
     }),
+    // A born-final order's first recompute, whatever its reason (see the doc comment).
+    prisma.profitRecomputeRequest.findFirst({
+      where: {
+        organizationId: orgId,
+        storeId,
+        order: {
+          organizationId: orgId,
+          storeId,
+          orderDate: { lt: scope.cutoff },
+          sellerInputsFinalAt: { not: null },
+          profitStatements: {
+            none: { view: ProfitStatementView.BEST_KNOWN, organizationId: orgId, storeId },
+          },
+        },
+      },
+      select: { id: true },
+    }),
   ]);
-  return nonFinalOrder !== null || waitingBufferEntry !== null || dayCloseRecompute !== null;
+  return (
+    nonFinalOrder !== null ||
+    waitingBufferEntry !== null ||
+    dayCloseRecompute !== null ||
+    firstRecompute !== null
+  );
 }
 
 /**

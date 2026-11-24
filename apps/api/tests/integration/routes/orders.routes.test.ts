@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { prisma } from '@pazarsync/db';
-import { BufferEntryStatus, OrderStatus, ProfitRecomputeReason } from '@pazarsync/db/enums';
+import {
+  BufferEntryStatus,
+  OrderStatus,
+  ProfitRecomputeReason,
+  ProfitStatementView,
+} from '@pazarsync/db/enums';
 import {
   buildStatementBreakdown,
   computeParcelProfit,
@@ -3113,7 +3118,11 @@ describe('Order routes', () => {
     it('a queued DAY_CLOSE recompute keeps finalizing true', async () => {
       const ctx = await memberStore();
       // Already final, empty buffer: only the queued recompute is left of the day close.
+      // The order already has figures, so only the DAY_CLOSE row can set the flag.
       const order = await seedFinalOrder(ctx);
+      await createProfitStatement(order.id, ctx.orgId, ctx.storeId, {
+        view: ProfitStatementView.BEST_KNOWN,
+      });
       await queueRecompute(ctx, order.id, ProfitRecomputeReason.DAY_CLOSE);
       expect((await getOpenDay(ctx))?.finalizing).toBe(true);
 
@@ -3124,10 +3133,48 @@ describe('Order routes', () => {
 
     it('a queued recompute with another reason does not set finalizing', async () => {
       const ctx = await memberStore();
+      // Settlement, claim and cargo recomputes run all day for orders that already have
+      // figures: such a row says nothing about the day close.
       const order = await seedFinalOrder(ctx);
+      await createProfitStatement(order.id, ctx.orgId, ctx.storeId, {
+        view: ProfitStatementView.BEST_KNOWN,
+      });
       await queueRecompute(ctx, order.id, ProfitRecomputeReason.COST_CHANGED);
 
       expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it('a born-final completed-day order waiting for its first statement keeps finalizing true', async () => {
+      const ctx = await memberStore();
+      // Intake after its day settled: the order is final from birth and its first
+      // recompute is queued with the intake's reason, not DAY_CLOSE.
+      const order = await seedFinalOrder(ctx);
+      await queueRecompute(ctx, order.id, ProfitRecomputeReason.ORDER_CHANGED);
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
+
+      // Control: once its best-known figures exist, the queued row no longer counts.
+      await createProfitStatement(order.id, ctx.orgId, ctx.storeId, {
+        view: ProfitStatementView.BEST_KNOWN,
+      });
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+    });
+
+    it("today's order waiting for its first statement does not set finalizing", async () => {
+      const ctx = await memberStore();
+      // Every new order of today has a queued first recompute and no figures yet; only a
+      // completed day's order may hold the flag. Marked final here so the order date is
+      // the only guard that keeps it out.
+      const today = await createOrder(ctx.orgId, ctx.storeId, {
+        orderDate: openBusinessDayInstant(),
+        sellerInputsFinalAt: new Date(),
+      });
+      await queueRecompute(ctx, today.id, ProfitRecomputeReason.ORDER_CHANGED);
+      expect((await getOpenDay(ctx))?.finalizing).toBe(false);
+
+      // Control: the same row for a completed day's order sets it.
+      const completed = await seedFinalOrder(ctx);
+      await queueRecompute(ctx, completed.id, ProfitRecomputeReason.ORDER_CHANGED);
+      expect((await getOpenDay(ctx))?.finalizing).toBe(true);
     });
 
     it('finalizing ignores the list filters', async () => {

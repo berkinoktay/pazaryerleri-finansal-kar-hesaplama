@@ -2230,7 +2230,7 @@
     },
     "openDay": {
       "finalizing": "Yesterday's orders are being finalised. Figures can still change for a few minutes.",
-      "matchesTitle": "{count, plural, one {# order from today matches your search:} other {# orders from today match your search:}}",
+      "matchesTitle": "{count, plural, one {Today's order matching your search:} other {Today's orders matching your search:}}",
       "matchStored": "Open order {orderNumber} on Live Performance",
       "matchPending": "Order {orderNumber} is waiting on Live Performance",
       "matchCancelled": "Order {orderNumber} is in today's cancelled orders",

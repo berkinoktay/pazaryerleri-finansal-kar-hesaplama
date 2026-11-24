@@ -2230,7 +2230,7 @@
     },
     "openDay": {
       "finalizing": "Dünün siparişleri kesinleşiyor. Rakamlar birkaç dakika daha değişebilir.",
-      "matchesTitle": "{count, plural, one {Aramana uyan # sipariş bugüne ait:} other {Aramana uyan # sipariş bugüne ait:}}",
+      "matchesTitle": "{count, plural, one {Aramana uyan bugünkü sipariş:} other {Aramana uyan bugünkü siparişler:}}",
       "matchStored": "{orderNumber} numaralı siparişi Canlı Performans'ta aç",
       "matchPending": "{orderNumber} numaralı sipariş Canlı Performans'ta bekliyor",
       "matchCancelled": "{orderNumber} numaralı sipariş bugünün iptallerinde",
