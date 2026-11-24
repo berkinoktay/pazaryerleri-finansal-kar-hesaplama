@@ -1,7 +1,7 @@
 import { Decimal } from 'decimal.js';
 
 import { prisma } from '@pazarsync/db';
-import type { Prisma } from '@pazarsync/db';
+import type { BufferEntryStatus, Prisma } from '@pazarsync/db';
 import {
   CommissionRuleKind,
   Platform,
@@ -12,8 +12,12 @@ import {
 } from '@pazarsync/db/enums';
 import type { MappedOrder } from '@pazarsync/marketplace';
 import { intakeOrder, upsertOrderWithSnapshot } from '@pazarsync/order-sync';
-import { drainProfitRecomputeQueue } from '@pazarsync/profit';
-import { getBusinessDateAnchor, getBusinessDayRange } from '@pazarsync/utils';
+import { drainProfitRecomputeQueue, resetSettledCutoffMemo } from '@pazarsync/profit';
+import {
+  getBusinessDateAnchor,
+  getBusinessDayRange,
+  SELLER_INPUT_SETTLE_MS,
+} from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { processBufferPromote, processPastDayBufferFlush } from '../../src/handlers/buffer-promote';
@@ -462,6 +466,7 @@ describe('processBufferPromote', () => {
   beforeEach(async () => {
     await truncateAll();
     await ensureFeeDefinitions();
+    resetSettledCutoffMemo();
   });
 
   it('promotes a PROMOTING entry to orders and deletes the buffer row', async () => {
@@ -697,7 +702,7 @@ describe('processBufferPromote', () => {
     // PROFIT-EXCLUDED (COST_DEADLINE_MISSED), the write still enqueues a recompute.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'pkg-flush-handoff',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * 24 * 60 * 60_000)),
       status: 'FAILED',
       mappedOrder: buildMappedOrder({ platformOrderId: 'pkg-flush-handoff' }),
     });
@@ -820,7 +825,7 @@ describe('processBufferPromote', () => {
   it('graduates a past-day PROMOTING entry with a timely cost but no desi as DESI_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * 24 * 60 * 60_000));
     await seedTimelyCostedVariant(org.id, store.id, 'EAN13-PROMOTE-PAST-NODESI', orderDate);
     await clearVariantDesi(store.id, 'EAN13-PROMOTE-PAST-NODESI');
     // Fixture setup, not history: the variant had no desi on the order's day.
@@ -895,7 +900,7 @@ describe('processBufferPromote', () => {
   it('graduates a past-day PROMOTING entry whose cost arrived after its day as COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * 24 * 60 * 60_000));
     // The cost was attached (and its version made effective) one minute AFTER the
     // order's day ended, so the entry is calculable now but its cost missed the
     // window. The calculable graduation branch must still exclude it (the BLOCKER:
@@ -924,7 +929,7 @@ describe('processBufferPromote', () => {
   it('graduates a past-day FAILED entry whose cost arrived after its day as COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * 24 * 60 * 60_000));
     // Same late-cost shape, but the entry reaches the promote tick via FAILED (a
     // day-end flush that threw handed it off). The retry graduates it; the late cost
     // must not rescue it from COST_DEADLINE_MISSED.
@@ -956,7 +961,7 @@ describe('processBufferPromote', () => {
   it('graduates a past-day entry whose cost was attached before its day ended as a normal order', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 24 * 60 * 60_000));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * 24 * 60 * 60_000));
     // Cost attached (and effective) one minute before the order's day ended, but the
     // attach-flip never fired, so the row is still PROMOTING when the promote tick runs
     // after midnight. A timely cost still counts -- it graduates unexcluded.
@@ -1152,6 +1157,7 @@ describe('processPastDayBufferFlush', () => {
   beforeEach(async () => {
     await truncateAll();
     await ensureFeeDefinitions();
+    resetSettledCutoffMemo();
   });
 
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -1164,7 +1170,7 @@ describe('processPastDayBufferFlush', () => {
     // resolves it to an EXCLUDED best-known statement.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-pending',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PENDING',
       mappedOrder: buildMappedOrder({ platformOrderId: 'flush-pending', barcode: 'EAN13-FLUSH' }),
     });
@@ -1195,7 +1201,7 @@ describe('processPastDayBufferFlush', () => {
   it('graduates a buffer entry costed during the day as a normal order', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     // The cost was attached (and its version made effective) one minute before the
     // order's day ended, but the attach-flip never fired, so the row is still PENDING
     // when the flush runs after midnight. A cost attached in time still counts.
@@ -1223,7 +1229,7 @@ describe('processPastDayBufferFlush', () => {
   it('graduates a costed but desiless buffer entry as DESI_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     // The cost came in time, but the product desi was never entered before the
     // order's day ended (plan PR-2c): the day-end flush stamps the desi reason.
     await seedTimelyCostedVariant(org.id, store.id, 'EAN13-FLUSH-NODESI', orderDate);
@@ -1413,7 +1419,7 @@ describe('processPastDayBufferFlush', () => {
     await seedUncostedDesilessVariant(org.id, store.id, 'EAN13-FLUSH-NOTHING');
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-nothing',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PENDING',
       mappedOrder: buildMappedOrder({
         platformOrderId: 'flush-nothing',
@@ -1431,7 +1437,7 @@ describe('processPastDayBufferFlush', () => {
   it('excludes a past-day entry whose cost arrived after its day at the day-end flush', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     // The cost was attached (and its version made effective) one minute AFTER the
     // order's day ended, so the entry is calculable now but its cost missed the
     // window. The day-end flush must still exclude it with COST_DEADLINE_MISSED.
@@ -1458,7 +1464,7 @@ describe('processPastDayBufferFlush', () => {
   it('a past-day entry whose only profile was archived before its day ended graduates with COST_DEADLINE_MISSED', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     // The variant's only profile was linked long ago but archived one minute before
     // the order's day ended (plan PR-3b): no cost was in force when the day closed,
     // so the day-end flush must exclude it even though the link itself is old.
@@ -1487,7 +1493,7 @@ describe('processPastDayBufferFlush', () => {
   it('excludes a past-day PERMANENT_FAILED entry whose cost arrived after its day on its final flush attempt', async () => {
     const org = await createOrganization();
     const store = await createStore(org.id);
-    const orderDate = getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS));
+    const orderDate = getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS));
     // Same late-cost shape, but the entry reaches the flush via its PERMANENT_FAILED
     // final-attempt pass (loss-proofing). The late cost must not rescue it from
     // COST_DEADLINE_MISSED.
@@ -1522,7 +1528,7 @@ describe('processPastDayBufferFlush', () => {
     // A cancelled order carries no payout and is never excluded, even without a cost.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-cancelled',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PENDING',
       mappedOrder: buildMappedOrder({
         platformOrderId: 'flush-cancelled',
@@ -1563,7 +1569,7 @@ describe('processPastDayBufferFlush', () => {
     const store = await createStore(org.id);
     const promoting = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-promoting',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PROMOTING',
       mappedOrder: buildMappedOrder({ platformOrderId: 'flush-promoting', barcode: 'EAN13-FLUSH' }),
     });
@@ -1579,7 +1585,7 @@ describe('processPastDayBufferFlush', () => {
     const store = await createStore(org.id);
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-bad',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PENDING',
       mappedOrder: buildMappedOrder({ platformOrderId: 'flush-bad', invalid: true }),
     });
@@ -1601,7 +1607,7 @@ describe('processPastDayBufferFlush', () => {
     // ever entered, so the cost-window rule excludes it with COST_DEADLINE_MISSED.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-perm-recover',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PERMANENT_FAILED',
       mappedOrder: buildMappedOrder({
         platformOrderId: 'flush-perm-recover',
@@ -1631,7 +1637,7 @@ describe('processPastDayBufferFlush', () => {
     // only the 7-day reset cron may remove it, and only after the recovery window.
     const entry = await createBufferEntry(org.id, store.id, {
       platformOrderId: 'flush-perm-stuck',
-      orderDate: getBusinessDateAnchor(new Date(Date.now() - ONE_DAY_MS)),
+      orderDate: getBusinessDateAnchor(new Date(Date.now() - 2 * ONE_DAY_MS)),
       status: 'PERMANENT_FAILED',
       mappedOrder: buildMappedOrder({ platformOrderId: 'flush-perm-stuck', invalid: true }),
     });
@@ -1647,5 +1653,258 @@ describe('processPastDayBufferFlush', () => {
     expect(after.status).toBe('PERMANENT_FAILED');
     expect(after.attempts).toBe(4);
     expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+  });
+});
+
+interface HeldTransaction {
+  /** The backend pid of the held transaction. */
+  readonly pid: number;
+  /** Commits the held transaction. */
+  readonly release: () => Promise<void>;
+}
+
+/**
+ * Opens a transaction on another pooled connection, runs one statement in it (its
+ * pg_backend_pid) and keeps it open until `release`: an open seller-input writer.
+ */
+async function holdOpenTransaction(): Promise<HeldTransaction> {
+  let markStarted: (pid: number) => void = () => undefined;
+  const started = new Promise<number>((resolve) => {
+    markStarted = resolve;
+  });
+  let markReleased: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    markReleased = resolve;
+  });
+  const holder = prisma.$transaction(
+    async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+      markStarted(rows[0]?.pid ?? -1);
+      await released;
+    },
+    { timeout: 30_000 },
+  );
+  try {
+    const pid = await Promise.race([
+      started,
+      holder.then(() => {
+        throw new Error('the held transaction ended before it started');
+      }),
+    ]);
+    return {
+      pid,
+      release: async () => {
+        markReleased();
+        await holder;
+      },
+    };
+  } catch (err) {
+    markReleased();
+    await holder.catch(() => undefined);
+    throw err;
+  }
+}
+
+// Same-day edit window (plan PR-1, P1-15): a past-day entry graduates only once its
+// day is settled by the database clock (resolveSettledCutoff), never at the first
+// tick after midnight, and a graduation of a settled day creates the order final.
+// Every tick here gets an injected database clock.
+describe('buffer graduation waits for the settled cutoff', () => {
+  const HOUR_MS = 60 * 60 * 1000;
+
+  beforeAll(async () => {
+    await ensureDbReachable();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await ensureFeeDefinitions();
+    resetSettledCutoffMemo();
+  });
+
+  /** Today's business-day start: the end T of yesterday's orders. */
+  function todayStart(): Date {
+    return getBusinessDayRange(new Date()).start;
+  }
+
+  it('a past-day PENDING entry is not graduated five seconds after midnight', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const dayEnd = todayStart();
+    const orderInstant = new Date(dayEnd.getTime() - HOUR_MS);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'settle-flush',
+      orderDate: getBusinessDateAnchor(orderInstant),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'settle-flush',
+        barcode: 'EAN13-SETTLE-FLUSH',
+        orderDate: orderInstant.toISOString(),
+      }),
+    });
+
+    await processPastDayBufferFlush(new Date(dayEnd.getTime() + 5_000));
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+
+    // Positive control: at the settle point the same entry graduates.
+    await processPastDayBufferFlush(new Date(dayEnd.getTime() + SELLER_INPUT_SETTLE_MS));
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.profitExclusionReason).toBe('COST_DEADLINE_MISSED');
+  });
+
+  it('a graduated past-day order is created final', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const dayEnd = todayStart();
+    const orderInstant = new Date(dayEnd.getTime() - HOUR_MS);
+    const orderDate = getBusinessDateAnchor(orderInstant);
+    await seedTimelyCostedVariant(org.id, store.id, 'EAN13-SETTLE-FINAL', orderDate);
+    await prisma.productVariant.updateMany({
+      where: { storeId: store.id, barcode: 'EAN13-SETTLE-FINAL' },
+      data: { syncedDimensionalWeight: '2' },
+    });
+    // Fixture setup: the variant had that desi all day.
+    await clearSellerInputHistory(org.id);
+    const entries: ReadonlyArray<{ platformOrderId: string; status: BufferEntryStatus }> = [
+      { platformOrderId: 'settle-final-flush', status: 'PENDING' },
+      { platformOrderId: 'settle-final-promote', status: 'PROMOTING' },
+    ];
+    for (const { platformOrderId, status } of entries) {
+      await createBufferEntry(org.id, store.id, {
+        platformOrderId,
+        orderDate,
+        status,
+        mappedOrder: buildMappedOrder({
+          platformOrderId,
+          barcode: 'EAN13-SETTLE-FINAL',
+          orderDate: orderInstant.toISOString(),
+        }),
+      });
+    }
+    const dbNow = new Date(dayEnd.getTime() + SELLER_INPUT_SETTLE_MS);
+
+    await processPastDayBufferFlush(dbNow);
+    await processBufferPromote({ dbNow });
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { storeId: store.id } })).toBe(0);
+    const orders = await prisma.order.findMany({
+      where: { storeId: store.id },
+      include: { items: true },
+      orderBy: { platformOrderId: 'asc' },
+    });
+    expect(orders.map((order) => order.platformOrderId)).toEqual([
+      'settle-final-flush',
+      'settle-final-promote',
+    ]);
+    for (const order of orders) {
+      expect(order.sellerInputsFinalAt?.toISOString()).toBe(dbNow.toISOString());
+      expect(order.profitExcludedAt).toBeNull();
+      // The first capture of a final order still reads the inputs at the day end.
+      expect(order.items.map((item) => item.snapshotUnitDesi?.toString())).toEqual(['2']);
+    }
+  });
+
+  it('a same-day promote creates the order non-final', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    await seedCalculableVariant(org.id, store.id, 'EAN13-SETTLE-TODAY');
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'settle-today',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'settle-today',
+        barcode: 'EAN13-SETTLE-TODAY',
+      }),
+    });
+
+    await processBufferPromote({ dbNow: new Date() });
+
+    // Positive control: the entry was promoted.
+    const order = await prisma.order.findFirstOrThrow({ where: { storeId: store.id } });
+    expect(order.platformOrderId).toBe('settle-today');
+    expect(order.sellerInputsFinalAt).toBeNull();
+    expect(order.profitExcludedAt).toBeNull();
+  });
+
+  it("an unsettled past-day PROMOTING entry is neither promoted nor demoted, and does not block today's entries", async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    const dayEnd = todayStart();
+    const yesterday = getBusinessDateAnchor(new Date(dayEnd.getTime() - HOUR_MS));
+    // A full promote chunk of yesterday's PROMOTING entries, all older than today's.
+    const PROMOTE_CHUNK = 25;
+    for (let index = 0; index < PROMOTE_CHUNK; index += 1) {
+      await createBufferEntry(org.id, store.id, {
+        platformOrderId: `settle-yesterday-${index}`,
+        orderDate: yesterday,
+        status: 'PROMOTING',
+        mappedOrder: buildMappedOrder({
+          platformOrderId: `settle-yesterday-${index}`,
+          barcode: 'EAN13-SETTLE-UNCOSTED',
+        }),
+      });
+    }
+    await prisma.livePerformanceBuffer.updateMany({
+      where: { organizationId: org.id, storeId: store.id },
+      data: { createdAt: new Date(Date.now() - HOUR_MS) },
+    });
+    await seedCalculableVariant(org.id, store.id, 'EAN13-SETTLE-TODAY-2');
+    await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'settle-today-2',
+      orderDate: getBusinessDateAnchor(dayEnd),
+      status: 'PROMOTING',
+      mappedOrder: buildMappedOrder({
+        platformOrderId: 'settle-today-2',
+        barcode: 'EAN13-SETTLE-TODAY-2',
+      }),
+    });
+
+    await processBufferPromote({ dbNow: new Date(dayEnd.getTime() + 5_000) });
+
+    const orders = await prisma.order.findMany({ where: { storeId: store.id } });
+    expect(orders.map((order) => order.platformOrderId)).toEqual(['settle-today-2']);
+    const waiting = await prisma.livePerformanceBuffer.findMany({
+      where: { organizationId: org.id, storeId: store.id },
+    });
+    expect(waiting).toHaveLength(PROMOTE_CHUNK);
+    expect(waiting.every((entry) => entry.status === 'PROMOTING' && entry.attempts === 0)).toBe(
+      true,
+    );
+  });
+
+  it('an open pre-midnight transaction holds graduation back after the settle delay', async () => {
+    const org = await createOrganization();
+    const store = await createStore(org.id);
+    // The day under test is today, closed by an injected clock at tomorrow's start plus
+    // the settle delay: every transaction this test opens began before that day end.
+    const dayEnd = getBusinessDayRange(new Date()).end;
+    const dbNow = new Date(dayEnd.getTime() + SELLER_INPUT_SETTLE_MS);
+    const entry = await createBufferEntry(org.id, store.id, {
+      platformOrderId: 'settle-held',
+      orderDate: getBusinessDateAnchor(),
+      status: 'PENDING',
+      mappedOrder: buildMappedOrder({ platformOrderId: 'settle-held', barcode: 'EAN13-SETTLE' }),
+    });
+
+    const held = await holdOpenTransaction();
+    try {
+      await processPastDayBufferFlush(dbNow);
+
+      expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(1);
+      expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(0);
+    } finally {
+      await held.release();
+    }
+
+    // Positive control: once the writer committed, the same tick graduates it.
+    await processPastDayBufferFlush(dbNow);
+
+    expect(await prisma.livePerformanceBuffer.count({ where: { id: entry.id } })).toBe(0);
+    expect(await prisma.order.count({ where: { storeId: store.id } })).toBe(1);
   });
 });

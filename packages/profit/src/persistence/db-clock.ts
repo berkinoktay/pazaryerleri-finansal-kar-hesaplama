@@ -13,7 +13,9 @@
  *      transaction that starts within half a millisecond after T stamps exactly T; the
  *      extra millisecond waits for it too.
  * When (2) still fails at T + SELLER_INPUT_SETTLE_CAP_MS the cutoff moves anyway and
- * the result is `forced`, carrying the open transactions for the caller's warning.
+ * the result is `forced`, carrying the open transactions. The warning
+ * (`seller-input.settle-forced`) is logged here, not by the callers: the forced result
+ * is memoised, so only the first caller of the day sees `forced`.
  * Every seller-input writer also runs with SELLER_INPUT_TX_OPTIONS, whose timeout ends
  * such a transaction long before the settle delay (the second guard).
  *
@@ -32,6 +34,7 @@
  */
 
 import { Prisma } from '@pazarsync/db';
+import { syncLog } from '@pazarsync/sync-core';
 import {
   getBusinessDayRange,
   previousDayStart,
@@ -52,7 +55,10 @@ export interface SettledCutoff {
   readonly dbNow: Date;
   /** An order is settled when its business-day end T is at or before this instant. */
   readonly cutoff: Date;
-  /** True when the cap passed with writers still open (the cutoff moved anyway). */
+  /**
+   * True when the cap passed with writers still open (the cutoff moved anyway). Only the
+   * first resolve of that day in this process sees it; the warning is already logged.
+   */
   readonly forced: boolean;
   /** The open transactions that held the cutoff back, or that were overridden when forced. */
   readonly openWriters: readonly OpenWriter[];
@@ -154,6 +160,21 @@ export async function resolveSettledCutoff(
   if (dbNow.getTime() < latestEndMs + SELLER_INPUT_SETTLE_CAP_MS) {
     return { dbNow, cutoff: heldBack, forced: false, openWriters };
   }
+  // Re-checked after the await above: two callers started in the same worker tick can
+  // both pass the earlier memo check, and only the first may warn.
+  if (settledDayEndMs === latestEndMs) {
+    return { dbNow, cutoff: latestEnd, forced: false, openWriters: [] };
+  }
   settledDayEndMs = latestEndMs;
+  // Once per day per process: the memo answers every later call of this day. Only the
+  // pids and start instants are logged, never a session's query text.
+  syncLog.warn('seller-input.settle-forced', {
+    dayEnd: latestEnd.toISOString(),
+    dbNow: dbNow.toISOString(),
+    openWriters: openWriters.map((writer) => ({
+      pid: writer.pid,
+      xactStart: writer.xactStart.toISOString(),
+    })),
+  });
   return { dbNow, cutoff: latestEnd, forced: true, openWriters };
 }

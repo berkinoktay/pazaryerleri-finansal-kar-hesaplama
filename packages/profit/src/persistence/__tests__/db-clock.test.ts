@@ -14,13 +14,14 @@
  */
 
 import { prisma } from '@pazarsync/db';
+import { syncLog } from '@pazarsync/sync-core';
 import {
   getBusinessDayRange,
   previousDayStart,
   SELLER_INPUT_SETTLE_CAP_MS,
   SELLER_INPUT_SETTLE_MS,
 } from '@pazarsync/utils';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   findTransactionsOpenSince,
@@ -226,6 +227,70 @@ describe('resolveSettledCutoff', () => {
       expect(pidsOf(atCap.openWriters)).toContain(held.pid);
     } finally {
       await held.release();
+    }
+  });
+
+  it('a forced cutoff is logged once per day with the open writers', async () => {
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+    const forcedWarnings = (): unknown[] =>
+      warn.mock.calls
+        .filter(([event]) => event === 'seller-input.settle-forced')
+        .map(([, ctx]) => ctx);
+    const dayEnd = futureDayStart();
+    const held = await holdOpenTransaction();
+    try {
+      // Positive control: held back before the cap, and that is not a forced result.
+      const beforeCap = await resolveSettledCutoff(prisma, {
+        dbNow: shift(dayEnd, SELLER_INPUT_SETTLE_CAP_MS - 1),
+      });
+      expect(beforeCap.forced).toBe(false);
+      expect(forcedWarnings()).toHaveLength(0);
+
+      const atCap = await resolveSettledCutoff(prisma, {
+        dbNow: shift(dayEnd, SELLER_INPUT_SETTLE_CAP_MS),
+      });
+      expect(atCap.forced).toBe(true);
+      const warnings = forcedWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({
+        dayEnd: dayEnd.toISOString(),
+        openWriters: expect.arrayContaining([{ pid: held.pid, xactStart: expect.any(String) }]),
+      });
+
+      // The same day again: the memo answers, no second warning.
+      const later = await resolveSettledCutoff(prisma, {
+        dbNow: shift(dayEnd, SELLER_INPUT_SETTLE_CAP_MS + MINUTE_MS),
+      });
+      expect(later.cutoff).toEqual(dayEnd);
+      expect(later.forced).toBe(false);
+      expect(forcedWarnings()).toHaveLength(1);
+    } finally {
+      await held.release();
+      warn.mockRestore();
+    }
+  });
+
+  it('two callers started in the same tick past the cap log the forced cutoff once', async () => {
+    const warn = vi.spyOn(syncLog, 'warn').mockImplementation(() => undefined);
+    const forcedCount = (): number =>
+      warn.mock.calls.filter(([event]) => event === 'seller-input.settle-forced').length;
+    const dayEnd = futureDayStart();
+    const held = await holdOpenTransaction();
+    try {
+      const atCap = shift(dayEnd, SELLER_INPUT_SETTLE_CAP_MS);
+      // The buffer promote and the past-day flush start in one worker tick without
+      // awaiting each other, so both pass the memo check before either writes it.
+      const [first, second] = await Promise.all([
+        resolveSettledCutoff(prisma, { dbNow: atCap }),
+        resolveSettledCutoff(prisma, { dbNow: atCap }),
+      ]);
+      expect(first.cutoff).toEqual(dayEnd);
+      expect(second.cutoff).toEqual(dayEnd);
+      expect([first.forced, second.forced].filter(Boolean)).toHaveLength(1);
+      expect(forcedCount()).toBe(1);
+    } finally {
+      await held.release();
+      warn.mockRestore();
     }
   });
 
