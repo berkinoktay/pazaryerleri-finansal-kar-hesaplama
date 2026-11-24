@@ -40,6 +40,7 @@ import { LostLeaseError, syncLog, tryClaimNext } from '@pazarsync/sync-core';
 
 import { errorCodeOf } from './error-code';
 import { processBufferPromote, processPastDayBufferFlush } from './handlers/buffer-promote';
+import { DAY_CLOSE_INTERVAL_MS, processDayClose } from './handlers/day-close';
 import { PROFIT_RECOMPUTE_INTERVAL_MS, processProfitRecompute } from './handlers/profit-recompute';
 import { processVariantResolution } from './handlers/variant-resolution';
 import { processWebhookEventCleanup } from './handlers/webhook-event-cleanup';
@@ -256,6 +257,18 @@ async function main(): Promise<void> {
     });
   }, BUFFER_PROMOTE_INTERVAL_MS);
 
+  // Day-close pass (same-day edit window): once a business day is settled by the
+  // database clock (a short delay after 00:00 Istanbul, plus no open transaction that
+  // began before it), the orders of that day get their final cost and desi and, when
+  // they miss one, their permanent exclusion. The handler resolves the settled cutoff
+  // itself and keeps a failing order in an in-memory backoff; its in-flight flag skips
+  // an overlapping tick. Own catch so a DB hiccup never stops the other ticks.
+  const dayCloseTimer = setInterval(() => {
+    void processDayClose().catch((err: unknown) => {
+      dbConnectivity.logBackgroundError('day-close.tick-error', err, { workerId: WORKER_ID });
+    });
+  }, DAY_CLOSE_INTERVAL_MS);
+
   // Run once on boot so a freshly (re)started worker heals webhooks immediately
   // — e.g. right after a db reset that orphaned the old subscriptions — then on
   // the interval. Wrapped like buffer-promote so a Trendyol/DB hiccup never
@@ -420,6 +433,7 @@ async function main(): Promise<void> {
 
   clearInterval(watchdogTimer);
   clearInterval(bufferPromoteTimer);
+  clearInterval(dayCloseTimer);
   clearInterval(webhookReconcileTimer);
   clearInterval(webhookEventCleanupTimer);
   clearInterval(webhookEventsConsumerTimer);

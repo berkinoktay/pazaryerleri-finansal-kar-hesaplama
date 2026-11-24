@@ -20,7 +20,11 @@ import {
 } from '@pazarsync/utils';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { processBufferPromote, processPastDayBufferFlush } from '../../src/handlers/buffer-promote';
+import {
+  CHUNK_SIZE,
+  processBufferPromote,
+  processPastDayBufferFlush,
+} from '../../src/handlers/buffer-promote';
 import { ensureDbReachable, truncateAll } from '../../../../apps/api/tests/helpers/db';
 import {
   createBufferEntry,
@@ -1836,9 +1840,10 @@ describe('buffer graduation waits for the settled cutoff', () => {
     const store = await createStore(org.id);
     const dayEnd = todayStart();
     const yesterday = getBusinessDateAnchor(new Date(dayEnd.getTime() - HOUR_MS));
-    // A full promote chunk of yesterday's PROMOTING entries, all older than today's.
-    const PROMOTE_CHUNK = 25;
-    for (let index = 0; index < PROMOTE_CHUNK; index += 1) {
+    // More than a full promote chunk of yesterday's PROMOTING entries, all older than
+    // today's: without the settled filter they alone would fill the chunk.
+    const UNSETTLED_ENTRIES = CHUNK_SIZE + 1;
+    for (let index = 0; index < UNSETTLED_ENTRIES; index += 1) {
       await createBufferEntry(org.id, store.id, {
         platformOrderId: `settle-yesterday-${index}`,
         orderDate: yesterday,
@@ -1871,7 +1876,7 @@ describe('buffer graduation waits for the settled cutoff', () => {
     const waiting = await prisma.livePerformanceBuffer.findMany({
       where: { organizationId: org.id, storeId: store.id },
     });
-    expect(waiting).toHaveLength(PROMOTE_CHUNK);
+    expect(waiting).toHaveLength(UNSETTLED_ENTRIES);
     expect(waiting.every((entry) => entry.status === 'PROMOTING' && entry.attempts === 0)).toBe(
       true,
     );

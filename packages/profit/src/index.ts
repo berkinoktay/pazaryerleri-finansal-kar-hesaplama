@@ -221,6 +221,7 @@ export {
 export {
   recomputeParcelProfit,
   acquireParcelProfitLock,
+  tryAcquireParcelProfitLock,
   type RecomputeParcelResult,
 } from './persistence/recompute-parcel-profit';
 export {
@@ -295,6 +296,8 @@ export { visibleProfitIssues } from './read/visible-profit-issues';
 // Profit recompute queue (rebuild, phase 3B) -- docs/plans/2026-10-30-profit-engine-faz-3b-plan.md
 export {
   PROFIT_RECOMPUTE_BATCH_SIZE,
+  PROFIT_RECOMPUTE_TX_MAX_WAIT_MS,
+  PROFIT_RECOMPUTE_TX_TIMEOUT_MS,
   enqueueProfitRecompute,
   enqueueProfitRecomputeForVariants,
   enqueueProfitRecomputeForStore,

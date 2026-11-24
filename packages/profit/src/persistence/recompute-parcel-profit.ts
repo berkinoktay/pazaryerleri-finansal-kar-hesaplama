@@ -143,6 +143,30 @@ export async function acquireParcelProfitLock(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8))`;
 }
 
+/**
+ * Tries the same transaction-level advisory lock as `acquireParcelProfitLock` without
+ * waiting: true when it was granted (released at commit or rollback), false when
+ * another transaction holds it -- a recompute of this parcel is running. The day-close
+ * finaliser takes it first and skips a busy order instead of queueing behind it.
+ */
+export async function tryAcquireParcelProfitLock(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<unknown[]>`
+    SELECT pg_try_advisory_xact_lock(hashtextextended(${orderId}, ${ADVISORY_LOCK_SEED}::int8)) AS locked`;
+  const row = rows[0];
+  if (
+    typeof row !== 'object' ||
+    row === null ||
+    !('locked' in row) ||
+    typeof row.locked !== 'boolean'
+  ) {
+    throw new Error('the parcel try-lock returned an unexpected row shape');
+  }
+  return row.locked;
+}
+
 /** A profit-line row built for createMany, carrying the id its allocations reference. */
 interface ProfitLineRow {
   readonly id: string;

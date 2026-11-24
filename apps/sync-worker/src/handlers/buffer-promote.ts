@@ -20,7 +20,8 @@ import { getBusinessDateAnchor } from '@pazarsync/utils';
 
 import { isRetryDue, MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from '../lib/buffer-promote-backoff';
 
-const CHUNK_SIZE = 25;
+/** How many due buffer entries one promote tick takes. */
+export const CHUNK_SIZE = 25;
 
 /**
  * One tick's graduation window, from the settled cutoff (same-day edit window, plan
